@@ -18,28 +18,24 @@ class ProcessTextAnalysis implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 300; // 5 minutes
+    public $timeout = 600; // 10 minutes
     public $tries = 3;
+    public $backoff = [60, 120, 300]; // Retry delays
 
     protected $analysis;
 
-    /**
-     * Create a new job instance.
-     */
     public function __construct(TextAnalysis $analysis)
     {
         $this->analysis = $analysis;
     }
 
-    /**
-     * Execute the job.
-     */
     public function handle(NLPApiService $nlpService): void
     {
         try {
             Log::info("Processing analysis ID: {$this->analysis->id}");
 
-            // Update status to processing
+            // ✅ Update status to processing (10%)
+            $this->updateProgress(10, 'Memulai analisis...');
             $this->analysis->update([
                 'status' => 'processing',
                 'started_at' => now()
@@ -52,36 +48,48 @@ class ProcessTextAnalysis implements ShouldQueue
                 'Analysis processing started'
             );
 
-            // Get texts from raw_data
+            // ✅ Get texts (20%)
+            $this->updateProgress(20, 'Memuat data teks...');
             $texts = $this->analysis->raw_data;
             
             if (empty($texts)) {
                 throw new Exception('No texts to analyze');
             }
 
-            // Get preprocessing config if specified
+            // ✅ Preprocessing config (30%)
+            $this->updateProgress(30, 'Menyiapkan konfigurasi preprocessing...');
             $preprocessingConfig = $this->getPreprocessingConfig();
 
-            // Perform analysis based on type
+            // ✅ Perform analysis based on type (40-70%)
             $result = null;
 
             switch ($this->analysis->analysis_type) {
                 case 'sentiment':
+                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
+                    $this->updateProgress(60, 'Menganalisis sentimen...');
                     $result = $nlpService->analyzeSentiment($texts, $preprocessingConfig);
                     break;
 
                 case 'aspect':
+                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
                     $predefinedAspects = $this->getPredefinedAspects();
                     $mode = $predefinedAspects ? 'rule-based' : 'automatic';
+                    $this->updateProgress(60, 'Mengekstraksi aspek dan sentimen...');
                     $result = $nlpService->analyzeAspect($texts, $preprocessingConfig, $predefinedAspects, $mode);
                     break;
 
                 case 'topic':
+                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
                     $numTopics = $this->analysis->metadata['num_topics'] ?? 5;
+                    $this->updateProgress(60, 'Mengidentifikasi topik...');
                     $result = $nlpService->analyzeTopic($texts, $preprocessingConfig, $numTopics);
                     break;
 
                 case 'combined':
+                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
+                    $this->updateProgress(50, 'Menganalisis sentimen...');
+                    $this->updateProgress(60, 'Mengekstraksi aspek...');
+                    $this->updateProgress(70, 'Mengidentifikasi topik...');
                     $result = $nlpService->analyzeCombined($texts, $preprocessingConfig);
                     break;
 
@@ -89,10 +97,15 @@ class ProcessTextAnalysis implements ShouldQueue
                     throw new Exception('Invalid analysis type');
             }
 
-            // Save results
+            // ✅ Save results (80%)
+            $this->updateProgress(80, 'Menyimpan hasil analisis...');
             $this->saveResults($result);
 
-            // Update analysis status
+            // ✅ Generate visualizations (90%)
+            $this->updateProgress(90, 'Menghasilkan visualisasi...');
+
+            // ✅ Complete (100%)
+            $this->updateProgress(100, 'Analisis selesai!');
             $this->analysis->update([
                 'status' => 'completed',
                 'completed_at' => now()
@@ -104,41 +117,73 @@ class ProcessTextAnalysis implements ShouldQueue
                 $this->analysis->id,
                 'Analysis completed successfully',
                 [
-                    'duration' => $this->analysis->started_at->diffInSeconds($this->analysis->completed_at)
+                    'duration' => $this->analysis->started_at->diffInSeconds(now())
                 ]
             );
 
             Log::info("Analysis ID {$this->analysis->id} completed successfully");
 
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            // ✅ Connection timeout - will retry
+            Log::warning("Analysis ID {$this->analysis->id} connection timeout: " . $e->getMessage());
+
+            if ($this->attempts() < $this->tries) {
+                $retryDelay = $this->backoff[$this->attempts() - 1] ?? 60;
+                
+                $this->updateProgress(
+                    $this->analysis->progress ?? 0,
+                    "Koneksi terputus. Mencoba kembali dalam {$retryDelay} detik... (Percobaan {$this->attempts()}/{$this->tries})"
+                );
+                
+                $this->release($retryDelay);
+                return;
+            }
+
+            // All retries exhausted
+            $this->handleFailure($e, 'Koneksi ke service analisis gagal setelah beberapa percobaan');
+
         } catch (Exception $e) {
-            Log::error("Analysis ID {$this->analysis->id} failed: " . $e->getMessage());
-
-            $this->analysis->update([
-                'status' => 'failed',
-                'error_message' => $e->getMessage(),
-                'completed_at' => now()
-            ]);
-
-            AnalysisLog::createLog(
-                'failed',
-                $this->analysis->user_id,
-                $this->analysis->id,
-                'Analysis failed',
-                ['error' => $e->getMessage()]
-            );
-
-            // Re-throw to mark job as failed
-            throw $e;
+            $this->handleFailure($e);
         }
     }
 
     /**
-     * Get preprocessing configuration
+     * ✅ Update progress dengan simpan ke database
      */
+    private function updateProgress(int $progress, string $step): void
+    {
+        $this->analysis->updateProgress($progress, $step);
+        Log::info("Analysis {$this->analysis->id}: {$progress}% - {$step}");
+    }
+
+    /**
+     * ✅ Handle failure
+     */
+    private function handleFailure(Exception $e, string $customMessage = null): void
+    {
+        $errorMessage = $customMessage ?? $e->getMessage();
+        
+        Log::error("Analysis ID {$this->analysis->id} failed: " . $errorMessage);
+
+        $this->analysis->update([
+            'status' => 'failed',
+            'error_message' => $errorMessage,
+            'completed_at' => now()
+        ]);
+
+        AnalysisLog::createLog(
+            'failed',
+            $this->analysis->user_id,
+            $this->analysis->id,
+            'Analysis failed',
+            ['error' => $errorMessage]
+        );
+
+        throw $e;
+    }
+
     protected function getPreprocessingConfig(): array
     {
-        // If preprocessing_config_id is set, load from database
-        // For now, return default config
         return [
             'case_folding' => true,
             'remove_punctuation' => true,
@@ -149,25 +194,17 @@ class ProcessTextAnalysis implements ShouldQueue
         ];
     }
 
-    /**
-     * Get predefined aspects for aspect analysis
-     */
     protected function getPredefinedAspects(): ?array
     {
-        // Check if aspects are defined in metadata
         if (isset($this->analysis->metadata['predefined_aspects'])) {
             return $this->analysis->metadata['predefined_aspects'];
         }
-
         return null;
     }
 
-    
-    /**
-     * Save analysis results to database
-     */
     protected function saveResults(array $result): void
     {
+        // [Keep your existing implementation]
         $analysisResults = $result['results'] ?? $result;
 
         $data = [
@@ -181,22 +218,18 @@ class ProcessTextAnalysis implements ShouldQueue
             'summary' => null
         ];
 
-        // Get original texts
         $originalTexts = $this->analysis->raw_data;
 
-        // Handle different analysis types
         switch ($this->analysis->analysis_type) {
             case 'sentiment':
-                // Map predictions with original texts
                 if (isset($analysisResults['predictions'])) {
                     $predictions = $analysisResults['predictions'];
                     
-                    // Replace preprocessed text with original text
                     foreach ($predictions as $index => &$prediction) {
                         if (isset($originalTexts[$index])) {
                             $prediction['original_text'] = $originalTexts[$index];
-                            $prediction['processed_text'] = $prediction['text']; // Save processed version
-                            $prediction['text'] = $originalTexts[$index]; // Show original in display
+                            $prediction['processed_text'] = $prediction['text'];
+                            $prediction['text'] = $originalTexts[$index];
                         }
                     }
                     
@@ -219,7 +252,6 @@ class ProcessTextAnalysis implements ShouldQueue
                 break;
 
             case 'combined':
-                // Map predictions with original texts for combined analysis
                 if (isset($analysisResults['sentiment']['predictions'])) {
                     $predictions = $analysisResults['sentiment']['predictions'];
                     
@@ -238,22 +270,16 @@ class ProcessTextAnalysis implements ShouldQueue
                 $data['aspect_results'] = $analysisResults['aspect']['aspect_sentiments'] ?? null;
                 $data['topic_results'] = $analysisResults['topic'] ?? null;
                 $data['metrics'] = $analysisResults['sentiment']['metrics'] ?? null;
-                
-                // Generate combined summary
                 $data['summary'] = $this->generateCombinedSummary($analysisResults);
                 break;
         }
 
-        // Create or update result
         AnalysisResult::updateOrCreate(
             ['text_analysis_id' => $this->analysis->id],
             $data
         );
     }
 
-    /**
-     * Generate combined summary
-     */
     protected function generateCombinedSummary(array $results): string
     {
         $summary = [];
@@ -273,23 +299,21 @@ class ProcessTextAnalysis implements ShouldQueue
         return implode(' ', $summary);
     }
 
-    /**
-     * Handle job failure
-     */
     public function failed(Exception $exception): void
     {
         Log::error("Job failed for analysis ID {$this->analysis->id}: " . $exception->getMessage());
 
         $this->analysis->update([
             'status' => 'failed',
-            'error_message' => $exception->getMessage()
+            'error_message' => $exception->getMessage(),
+            'completed_at' => now()
         ]);
 
         AnalysisLog::createLog(
             'failed',
             $this->analysis->user_id,
             $this->analysis->id,
-            'Job failed',
+            'Job permanently failed',
             ['error' => $exception->getMessage()]
         );
     }

@@ -404,4 +404,41 @@ class AnalysisController extends Controller
 
     //     return array_values($texts);
     // }
+
+    /**
+     * ✅ API endpoint untuk polling status
+     */
+    public function pollStatus($id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+                                ->findOrFail($id);
+        
+        // Update last polled timestamp
+        $analysis->update(['last_polled_at' => now()]);
+        
+        return response()->json($analysis->getStatusForPolling());
+    }
+
+    /**
+     * ✅ Check if analysis can be polled (rate limiting)
+     */
+    public function canPoll($id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+                                ->findOrFail($id);
+        
+        // Only allow polling if still processing
+        if (!$analysis->isProcessing()) {
+            return response()->json([
+                'can_poll' => false,
+                'reason' => 'Analysis is not in processing state',
+                'current_status' => $analysis->status
+            ]);
+        }
+        
+        return response()->json([
+            'can_poll' => true,
+            'status' => $analysis->getStatusForPolling()
+        ]);
+    }
 }

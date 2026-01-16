@@ -37,7 +37,7 @@ return [
 
     'nlp_api' => [
         'url' => env('NLP_API_URL', 'http://localhost:8001'),
-        'timeout' => env('NLP_API_TIMEOUT', 300),
+        'timeout' => env('NLP_API_TIMEOUT', 7200),
     ],
 
 ];

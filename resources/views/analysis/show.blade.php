@@ -158,50 +158,6 @@
         @endif
     </div>
 
-    {{-- <!-- Status Alert -->
-    @if($analysis->status == 'processing')
-        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
-            <div class="flex items-center">
-                <svg class="w-6 h-6 text-yellow-600 animate-spin mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                </svg>
-                <div>
-                    <h3 class="text-lg font-semibold text-yellow-900">Analisis Sedang Diproses</h3>
-                    <p class="text-sm text-yellow-700 mt-1">Harap tunggu, proses analisis biasanya memakan waktu 5-30 detik. Halaman akan otomatis refresh.</p>
-                </div>
-            </div>
-        </div>
-    @elseif($analysis->status == 'failed')
-        <div class="bg-red-50 border border-red-200 rounded-xl p-6">
-            <div class="flex items-start">
-                <svg class="w-6 h-6 text-red-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
-                </svg>
-                <div class="flex-1">
-                    <h3 class="text-lg font-semibold text-red-900">Analisis Gagal</h3>
-                    <p class="text-sm text-red-700 mt-1">{{ $analysis->error_message ?? 'Terjadi kesalahan saat memproses analisis.' }}</p>
-                    <div class="mt-4">
-                        <a href="{{ route('analysis.create') }}" class="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
-                            Coba Lagi
-                        </a>
-                    </div>
-                </div>
-            </div>
-        </div>
-    @elseif($analysis->status == 'pending')
-        <div class="bg-gray-50 border border-gray-200 rounded-xl p-6">
-            <div class="flex items-center">
-                <svg class="w-6 h-6 text-gray-600 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900">Analisis Dalam Antrian</h3>
-                    <p class="text-sm text-gray-600 mt-1">Analisis Anda sedang menunggu untuk diproses.</p>
-                </div>
-            </div>
-        </div>
-    @endif --}}
-
     <!-- Status Alert & Content -->
     @if($analysis->status == 'processing')
         <!-- Alert Box -->
@@ -784,7 +740,235 @@
     @endif
 </div>
 
+{{-- ✅ POLLING SCRIPT - Updated with Progress Tracking --}}
 @if($analysis->status == 'pending' || $analysis->status == 'processing')
+@push('scripts')
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const analysisId = {{ $analysis->id }};
+    const currentStatus = '{{ $analysis->status }}';
+    
+    let pollingInterval = null;
+    let pollCount = 0;
+    const maxPolls = 200; // Maximum 200 polls (10 minutes at 3s interval)
+    
+    console.log('Starting polling for analysis ID:', analysisId);
+    
+    // ✅ Start polling
+    startPolling();
+    
+    function startPolling() {
+        // Poll immediately
+        pollStatus();
+        
+        // Then poll every 3 seconds
+        pollingInterval = setInterval(() => {
+            pollCount++;
+            
+            // Safety: stop after max polls
+            if (pollCount >= maxPolls) {
+                console.warn('Max poll count reached, stopping polling');
+                stopPolling();
+                showTimeoutMessage();
+                return;
+            }
+            
+            pollStatus();
+        }, 3000); // Poll every 3 seconds
+    }
+    
+    function pollStatus() {
+        fetch(`/analysis/${analysisId}/poll-status`, {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin'
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Poll response:', data);
+            updateUI(data);
+            
+            // ✅ Stop polling if completed or failed
+            if (data.status === 'completed') {
+                stopPolling();
+                showSuccessMessage();
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } else if (data.status === 'failed') {
+                stopPolling();
+                showErrorMessage(data.error_message || 'Unknown error');
+            }
+        })
+        .catch(error => {
+            console.error('Polling error:', error);
+            // Don't stop polling on network errors
+            // Server might be temporarily unavailable
+        });
+    }
+    
+    function updateUI(data) {
+        // Update status text
+        const statusText = document.querySelector('.status-text');
+        const statusKet = document.querySelector('.status-ket');
+        
+        if (statusText) {
+            if (data.status === 'processing') {
+                statusText.textContent = 'Analisis Sedang Diproses';
+                if (statusKet && data.current_step) {
+                    statusKet.textContent = data.current_step;
+                }
+            } else if (data.status === 'pending') {
+                statusText.textContent = 'Analisis Dalam Antrian';
+                if (statusKet) {
+                    statusKet.textContent = 'Menunggu untuk diproses...';
+                }
+            }
+        }
+        
+        // Update progress if available (optional enhancement)
+        if (data.progress !== undefined && data.progress > 0) {
+            updateProgress(data.progress, data.current_step || '');
+        }
+    }
+    
+    function updateProgress(progress, message) {
+        // Check if progress elements exist, if not create them
+        let progressContainer = document.getElementById('progress-container');
+        
+        if (!progressContainer) {
+            // Create progress bar if doesn't exist
+            const alertBox = document.querySelector('.bg-yellow-50');
+            if (alertBox) {
+                progressContainer = document.createElement('div');
+                progressContainer.id = 'progress-container';
+                progressContainer.className = 'mt-4';
+                progressContainer.innerHTML = `
+                    <div class="bg-white rounded-lg border border-gray-200 p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-sm font-medium text-gray-700">Progress</span>
+                            <span id="progress-percentage" class="text-sm font-bold text-blue-600">0%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2.5">
+                            <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
+                        <p id="progress-message" class="mt-2 text-xs text-gray-500"></p>
+                    </div>
+                `;
+                alertBox.after(progressContainer);
+            }
+        }
+        
+        // Update progress values
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercentage = document.getElementById('progress-percentage');
+        const progressMessage = document.getElementById('progress-message');
+        
+        if (progressBar) {
+            progressBar.style.width = progress + '%';
+        }
+        if (progressPercentage) {
+            progressPercentage.textContent = progress + '%';
+        }
+        if (progressMessage && message) {
+            progressMessage.textContent = message;
+        }
+    }
+    
+    function stopPolling() {
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+            console.log('Polling stopped');
+        }
+    }
+    
+    function showSuccessMessage() {
+        const alertBox = document.querySelector('.bg-yellow-50');
+        if (alertBox) {
+            alertBox.classList.remove('bg-yellow-50', 'border-yellow-200');
+            alertBox.classList.add('bg-green-50', 'border-green-200');
+            alertBox.innerHTML = `
+                <div class="flex items-center">
+                    <svg class="w-6 h-6 text-green-600 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                    </svg>
+                    <div>
+                        <h3 class="text-lg font-semibold text-green-900">Analisis Selesai!</h3>
+                        <p class="text-sm text-green-700 mt-1">Memuat hasil analisis...</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    function showErrorMessage(errorMsg) {
+        const alertBox = document.querySelector('.bg-yellow-50');
+        if (alertBox) {
+            alertBox.classList.remove('bg-yellow-50', 'border-yellow-200');
+            alertBox.classList.add('bg-red-50', 'border-red-200');
+            alertBox.innerHTML = `
+                <div class="flex items-start">
+                    <svg class="w-6 h-6 text-red-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                    </svg>
+                    <div class="flex-1">
+                        <h3 class="text-lg font-semibold text-red-900">Analisis Gagal</h3>
+                        <p class="text-sm text-red-700 mt-1">${errorMsg}</p>
+                        <div class="mt-4">
+                            <a href="{{ route('analysis.create') }}" class="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+                                Coba Lagi
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    function showTimeoutMessage() {
+        const alertBox = document.querySelector('.bg-yellow-50');
+        if (alertBox) {
+            alertBox.classList.remove('bg-yellow-50', 'border-yellow-200');
+            alertBox.classList.add('bg-orange-50', 'border-orange-200');
+            alertBox.innerHTML = `
+                <div class="flex items-start">
+                    <svg class="w-6 h-6 text-orange-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+                    </svg>
+                    <div>
+                        <h3 class="text-lg font-semibold text-orange-900">Proses Memakan Waktu Lama</h3>
+                        <p class="text-sm text-orange-700 mt-1">Analisis masih berjalan tetapi memakan waktu lebih lama dari biasanya. Anda dapat refresh halaman secara manual.</p>
+                        <button onclick="location.reload()" class="mt-3 inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            Refresh Halaman
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    // Cleanup when leaving page
+    window.addEventListener('beforeunload', function() {
+        stopPolling();
+    });
+});
+</script>
+@endpush
+@endif
+
+{{-- @if($analysis->status == 'pending' || $analysis->status == 'processing')
 @push('scripts')
 <script>
     let refreshInterval;
@@ -870,7 +1054,7 @@
     checkStatus();
 </script>
 @endpush
-@endif
+@endif --}}
 
 @if($analysis->status == 'completed' && $analysis->result)
 @push('scripts')

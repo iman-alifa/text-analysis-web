@@ -22,9 +22,22 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::post('/upload-file', [AnalysisController::class, 'uploadFile'])->name('upload-file');
         Route::post('/process', [AnalysisController::class, 'process'])->name('process');
         Route::get('/{id}', [AnalysisController::class, 'show'])->name('show');
+        
+        Route::get('/{id}/poll-status', [AnalysisController::class, 'pollStatus'])
+             ->name('poll-status')
+             ->middleware('throttle:30,1'); // 30 requests per minute (every 2-3 seconds)
+        
+        Route::get('/{id}/can-poll', [AnalysisController::class, 'canPoll'])
+             ->name('can-poll')
+             ->middleware('throttle:20,1'); // 20 requests per minute
+        
         Route::get('/{id}/status', [AnalysisController::class, 'checkStatus'])->name('status');
+        
+        // Export Routes
         Route::get('/{id}/export-pdf', [AnalysisController::class, 'exportPdf'])->name('export-pdf');
         Route::get('/{id}/export-csv', [AnalysisController::class, 'exportCsv'])->name('export-csv');
+        
+        // Delete
         Route::delete('/{id}', [AnalysisController::class, 'destroy'])->name('destroy');
     });
     

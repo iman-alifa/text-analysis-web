@@ -25,9 +25,12 @@ class TextAnalysis extends Model
         'metadata',
         'analysis_type',
         'status',
+        'progress',
+        'current_step',
         'error_message',
         'started_at',
         'completed_at',
+        'last_polled_at',
     ];
 
     protected $casts = [
@@ -35,6 +38,7 @@ class TextAnalysis extends Model
         'metadata' => 'array',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
+        'last_polled_at' => 'datetime',
     ];
 
     // Relationships
@@ -89,5 +93,34 @@ class TextAnalysis extends Model
 
         $seconds = $this->started_at->diffInSeconds($this->completed_at);
         return gmdate('H:i:s', $seconds);
+    }
+
+    // Helper untuk update progress
+    public function updateProgress(int $progress, string $step): void
+    {
+        $this->update([
+            'progress' => $progress,
+            'current_step' => $step,
+        ]);
+    }
+
+    // Check apakah masih dalam proses
+    public function isProcessing(): bool
+    {
+        return in_array($this->status, ['pending', 'processing']);
+    }
+
+    // Get status untuk polling
+    public function getStatusForPolling(): array
+    {
+        return [
+            'status' => $this->status,
+            'progress' => $this->progress,
+            'current_step' => $this->current_step,
+            'started_at' => $this->started_at?->toISOString(),
+            'completed_at' => $this->completed_at?->toISOString(),
+            'error_message' => $this->error_message,
+            'duration' => $this->duration,
+        ];
     }
 }
