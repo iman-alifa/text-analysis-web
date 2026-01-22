@@ -21,6 +21,7 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',
     ];
 
     /**
@@ -59,5 +60,9 @@ class User extends Authenticatable
     public function logs()
     {
         return $this->hasMany(AnalysisLog::class);
+    }
+
+    public function isAdmin() {
+        return $this->role === 'admin';
     }
 }

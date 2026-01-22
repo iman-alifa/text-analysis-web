@@ -123,4 +123,24 @@ class TextAnalysis extends Model
             'duration' => $this->duration,
         ];
     }
+
+    // Tambahkan relasi ke tabel kerja baru
+    public function trainingItems()
+    {
+        return $this->hasMany(TrainingItem::class);
+    }
+
+    // Helper untuk menghitung akurasi realtime dari tabel kerja
+    public function getRealtimeAccuracyAttribute()
+    {
+        $verified = $this->trainingItems()->where('is_corrected', true)->get();
+        if ($verified->isEmpty()) return 0;
+        
+        // Hitung berapa yang AI-nya benar (AI == Koreksi)
+        $correct = $verified->filter(function($item) {
+            return $item->predicted_sentiment === $item->corrected_sentiment;
+        })->count();
+        
+        return round(($correct / $verified->count()) * 100, 1);
+    }
 }

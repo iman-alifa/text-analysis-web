@@ -20,6 +20,10 @@ class AnalysisResult extends Model
         'metrics',
         'summary',
         'visualizations',
+        'corrected_sentiment', 
+        'corrected_aspects', 
+        'verified_at', 
+        'verified_by',
     ];
 
     protected $casts = [
@@ -30,6 +34,8 @@ class AnalysisResult extends Model
         'topic_results' => 'array',
         'metrics' => 'array',
         'visualizations' => 'array',
+        'result' => 'array', 
+        'corrected_aspects' => 'array'
     ];
 
     public function analysis(): BelongsTo
@@ -58,5 +64,18 @@ class AnalysisResult extends Model
         }
 
         return array_slice($this->topic_results['topics'], 0, $limit);
+    }
+
+    public function getIsAccurateAttribute() {
+        if (is_null($this->verified_at)) return null;
+
+        $aiSent = $this->result['sentiment']['label'] ?? null;
+        $admSent = $this->corrected_sentiment;
+
+        $aiAsp = $this->result['aspects'] ?? [];
+        $admAsp = $this->corrected_aspects ?? [];
+        sort($aiAsp); sort($admAsp);
+
+        return ($aiSent === $admSent) && ($aiAsp == $admAsp);
     }
 }
