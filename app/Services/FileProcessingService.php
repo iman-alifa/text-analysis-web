@@ -4,125 +4,390 @@ namespace App\Services;
 
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Maatwebsite\Excel\Facades\Excel;
-use Exception;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
 
 class FileProcessingService
 {
     /**
-     * Process uploaded file dan extract text
+     * Save uploaded file to storage
      */
-    public function processFile(UploadedFile $file): array
+    public function saveFile(UploadedFile $file, $directory = 'uploads')
     {
-        $extension = strtolower($file->getClientOriginalExtension());
-
-        return match($extension) {
-            'csv' => $this->processCsv($file),
-            'txt' => $this->processTxt($file),
-            'xlsx', 'xls' => $this->processExcel($file),
-            default => throw new Exception('Unsupported file type')
-        };
-    }
-
-    /**
-     * Process CSV file
-     */
-    private function processCsv(UploadedFile $file): array
-    {
-        $handle = fopen($file->getRealPath(), 'r');
-        $headers = fgetcsv($handle);
-        
-        $texts = [];
-        $rowCount = 0;
-        
-        while (($row = fgetcsv($handle)) !== false) {
-            if (count($row) > 0 && !empty(trim($row[0]))) {
-                $texts[] = trim($row[0]); // Ambil kolom pertama
-                $rowCount++;
-            }
-            
-            // Limit untuk mencegah memory issue
-            if ($rowCount >= 10000) {
-                break;
-            }
-        }
-        
-        fclose($handle);
-
-        return [
-            'texts' => $texts,
-            'total' => count($texts),
-            'headers' => $headers,
-            'type' => 'csv'
-        ];
-    }
-
-    /**
-     * Process TXT file
-     */
-    private function processTxt(UploadedFile $file): array
-    {
-        $content = file_get_contents($file->getRealPath());
-        
-        // Handle different line endings
-        $content = str_replace(["\r\n", "\r"], "\n", $content);
-        
-        $lines = explode("\n", $content);
-        $texts = array_filter(array_map('trim', $lines), fn($line) => !empty($line));
-
-        return [
-            'texts' => array_values($texts),
-            'total' => count($texts),
-            'type' => 'txt'
-        ];
-    }
-
-    /**
-     * Process Excel file
-     */
-    private function processExcel(UploadedFile $file): array
-    {
-        $data = Excel::toArray([], $file)[0];
-        
-        if (empty($data)) {
-            throw new Exception('File Excel kosong');
-        }
-        
-        $headers = array_shift($data);
-        
-        $texts = [];
-        foreach ($data as $row) {
-            if (count($row) > 0 && !empty(trim($row[0]))) {
-                $texts[] = trim($row[0]);
-            }
-            
-            // Limit untuk mencegah memory issue
-            if (count($texts) >= 10000) {
-                break;
-            }
-        }
-
-        return [
-            'texts' => $texts,
-            'total' => count($texts),
-            'headers' => $headers,
-            'type' => 'xlsx'
-        ];
-    }
-
-    /**
-     * Save uploaded file
-     */
-    public function saveFile(UploadedFile $file, string $directory = 'uploads'): array
-    {
-        $filename = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '', $file->getClientOriginalName());
+        $filename = time() . '_' . $file->getClientOriginalName();
         $path = $file->storeAs($directory, $filename, 'public');
-
+        
         return [
             'path' => $path,
             'filename' => $filename,
+            'original_name' => $file->getClientOriginalName(),
             'size' => $file->getSize(),
-            'type' => $file->getClientOriginalExtension()
+            'extension' => $file->getClientOriginalExtension(),
+        ];
+    }
+
+    /**
+     * Process file for preview (used in AJAX upload)
+     * Returns basic information about the file
+     */
+    public function processFile(UploadedFile $file)
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        
+        switch ($extension) {
+            case 'xlsx':
+            case 'xls':
+                return $this->previewExcelFile($file->getRealPath());
+                
+            case 'csv':
+                return $this->previewCsvFile($file->getRealPath());
+                
+            case 'txt':
+                return $this->previewTxtFile($file->getRealPath());
+                
+            default:
+                throw new \Exception('Unsupported file type');
+        }
+    }
+
+    /**
+     * Process file with configuration (used in final submission)
+     * Returns array of text strings ready for analysis
+     */
+    public function processFileWithConfig(UploadedFile $file, array $config)
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        
+        switch ($extension) {
+            case 'xlsx':
+            case 'xls':
+                return $this->processExcelWithConfig($file->getRealPath(), $config);
+                
+            case 'csv':
+                return $this->processCsvWithConfig($file->getRealPath(), $config);
+                
+            case 'txt':
+                return $this->processTxtWithConfig($file->getRealPath(), $config);
+                
+            default:
+                throw new \Exception('Unsupported file type');
+        }
+    }
+
+    /**
+     * Preview Excel file - return headers and sample data
+     */
+    private function previewExcelFile($filePath)
+    {
+        $spreadsheet = IOFactory::load($filePath);
+        $sheets = [];
+        
+        // Get all sheet names
+        foreach ($spreadsheet->getSheetNames() as $sheetName) {
+            $sheets[] = $sheetName;
+        }
+        
+        // Get data from first sheet
+        $worksheet = $spreadsheet->getActiveSheet();
+        $data = $worksheet->toArray();
+        
+        // Remove empty rows
+        $data = array_filter($data, function($row) {
+            return !empty(array_filter($row));
+        });
+        $data = array_values($data);
+        
+        $headers = [];
+        $sample = [];
+        $total = count($data);
+        
+        if ($total > 0) {
+            // First row as headers
+            $headers = array_values($data[0]);
+            
+            // Get sample data (skip header, take 5 rows)
+            $sampleData = array_slice($data, 1, 5);
+            foreach ($sampleData as $row) {
+                $rowData = [];
+                foreach ($headers as $index => $header) {
+                    $rowData[$header] = $row[$index] ?? '';
+                }
+                $sample[] = $rowData;
+            }
+        }
+        
+        return [
+            'total' => max(0, $total - 1), // Exclude header
+            'valid' => max(0, $total - 1),
+            'headers' => $headers,
+            'sample' => $sample,
+            'sheets' => $sheets,
+        ];
+    }
+
+    /**
+     * Preview CSV file
+     */
+    private function previewCsvFile($filePath, $delimiter = ',')
+    {
+        $reader = new CsvReader();
+        $reader->setDelimiter($delimiter);
+        $reader->setEnclosure('"');
+        $reader->setSheetIndex(0);
+        
+        $spreadsheet = $reader->load($filePath);
+        $worksheet = $spreadsheet->getActiveSheet();
+        $data = $worksheet->toArray();
+        
+        // Remove empty rows
+        $data = array_filter($data, function($row) {
+            return !empty(array_filter($row));
+        });
+        $data = array_values($data);
+        
+        $headers = [];
+        $sample = [];
+        $total = count($data);
+        
+        if ($total > 0) {
+            $headers = array_values($data[0]);
+            
+            $sampleData = array_slice($data, 1, 5);
+            foreach ($sampleData as $row) {
+                $rowData = [];
+                foreach ($headers as $index => $header) {
+                    $rowData[$header] = $row[$index] ?? '';
+                }
+                $sample[] = $rowData;
+            }
+        }
+        
+        return [
+            'total' => max(0, $total - 1),
+            'valid' => max(0, $total - 1),
+            'headers' => $headers,
+            'sample' => $sample,
+        ];
+    }
+
+    /**
+     * Preview TXT file
+     */
+    private function previewTxtFile($filePath)
+    {
+        $content = file_get_contents($filePath);
+        
+        // Split by newline for preview
+        $lines = explode("\n", $content);
+        $lines = array_filter(array_map('trim', $lines));
+        $lines = array_values($lines);
+        
+        $sample = array_slice($lines, 0, 5);
+        
+        return [
+            'total' => count($lines),
+            'valid' => count($lines),
+            'sample' => $sample,
+        ];
+    }
+
+    /**
+     * Process Excel file with configuration
+     */
+    private function processExcelWithConfig($filePath, array $config)
+    {
+        $spreadsheet = IOFactory::load($filePath);
+        
+        // Select sheet
+        $sheetIndex = $config['excel_sheet'] ?? 0;
+        $spreadsheet->setActiveSheetIndex((int)$sheetIndex);
+        $worksheet = $spreadsheet->getActiveSheet();
+        
+        $data = $worksheet->toArray();
+        
+        // Remove empty rows
+        $data = array_filter($data, function($row) {
+            return !empty(array_filter($row));
+        });
+        $data = array_values($data);
+        
+        $texts = [];
+        $hasHeader = isset($config['file_has_header']) && $config['file_has_header'] == 'on';
+        
+        if ($hasHeader) {
+            // Use column name
+            $columnName = $config['text_column_name'] ?? null;
+            
+            if (empty($data) || !$columnName) {
+                return ['texts' => [], 'total' => 0];
+            }
+            
+            $headers = $data[0];
+            $columnIndex = array_search($columnName, $headers);
+            
+            if ($columnIndex === false) {
+                throw new \Exception("Column '$columnName' not found");
+            }
+            
+            // Extract text from column (skip header)
+            for ($i = 1; $i < count($data); $i++) {
+                $text = $data[$i][$columnIndex] ?? '';
+                $text = trim($text);
+                if (!empty($text)) {
+                    $texts[] = $text;
+                }
+            }
+            
+        } else {
+            // Use column index
+            $columnIndex = isset($config['text_column_index']) 
+                ? (int)$config['text_column_index'] - 1  // Convert to 0-based
+                : 0;
+            
+            // Extract text from column
+            foreach ($data as $row) {
+                $text = $row[$columnIndex] ?? '';
+                $text = trim($text);
+                if (!empty($text)) {
+                    $texts[] = $text;
+                }
+            }
+        }
+        
+        return [
+            'texts' => $texts,
+            'total' => count($texts),
+        ];
+    }
+
+    /**
+     * Process CSV file with configuration
+     */
+    private function processCsvWithConfig($filePath, array $config)
+    {
+        // Get delimiter
+        $delimiter = $config['csv_delimiter'] ?? ',';
+        
+        // Handle special characters
+        if ($delimiter === '\t') {
+            $delimiter = "\t";
+        }
+        
+        $reader = new CsvReader();
+        $reader->setDelimiter($delimiter);
+        $reader->setEnclosure('"');
+        $reader->setSheetIndex(0);
+        
+        $spreadsheet = $reader->load($filePath);
+        $worksheet = $spreadsheet->getActiveSheet();
+        $data = $worksheet->toArray();
+        
+        // Remove empty rows
+        $data = array_filter($data, function($row) {
+            return !empty(array_filter($row));
+        });
+        $data = array_values($data);
+        
+        $texts = [];
+        $hasHeader = isset($config['file_has_header']) && $config['file_has_header'] == 'on';
+        
+        if ($hasHeader) {
+            // Use column name
+            $columnName = $config['text_column_name'] ?? null;
+            
+            if (empty($data) || !$columnName) {
+                return ['texts' => [], 'total' => 0];
+            }
+            
+            $headers = $data[0];
+            $columnIndex = array_search($columnName, $headers);
+            
+            if ($columnIndex === false) {
+                throw new \Exception("Column '$columnName' not found");
+            }
+            
+            // Extract text (skip header)
+            for ($i = 1; $i < count($data); $i++) {
+                $text = $data[$i][$columnIndex] ?? '';
+                $text = trim($text);
+                if (!empty($text)) {
+                    $texts[] = $text;
+                }
+            }
+            
+        } else {
+            // Use column index
+            $columnIndex = isset($config['text_column_index']) 
+                ? (int)$config['text_column_index'] - 1
+                : 0;
+            
+            foreach ($data as $row) {
+                $text = $row[$columnIndex] ?? '';
+                $text = trim($text);
+                if (!empty($text)) {
+                    $texts[] = $text;
+                }
+            }
+        }
+        
+        return [
+            'texts' => $texts,
+            'total' => count($texts),
+        ];
+    }
+
+    /**
+     * Process TXT file with configuration
+     */
+    private function processTxtWithConfig($filePath, array $config)
+    {
+        // Get encoding
+        $encoding = $config['txt_encoding'] ?? 'utf-8';
+        
+        // Read file
+        $content = file_get_contents($filePath);
+        
+        // Convert encoding if needed
+        if (strtolower($encoding) !== 'utf-8') {
+            $content = mb_convert_encoding($content, 'UTF-8', $encoding);
+        }
+        
+        // Get separator
+        $separator = $config['txt_separator'] ?? 'newline';
+        
+        $texts = [];
+        
+        switch ($separator) {
+            case 'newline':
+                $texts = explode("\n", $content);
+                break;
+                
+            case 'period':
+                $texts = explode('.', $content);
+                break;
+                
+            case 'double_newline':
+                $texts = preg_split('/\n\s*\n/', $content);
+                break;
+                
+            case 'custom':
+                $customSeparator = $config['txt_custom_separator'] ?? "\n";
+                $texts = explode($customSeparator, $content);
+                break;
+                
+            default:
+                $texts = explode("\n", $content);
+        }
+        
+        // Clean up
+        $texts = array_filter(array_map('trim', $texts), function($text) {
+            return !empty($text);
+        });
+        $texts = array_values($texts);
+        
+        return [
+            'texts' => $texts,
+            'total' => count($texts),
         ];
     }
 }

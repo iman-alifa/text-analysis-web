@@ -38,6 +38,8 @@ return [
     'nlp_api' => [
         'url' => env('NLP_API_URL', 'http://localhost:8001'),
         'timeout' => env('NLP_API_TIMEOUT', 7200),
+        'batch_size' => env('NLP_API_BATCH_SIZE', 50),
+        'max_texts_single_request' => env('NLP_API_MAX_TEXTS', 100),
     ],
 
 ];

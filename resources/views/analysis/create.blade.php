@@ -32,6 +32,14 @@
         font-size: 0.875rem;
         margin: 0.25rem;
     }
+    
+    .file-config-section {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-top: 1rem;
+    }
 </style>
 @endpush
 
@@ -334,6 +342,190 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                     @error('file')
                         <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
                     @enderror
+
+                    <!-- File Configuration Section (Hidden initially) -->
+                    <div id="file-config" class="hidden mt-6 space-y-4">
+                        <div class="flex items-center justify-between">
+                            <h4 class="text-sm font-semibold text-gray-900">Konfigurasi File</h4>
+                            <span class="text-xs text-gray-500">Sesuaikan pengaturan sesuai format file Anda</span>
+                        </div>
+
+                        <!-- Excel/CSV Configuration -->
+                        <div id="excel-config" class="file-config-section hidden">
+                            <h5 class="font-medium text-gray-900 mb-3">Pengaturan Excel/CSV</h5>
+                            
+                            <!-- Has Header -->
+                            <div class="mb-4">
+                                <label class="flex items-center space-x-3">
+                                    <input type="checkbox" 
+                                           name="file_has_header" 
+                                           id="file_has_header"
+                                           class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                                           checked
+                                           onchange="toggleHeaderOptions()">
+                                    <span class="text-sm font-medium text-gray-700">File memiliki baris header (baris pertama adalah nama kolom)</span>
+                                </label>
+                            </div>
+
+                            <!-- Column Selection (with header) -->
+                            <div id="column-with-header" class="space-y-3">
+                                <label for="text_column_name" class="block text-sm font-medium text-gray-700">
+                                    Pilih Kolom Teks <span class="text-red-500">*</span>
+                                </label>
+                                <select name="text_column_name" 
+                                        id="text_column_name"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="">-- Pilih kolom setelah file di-upload --</option>
+                                </select>
+                                <p class="text-xs text-gray-500">Pilih kolom yang berisi teks yang ingin dianalisis</p>
+                            </div>
+
+                            <!-- Column Selection (without header) -->
+                            <div id="column-without-header" class="hidden space-y-3">
+                                <label for="text_column_index" class="block text-sm font-medium text-gray-700">
+                                    Nomor Kolom Teks <span class="text-red-500">*</span>
+                                </label>
+                                <input type="number" 
+                                       name="text_column_index" 
+                                       id="text_column_index"
+                                       min="1"
+                                       value="1"
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <p class="text-xs text-gray-500">Masukkan nomor kolom (dimulai dari 1) yang berisi teks untuk dianalisis</p>
+                            </div>
+
+                            <!-- CSV Delimiter (CSV only) -->
+                            <div id="csv-delimiter-config" class="hidden space-y-3">
+                                <label for="csv_delimiter" class="block text-sm font-medium text-gray-700">
+                                    Pemisah Kolom (Delimiter)
+                                </label>
+                                <select name="csv_delimiter" 
+                                        id="csv_delimiter"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="," selected>Koma (,)</option>
+                                    <option value=";">Titik Koma (;)</option>
+                                    <option value="\t">Tab</option>
+                                    <option value="|">Pipe (|)</option>
+                                </select>
+                            </div>
+
+                            <!-- Sheet Selection (Excel only) -->
+                            <div id="excel-sheet-config" class="hidden space-y-3">
+                                <label for="excel_sheet" class="block text-sm font-medium text-gray-700">
+                                    Pilih Sheet
+                                </label>
+                                <select name="excel_sheet" 
+                                        id="excel_sheet"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="0">Sheet 1 (Default)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- TXT Configuration -->
+                        <div id="txt-config" class="file-config-section hidden">
+                            <h5 class="font-medium text-gray-900 mb-3">Pengaturan File TXT</h5>
+                            
+                            <!-- Record Separator -->
+                            <div class="space-y-3">
+                                <label class="block text-sm font-medium text-gray-700">
+                                    Pemisah Antar Record <span class="text-red-500">*</span>
+                                </label>
+                                
+                                <div class="space-y-2">
+                                    <label class="flex items-start">
+                                        <input type="radio" 
+                                               name="txt_separator" 
+                                               value="newline" 
+                                               class="mt-1 mr-3"
+                                               checked>
+                                        <div>
+                                            <span class="font-medium text-gray-900">Baris Baru (Enter)</span>
+                                            <p class="text-sm text-gray-500">Setiap baris adalah satu record terpisah</p>
+                                            <code class="block mt-1 text-xs bg-gray-100 p-2 rounded">Teks pertama\nTeks kedua\nTeks ketiga</code>
+                                        </div>
+                                    </label>
+                                    
+                                    <label class="flex items-start">
+                                        <input type="radio" 
+                                               name="txt_separator" 
+                                               value="period" 
+                                               class="mt-1 mr-3">
+                                        <div>
+                                            <span class="font-medium text-gray-900">Titik (.)</span>
+                                            <p class="text-sm text-gray-500">Teks dipisahkan oleh karakter titik</p>
+                                            <code class="block mt-1 text-xs bg-gray-100 p-2 rounded">Teks pertama. Teks kedua. Teks ketiga.</code>
+                                        </div>
+                                    </label>
+                                    
+                                    <label class="flex items-start">
+                                        <input type="radio" 
+                                               name="txt_separator" 
+                                               value="double_newline" 
+                                               class="mt-1 mr-3">
+                                        <div>
+                                            <span class="font-medium text-gray-900">Baris Kosong (Double Enter)</span>
+                                            <p class="text-sm text-gray-500">Paragraf dipisahkan oleh baris kosong</p>
+                                            <code class="block mt-1 text-xs bg-gray-100 p-2 rounded">Teks pertama\n\nTeks kedua\n\nTeks ketiga</code>
+                                        </div>
+                                    </label>
+                                    
+                                    <label class="flex items-start">
+                                        <input type="radio" 
+                                               name="txt_separator" 
+                                               value="custom" 
+                                               class="mt-1 mr-3"
+                                               onchange="toggleCustomSeparator()">
+                                        <div class="flex-1">
+                                            <span class="font-medium text-gray-900">Custom (Tentukan sendiri)</span>
+                                            <p class="text-sm text-gray-500 mb-2">Masukkan karakter pemisah kustom</p>
+                                            <input type="text" 
+                                                   name="txt_custom_separator" 
+                                                   id="txt_custom_separator"
+                                                   placeholder="Contoh: ||, ---, ###"
+                                                   class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                                                   disabled>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Encoding -->
+                            <div class="space-y-3 mt-4">
+                                <label for="txt_encoding" class="block text-sm font-medium text-gray-700">
+                                    Encoding File
+                                </label>
+                                <select name="txt_encoding" 
+                                        id="txt_encoding"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="utf-8" selected>UTF-8 (Rekomendasi)</option>
+                                    <option value="iso-8859-1">ISO-8859-1 (Latin-1)</option>
+                                    <option value="windows-1252">Windows-1252</option>
+                                </select>
+                                <p class="text-xs text-gray-500">Pilih encoding yang sesuai dengan file Anda untuk menghindari karakter aneh</p>
+                            </div>
+                        </div>
+
+                        <!-- Preview Section -->
+                        <div id="file-data-preview" class="hidden">
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <div class="flex items-center justify-between mb-3">
+                                    <h5 class="font-medium text-blue-900">Preview Data</h5>
+                                    <span id="selected-column-indicator" class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded"></span>
+                                </div>
+                                <div class="text-sm text-blue-800 space-y-1">
+                                    <p>📊 <strong>Total records:</strong> <span id="preview-total">-</span></p>
+                                    <p>✅ <strong>Valid records:</strong> <span id="preview-valid">-</span></p>
+                                </div>
+                                <div id="preview-sample" class="mt-3 bg-white rounded p-3 text-sm">
+                                    <p class="font-medium text-gray-700 mb-2">Sample 3 baris pertama (dari kolom terpilih):</p>
+                                    <div id="preview-content" class="space-y-1 font-mono text-xs text-gray-600">
+                                        <!-- Will be populated by JavaScript -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -496,6 +688,9 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
 
 @push('scripts')
 <script>
+    // Global variable to store file metadata
+    let currentFileData = null;
+
     // ==========================================
     // Tab Switching
     // ==========================================
@@ -615,7 +810,9 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
         .then(response => response.json())
         .then(data => {
             if (data.success) {
+                currentFileData = data.data;
                 displayFilePreview(file, data.data);
+                showFileConfiguration(fileExtension, data.data);
             } else {
                 alert('Gagal memproses file: ' + data.message);
                 clearFile();
@@ -649,15 +846,191 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
         document.getElementById('file-type').textContent = file.name.split('.').pop().toUpperCase();
         
         // Data info
-        document.getElementById('total-rows').textContent = data.total;
-        document.getElementById('valid-rows').textContent = data.total;
+        document.getElementById('total-rows').textContent = data.total || 0;
+        document.getElementById('valid-rows').textContent = data.valid || data.total || 0;
         document.getElementById('columns-count').textContent = data.headers ? data.headers.length : 1;
+    }
+
+    function showFileConfiguration(fileExtension, data) {
+        // Show file config section
+        document.getElementById('file-config').classList.remove('hidden');
+        
+        // Hide all config sections first
+        document.getElementById('excel-config').classList.add('hidden');
+        document.getElementById('txt-config').classList.add('hidden');
+        document.getElementById('csv-delimiter-config').classList.add('hidden');
+        document.getElementById('excel-sheet-config').classList.add('hidden');
+        
+        // Show appropriate config based on file type
+        if (fileExtension === '.xlsx' || fileExtension === '.xls') {
+            // Excel configuration
+            document.getElementById('excel-config').classList.remove('hidden');
+            document.getElementById('excel-sheet-config').classList.remove('hidden');
+            
+            // Populate sheet options if available
+            if (data.sheets && data.sheets.length > 0) {
+                const sheetSelect = document.getElementById('excel_sheet');
+                sheetSelect.innerHTML = '';
+                data.sheets.forEach((sheet, index) => {
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = sheet;
+                    sheetSelect.appendChild(option);
+                });
+            }
+            
+            // Populate column options
+            populateColumnOptions(data);
+            
+        } else if (fileExtension === '.csv') {
+            // CSV configuration
+            document.getElementById('excel-config').classList.remove('hidden');
+            document.getElementById('csv-delimiter-config').classList.remove('hidden');
+            
+            // Populate column options
+            populateColumnOptions(data);
+            
+        } else if (fileExtension === '.txt') {
+            // TXT configuration
+            document.getElementById('txt-config').classList.remove('hidden');
+        }
+        
+        // Show preview
+        showDataPreview(data);
+    }
+
+    function populateColumnOptions(data) {
+        if (data.headers && data.headers.length > 0) {
+            const columnSelect = document.getElementById('text_column_name');
+            columnSelect.innerHTML = '<option value="">-- Pilih kolom --</option>';
+            
+            data.headers.forEach((header, index) => {
+                const option = document.createElement('option');
+                option.value = header;
+                option.textContent = `${header} (Kolom ${index + 1})`;
+                columnSelect.appendChild(option);
+            });
+            
+            // Auto-select first column that likely contains text
+            const textColumns = data.headers.filter(h => 
+                h.toLowerCase().includes('text') || 
+                h.toLowerCase().includes('review') || 
+                h.toLowerCase().includes('comment') ||
+                h.toLowerCase().includes('content') ||
+                h.toLowerCase().includes('komentar') ||
+                h.toLowerCase().includes('ulasan')
+            );
+            
+            if (textColumns.length > 0) {
+                columnSelect.value = textColumns[0];
+            } else if (data.headers.length > 0) {
+                columnSelect.value = data.headers[0];
+            }
+        }
+    }
+
+    function showDataPreview(data) {
+        const previewSection = document.getElementById('file-data-preview');
+        previewSection.classList.remove('hidden');
+        
+        document.getElementById('preview-total').textContent = data.total || 0;
+        document.getElementById('preview-valid').textContent = data.valid || data.total || 0;
+        
+        // Get selected column info
+        const hasHeader = document.getElementById('file_has_header').checked;
+        const selectedColumn = hasHeader 
+            ? document.getElementById('text_column_name').value 
+            : parseInt(document.getElementById('text_column_index').value) - 1;
+        
+        // Update column indicator
+        const columnIndicator = document.getElementById('selected-column-indicator');
+        if (hasHeader && selectedColumn) {
+            columnIndicator.textContent = `📌 Kolom: ${selectedColumn}`;
+        } else if (!hasHeader && selectedColumn !== undefined && !isNaN(selectedColumn)) {
+            columnIndicator.textContent = `📌 Kolom ke-${selectedColumn + 1}`;
+        } else {
+            columnIndicator.textContent = '⚠️ Pilih kolom terlebih dahulu';
+        }
+        
+        // Show sample data
+        if (data.sample && data.sample.length > 0) {
+            const previewContent = document.getElementById('preview-content');
+            previewContent.innerHTML = '';
+            
+            data.sample.slice(0, 3).forEach((row, index) => {
+                const div = document.createElement('div');
+                div.className = 'text-gray-700';
+                
+                let textToShow = '';
+                
+                if (typeof row === 'object') {
+                    // For CSV/Excel with headers
+                    if (hasHeader && selectedColumn) {
+                        // Show selected column by name
+                        textToShow = row[selectedColumn] || Object.values(row)[0];
+                    } else if (!hasHeader && selectedColumn !== undefined && !isNaN(selectedColumn)) {
+                        // Show selected column by index
+                        const values = Object.values(row);
+                        textToShow = values[selectedColumn] || values[0];
+                    } else {
+                        // Fallback to first column
+                        textToShow = Object.values(row)[0];
+                    }
+                } else {
+                    // For plain text
+                    textToShow = row;
+                }
+                
+                div.textContent = `${index + 1}. ${textToShow}`;
+                previewContent.appendChild(div);
+            });
+            
+            // Show message if no column selected
+            if ((!hasHeader && (selectedColumn === undefined || isNaN(selectedColumn))) || 
+                (hasHeader && !selectedColumn)) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'text-yellow-600 text-xs mt-2 italic';
+                warningDiv.textContent = '⚠️ Menampilkan kolom pertama. Silakan pilih kolom yang ingin dianalisis.';
+                previewContent.appendChild(warningDiv);
+            }
+        }
+    }
+    
+    // Update preview when column selection changes
+    function updatePreviewOnColumnChange() {
+        if (currentFileData && currentFileData.sample) {
+            showDataPreview(currentFileData);
+        }
+    }
+
+    function toggleHeaderOptions() {
+        const hasHeader = document.getElementById('file_has_header').checked;
+        
+        if (hasHeader) {
+            document.getElementById('column-with-header').classList.remove('hidden');
+            document.getElementById('column-without-header').classList.add('hidden');
+        } else {
+            document.getElementById('column-with-header').classList.add('hidden');
+            document.getElementById('column-without-header').classList.remove('hidden');
+        }
+    }
+
+    function toggleCustomSeparator() {
+        const customInput = document.getElementById('txt_custom_separator');
+        const isCustom = document.querySelector('input[name="txt_separator"][value="custom"]').checked;
+        
+        customInput.disabled = !isCustom;
+        if (isCustom) {
+            customInput.focus();
+        }
     }
 
     function clearFile() {
         fileInput.value = '';
+        currentFileData = null;
         document.getElementById('upload-placeholder').classList.remove('hidden');
         document.getElementById('file-preview').classList.add('hidden');
+        document.getElementById('file-config').classList.add('hidden');
     }
 
     function formatFileSize(bytes) {
@@ -768,6 +1141,27 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                 alert('Upload file terlebih dahulu!');
                 return;
             }
+            
+            // Validate file configuration
+            const fileExt = '.' + fileInput.files[0].name.split('.').pop().toLowerCase();
+            
+            if (fileExt === '.xlsx' || fileExt === '.xls' || fileExt === '.csv') {
+                const hasHeader = document.getElementById('file_has_header').checked;
+                
+                if (hasHeader) {
+                    const columnName = document.getElementById('text_column_name').value;
+                    if (!columnName) {
+                        alert('Pilih kolom yang berisi teks untuk dianalisis!');
+                        return;
+                    }
+                } else {
+                    const columnIndex = document.getElementById('text_column_index').value;
+                    if (!columnIndex || columnIndex < 1) {
+                        alert('Masukkan nomor kolom yang valid!');
+                        return;
+                    }
+                }
+            }
         }
         
         // Generate preview content
@@ -799,11 +1193,48 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
             const fileName = document.getElementById('file-name').textContent;
             const fileSize = document.getElementById('file-size').textContent;
             const totalRows = document.getElementById('total-rows').textContent;
+            const fileExt = '.' + fileName.split('.').pop().toLowerCase();
+            
+            let configInfo = '';
+            
+            if (fileExt === '.xlsx' || fileExt === '.xls' || fileExt === '.csv') {
+                const hasHeader = document.getElementById('file_has_header').checked;
+                
+                if (hasHeader) {
+                    const columnName = document.getElementById('text_column_name').value;
+                    configInfo = `<p class="text-sm text-gray-600">📌 Kolom teks: <strong>${columnName}</strong></p>`;
+                } else {
+                    const columnIndex = document.getElementById('text_column_index').value;
+                    configInfo = `<p class="text-sm text-gray-600">📌 Kolom ke-<strong>${columnIndex}</strong></p>`;
+                }
+                
+                if (fileExt === '.csv') {
+                    const delimiter = document.getElementById('csv_delimiter').value;
+                    const delimiterName = {',': 'Koma', ';': 'Titik Koma', '\t': 'Tab', '|': 'Pipe'}[delimiter];
+                    configInfo += `<p class="text-sm text-gray-600">📌 Delimiter: <strong>${delimiterName}</strong></p>`;
+                }
+            } else if (fileExt === '.txt') {
+                const separator = document.querySelector('input[name="txt_separator"]:checked').value;
+                const separatorName = {
+                    'newline': 'Baris Baru (Enter)',
+                    'period': 'Titik (.)',
+                    'double_newline': 'Baris Kosong',
+                    'custom': 'Custom'
+                }[separator];
+                
+                configInfo = `<p class="text-sm text-gray-600">📌 Pemisah: <strong>${separatorName}</strong></p>`;
+                
+                if (separator === 'custom') {
+                    const customSep = document.getElementById('txt_custom_separator').value;
+                    configInfo += `<p class="text-sm text-gray-600">📌 Custom separator: <strong>${customSep}</strong></p>`;
+                }
+            }
+            
             dataPreview = `
-                <div class="space-y-2">
+                <div class="space-y-3">
                     <p class="font-medium text-gray-700">File yang akan diproses:</p>
                     <div class="bg-gray-50 rounded-lg p-4">
-                        <div class="flex items-center space-x-3">
+                        <div class="flex items-center space-x-3 mb-3">
                             <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
                                 <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -814,6 +1245,7 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                                 <p class="text-sm text-gray-500">${fileSize} • ${totalRows} baris</p>
                             </div>
                         </div>
+                        ${configInfo}
                     </div>
                 </div>
             `;
@@ -902,6 +1334,31 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
         const selectedAnalysisType = document.querySelector('input[name="analysis_type"]:checked');
         if (selectedAnalysisType) {
             selectedAnalysisType.dispatchEvent(new Event('change'));
+        }
+        
+        // Initialize custom separator toggle
+        document.querySelectorAll('input[name="txt_separator"]').forEach(radio => {
+            radio.addEventListener('change', toggleCustomSeparator);
+        });
+        
+        // Add event listeners for column selection changes to update preview
+        const textColumnNameSelect = document.getElementById('text_column_name');
+        const textColumnIndexInput = document.getElementById('text_column_index');
+        const fileHasHeaderCheckbox = document.getElementById('file_has_header');
+        
+        if (textColumnNameSelect) {
+            textColumnNameSelect.addEventListener('change', updatePreviewOnColumnChange);
+        }
+        
+        if (textColumnIndexInput) {
+            textColumnIndexInput.addEventListener('input', updatePreviewOnColumnChange);
+        }
+        
+        if (fileHasHeaderCheckbox) {
+            fileHasHeaderCheckbox.addEventListener('change', function() {
+                toggleHeaderOptions();
+                updatePreviewOnColumnChange();
+            });
         }
     });
 </script>

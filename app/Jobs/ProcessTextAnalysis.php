@@ -18,9 +18,9 @@ class ProcessTextAnalysis implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 600; // 10 minutes
+    public $timeout = 1800; // 30 minutes untuk data besar
     public $tries = 3;
-    public $backoff = [60, 120, 300]; // Retry delays
+    public $backoff = [120, 300, 600]; // 2min, 5min, 10min
 
     protected $analysis;
 
@@ -56,41 +56,56 @@ class ProcessTextAnalysis implements ShouldQueue
                 throw new Exception('No texts to analyze');
             }
 
+            $textCount = count($texts);
+            Log::info("Analyzing {$textCount} texts");
+
             // ✅ Preprocessing config (30%)
             $this->updateProgress(30, 'Menyiapkan konfigurasi preprocessing...');
             $preprocessingConfig = $this->getPreprocessingConfig();
+
+            // ✅ Create progress callback
+            $progressCallback = function($progress, $message) {
+                $this->updateProgress($progress, $message);
+            };
 
             // ✅ Perform analysis based on type (40-70%)
             $result = null;
 
             switch ($this->analysis->analysis_type) {
                 case 'sentiment':
-                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
-                    $this->updateProgress(60, 'Menganalisis sentimen...');
-                    $result = $nlpService->analyzeSentiment($texts, $preprocessingConfig);
+                    $this->updateProgress(40, 'Memulai analisis sentimen...');
+                    $result = $nlpService->analyzeSentiment($texts, $preprocessingConfig, $progressCallback);
                     break;
 
                 case 'aspect':
-                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
+                    $this->updateProgress(40, 'Memulai ekstraksi aspek...');
                     $predefinedAspects = $this->getPredefinedAspects();
                     $mode = $predefinedAspects ? 'rule-based' : 'automatic';
-                    $this->updateProgress(60, 'Mengekstraksi aspek dan sentimen...');
-                    $result = $nlpService->analyzeAspect($texts, $preprocessingConfig, $predefinedAspects, $mode);
+                    $result = $nlpService->analyzeAspect($texts, $preprocessingConfig, $predefinedAspects, $mode, $progressCallback);
                     break;
 
                 case 'topic':
-                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
+                    $this->updateProgress(40, 'Memulai identifikasi topik...');
                     $numTopics = $this->analysis->metadata['num_topics'] ?? 5;
-                    $this->updateProgress(60, 'Mengidentifikasi topik...');
+                    
+                    // Topic modeling untuk data besar bisa lama
+                    if ($textCount > 500) {
+                        $this->updateProgress(45, "Memproses {$textCount} teks untuk topic modeling...");
+                    }
+                    
                     $result = $nlpService->analyzeTopic($texts, $preprocessingConfig, $numTopics);
+                    $this->updateProgress(70, 'Topic modeling selesai');
                     break;
 
                 case 'combined':
-                    $this->updateProgress(40, 'Melakukan preprocessing teks...');
-                    $this->updateProgress(50, 'Menganalisis sentimen...');
-                    $this->updateProgress(60, 'Mengekstraksi aspek...');
-                    $this->updateProgress(70, 'Mengidentifikasi topik...');
-                    $result = $nlpService->analyzeCombined($texts, $preprocessingConfig);
+                    $this->updateProgress(40, 'Memulai analisis gabungan...');
+                    
+                    if ($textCount > 100) {
+                        $this->updateProgress(42, "Memproses {$textCount} teks dengan batch processing...");
+                    }
+                    
+                    $result = $nlpService->analyzeCombined($texts, $preprocessingConfig, $progressCallback);
+                    $this->updateProgress(70, 'Analisis gabungan selesai');
                     break;
 
                 default:
@@ -111,24 +126,27 @@ class ProcessTextAnalysis implements ShouldQueue
                 'completed_at' => now()
             ]);
 
+            $duration = $this->analysis->started_at->diffInSeconds(now());
+            
             AnalysisLog::createLog(
                 'completed',
                 $this->analysis->user_id,
                 $this->analysis->id,
                 'Analysis completed successfully',
                 [
-                    'duration' => $this->analysis->started_at->diffInSeconds(now())
+                    'duration' => $duration,
+                    'text_count' => $textCount
                 ]
             );
 
-            Log::info("Analysis ID {$this->analysis->id} completed successfully");
+            Log::info("Analysis ID {$this->analysis->id} completed successfully in {$duration} seconds");
 
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             // ✅ Connection timeout - will retry
             Log::warning("Analysis ID {$this->analysis->id} connection timeout: " . $e->getMessage());
 
             if ($this->attempts() < $this->tries) {
-                $retryDelay = $this->backoff[$this->attempts() - 1] ?? 60;
+                $retryDelay = $this->backoff[$this->attempts() - 1] ?? 120;
                 
                 $this->updateProgress(
                     $this->analysis->progress ?? 0,
@@ -140,7 +158,23 @@ class ProcessTextAnalysis implements ShouldQueue
             }
 
             // All retries exhausted
-            $this->handleFailure($e, 'Koneksi ke service analisis gagal setelah beberapa percobaan');
+            $this->handleFailure($e, 'Koneksi ke service analisis gagal setelah beberapa percobaan. Data terlalu besar atau service tidak merespons.');
+
+        } catch (\Illuminate\Http\Client\RequestException $e) {
+            // HTTP errors
+            Log::error("Analysis ID {$this->analysis->id} request error: " . $e->getMessage());
+            
+            if ($this->attempts() < $this->tries) {
+                $retryDelay = $this->backoff[$this->attempts() - 1] ?? 120;
+                $this->updateProgress(
+                    $this->analysis->progress ?? 0,
+                    "Terjadi kesalahan. Mencoba kembali... (Percobaan {$this->attempts()}/{$this->tries})"
+                );
+                $this->release($retryDelay);
+                return;
+            }
+            
+            $this->handleFailure($e, 'Service analisis mengembalikan error. Silakan coba lagi atau hubungi administrator.');
 
         } catch (Exception $e) {
             $this->handleFailure($e);
@@ -164,6 +198,8 @@ class ProcessTextAnalysis implements ShouldQueue
         $errorMessage = $customMessage ?? $e->getMessage();
         
         Log::error("Analysis ID {$this->analysis->id} failed: " . $errorMessage);
+        Log::error("Exception: " . get_class($e));
+        Log::error("Stack trace: " . $e->getTraceAsString());
 
         $this->analysis->update([
             'status' => 'failed',
@@ -176,10 +212,15 @@ class ProcessTextAnalysis implements ShouldQueue
             $this->analysis->user_id,
             $this->analysis->id,
             'Analysis failed',
-            ['error' => $errorMessage]
+            [
+                'error' => $errorMessage,
+                'exception' => get_class($e),
+                'attempts' => $this->attempts()
+            ]
         );
 
-        throw $e;
+        // Don't re-throw to prevent infinite retry
+        // throw $e;
     }
 
     protected function getPreprocessingConfig(): array
@@ -204,7 +245,6 @@ class ProcessTextAnalysis implements ShouldQueue
 
     protected function saveResults(array $result): void
     {
-        // [Keep your existing implementation]
         $analysisResults = $result['results'] ?? $result;
 
         $data = [
@@ -301,11 +341,11 @@ class ProcessTextAnalysis implements ShouldQueue
 
     public function failed(Exception $exception): void
     {
-        Log::error("Job failed for analysis ID {$this->analysis->id}: " . $exception->getMessage());
+        Log::error("Job permanently failed for analysis ID {$this->analysis->id}: " . $exception->getMessage());
 
         $this->analysis->update([
             'status' => 'failed',
-            'error_message' => $exception->getMessage(),
+            'error_message' => 'Analisis gagal setelah beberapa percobaan. ' . $exception->getMessage(),
             'completed_at' => now()
         ]);
 
@@ -313,8 +353,11 @@ class ProcessTextAnalysis implements ShouldQueue
             'failed',
             $this->analysis->user_id,
             $this->analysis->id,
-            'Job permanently failed',
-            ['error' => $exception->getMessage()]
+            'Job permanently failed after all retries',
+            [
+                'error' => $exception->getMessage(),
+                'exception' => get_class($exception)
+            ]
         );
     }
 }
