@@ -154,6 +154,13 @@
                 </svg>
                 Export CSV
             </a>
+            <a href="{{ route('analysis.feedback', $analysis->id) }}"
+               class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+                </svg>
+                Koreksi Active Learning
+            </a>
         </div>
         @endif
     </div>
@@ -382,15 +389,13 @@
                                             {{ ucfirst($pred['sentiment']) }}
                                         </span>
                                         
-                                        <!-- Confidence -->
+                                        <!-- Confidence + Margin of Confidence -->
                                         @if(isset($pred['confidence']))
-                                        <span class="text-xs text-gray-500 flex items-center">
-                                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
-                                                <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/>
-                                            </svg>
-                                            Confidence: <strong class="ml-1">{{ round($pred['confidence'] * 100, 1) }}%</strong>
-                                        </span>
+                                        <x-confidence-meter
+                                            :score="$pred['confidence']"
+                                            :scores="$pred['scores'] ?? null"
+                                            :showMargin="true"
+                                        />
                                         @endif
                                         
                                         <!-- Show Processed Text Toggle (Optional) -->

@@ -7,6 +7,7 @@ use App\Http\Controllers\AnalysisController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Admin\TrainingController;
 use App\Http\Controllers\YouTubeScraperController;
+use App\Http\Controllers\AnalysisFeedbackController;
 
 // Landing Page
 Route::get('/', [LandingController::class, 'index'])->name('landing');
@@ -38,6 +39,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         // Export Routes
         Route::get('/{id}/export-pdf', [AnalysisController::class, 'exportPdf'])->name('export-pdf');
         Route::get('/{id}/export-csv', [AnalysisController::class, 'exportCsv'])->name('export-csv');
+
+        // Feedback / Active Learning
+        Route::get('/{id}/feedback', [AnalysisFeedbackController::class, 'show'])->name('feedback');
         
         // Delete
         Route::delete('/{id}', [AnalysisController::class, 'destroy'])->name('destroy');
@@ -54,34 +58,38 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
-});
 
-Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.')->group(function () {
-    
-    // 1. Dashboard Training (Index)
-    Route::get('/training', [TrainingController::class, 'index'])->name('training.index');
-    
-    // 2. Workspace Koreksi (Show per File)
-    Route::get('/training/{id}', [TrainingController::class, 'show'])->name('training.show');
-    
-    // 3. API Data Load (AJAX untuk DataTable di Show)
-    Route::get('/training/{id}/data', [TrainingController::class, 'getData'])->name('training.data');
-    
-    // 4. Action: Update Single Item
-    Route::post('/training/update/{itemId}', [TrainingController::class, 'update'])->name('training.update');
-    
-    // 5. Action: Bulk Update
-    Route::post('/training/bulk-update', [TrainingController::class, 'bulkCorrect'])->name('training.bulk');
-    
-    // 6. Action: Stopwords Management
-    Route::post('/training/stopword', [TrainingController::class, 'storeStopword'])->name('training.stopword');
-    Route::delete('/training/stopword/{id}', [TrainingController::class, 'destroyStopword'])->name('training.stopword.delete');
-    
-    // 7. Action: Export & Trigger
-    Route::get('/training/export-csv', [TrainingController::class, 'export'])->name('training.export');
-    Route::post('/training/trigger-retrain', [TrainingController::class, 'triggerTraining'])->name('training.trigger'); // Pastikan ini POST
+    // Training Routes (accessible to all authenticated users)
+    Route::prefix('training')->name('training.')->group(function () {
+        // Export must be listed before /{id} to prevent route conflict
+        Route::get('/export-csv', [TrainingController::class, 'export'])->name('export');
 
-    Route::post('/training/sync-all', [TrainingController::class, 'syncAll'])->name('training.sync');
+        // 1. Dashboard Training (Index)
+        Route::get('/', [TrainingController::class, 'index'])->name('index');
+
+        // 2. Workspace Koreksi (Show per File)
+        Route::get('/{id}', [TrainingController::class, 'show'])->name('show');
+
+        // 3. API Data Load (AJAX untuk DataTable di Show)
+        Route::get('/{id}/data', [TrainingController::class, 'getData'])->name('data');
+
+        // 4. Action: Update Single Item
+        Route::post('/update/{itemId}', [TrainingController::class, 'update'])->name('update');
+
+        // 5. Action: Bulk Update
+        Route::post('/bulk-update', [TrainingController::class, 'bulkCorrect'])->name('bulk');
+
+        // 6. Action: Stopwords Management (admin only)
+        Route::post('/stopword', [TrainingController::class, 'storeStopword'])->name('stopword');
+        Route::delete('/stopword/{id}', [TrainingController::class, 'destroyStopword'])->name('stopword.delete');
+
+        // 7. Action: Trigger & Sync (admin only)
+        Route::post('/trigger-retrain', [TrainingController::class, 'triggerTraining'])->name('trigger');
+        Route::post('/sync-all', [TrainingController::class, 'syncAll'])->name('sync');
+    });
+
+    // Analysis Feedback route is now inside the analysis prefix group above
+
 });
 
 require __DIR__.'/auth.php';
