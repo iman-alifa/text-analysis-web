@@ -27,7 +27,7 @@
                 <p class="text-sm text-gray-600">Topic Refinement Workspace</p>
             @endif
         </div>
-        <a href="{{ route('admin.training.index') }}" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Kembali</a>
+        <a href="{{ route('training.index') }}" class="px-4 py-2 border rounded-lg hover:bg-gray-50">Kembali</a>
     </div>
 
     @if(in_array($analysis->analysis_type, ['topic', 'combined']))
@@ -41,7 +41,7 @@
                 <p class="text-sm text-gray-500">Kata-kata yang diblokir akan mempengaruhi pembentukan topik.</p>
             </div>
             
-            <form action="{{ route('admin.training.stopword') }}" method="POST" class="flex gap-2 w-full md:w-auto mt-2 md:mt-0">
+            <form action="{{ route('training.stopword') }}" method="POST" class="flex gap-2 w-full md:w-auto mt-2 md:mt-0">
                 @csrf
                 <input type="text" name="word" placeholder="Tambah stopword..." class="text-sm border-gray-300 rounded-md focus:ring-indigo-500 w-full">
                 <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-indigo-700">Blokir Kata</button>
@@ -187,8 +187,8 @@
 @push('scripts')
 <script>
     // Config
-    const API_URL = "{{ route('admin.training.data', $analysis->id) }}";
-    const UPDATE_URL = "{{ url('/admin/training/update') }}";
+    const API_URL = "{{ route('training.data', $analysis->id) }}";
+    const UPDATE_URL = "{{ url('/training/update') }}";
     const CSRF_TOKEN = "{{ csrf_token() }}";
     // Ambil Tipe Analisis dari Backend ke JS
     const ANALYSIS_TYPE = "{{ $analysis->analysis_type }}"; 
@@ -273,11 +273,29 @@
                 let sentColor = 'text-gray-600';
                 if(item.predicted_sentiment === 'positive') sentColor = 'text-green-600';
                 if(item.predicted_sentiment === 'negative') sentColor = 'text-red-600';
+
+                // Confidence bar
+                const confPct = Math.round(item.confidence_score * 100);
+                // M(x) = P(ŷ₁|x) − P(ŷ₂|x), approximated for 3-class: M ≈ (3P − 1) / 2
+                const margin = Math.max(0, (3 * item.confidence_score - 1) / 2);
+                const marginPct = Math.round(margin * 100);
+                let barColor = 'bg-red-400', badgeClass = 'bg-red-100 text-red-700 border-red-200', statusLabel2 = 'Uncertain';
+                if (margin >= 0.6) { barColor = 'bg-green-500'; badgeClass = 'bg-green-100 text-green-700 border-green-200'; statusLabel2 = 'Confident'; }
+                else if (margin >= 0.3) { barColor = 'bg-yellow-500'; badgeClass = 'bg-yellow-100 text-yellow-700 border-yellow-200'; statusLabel2 = 'Moderate'; }
                 
                 detailsHtml += `
                     <span class="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded border mr-2">
-                        AI: <b class="${sentColor} uppercase">${item.predicted_sentiment}</b> 
-                        <span class="text-gray-400">(${Math.round(item.confidence_score * 100)}%)</span>
+                        AI: <b class="${sentColor} uppercase">${item.predicted_sentiment}</b>
+                    </span>
+                    <span class="inline-flex flex-col gap-0.5 min-w-[120px]">
+                        <span class="flex items-center justify-between text-xs">
+                            <span class="text-gray-400">${confPct}%</span>
+                            <span class="px-1.5 py-0.5 rounded-full border text-xs font-medium ${badgeClass}">${statusLabel2}</span>
+                        </span>
+                        <span class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <span class="${barColor} h-1.5 rounded-full block" style="width:${confPct}%"></span>
+                        </span>
+                        <span class="text-xs text-gray-400">M(x)=${marginPct}%</span>
                     </span>
                 `;
             }

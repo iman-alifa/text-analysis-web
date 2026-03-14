@@ -16,26 +16,40 @@ class TrainingController extends Controller
      */
     public function index()
     {
-        // 1. Hitung Statistik Global dari TrainingItem
-        $totalItems = TrainingItem::count();
-        $verifiedItems = TrainingItem::where('is_corrected', true)->count();
-        
-        // Hitung akurasi (Bandingkan prediksi AI vs Koreksi Admin)
-        $accurateItems = TrainingItem::where('is_corrected', true)
-            ->whereColumn('predicted_sentiment', 'corrected_sentiment') 
+        $user = auth()->user();
+
+        // Build base query filtered by user if not admin
+        $itemQuery = TrainingItem::query();
+        $batchQuery = TextAnalysis::query();
+
+        if (!$user->isAdmin()) {
+            $itemQuery->whereHas('textAnalysis', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+            $batchQuery->where('user_id', $user->id);
+        }
+
+        // 1. Hitung Statistik
+        $totalItems   = (clone $itemQuery)->count();
+        $verifiedItems = (clone $itemQuery)->where('is_corrected', true)->count();
+
+        $accurateItems = (clone $itemQuery)->where('is_corrected', true)
+            ->whereColumn('predicted_sentiment', 'corrected_sentiment')
             ->count();
 
         $stats = [
-            'accuracy' => $verifiedItems > 0 ? round(($accurateItems / $verifiedItems) * 100, 1) : 0,
-            'total_texts' => $totalItems,
+            'accuracy'        => $verifiedItems > 0 ? round(($accurateItems / $verifiedItems) * 100, 1) : 0,
+            'total_texts'     => $totalItems,
             'corrected_count' => $verifiedItems,
-            'pending_count' => $totalItems - $verifiedItems,
+            'pending_count'   => $totalItems - $verifiedItems,
         ];
 
         // 2. Ambil Daftar File (Batch)
-        $batches = TextAnalysis::withCount(['trainingItems as verified_count' => function($q){
+        $batches = $batchQuery
+            ->withCount(['trainingItems as verified_count' => function ($q) {
                 $q->where('is_corrected', true);
             }])
+            ->withAvg('trainingItems as avg_confidence', 'confidence_score')
             ->latest()
             ->paginate(10);
 
@@ -50,7 +64,13 @@ class TrainingController extends Controller
      */
     public function show($id)
     {
+        $user = auth()->user();
         $analysis = TextAnalysis::with('result')->findOrFail($id);
+
+        // Authorization: admin can view all, users can only view their own
+        if (!$user->isAdmin() && $analysis->user_id !== $user->id) {
+            abort(403, 'Anda tidak memiliki akses ke data ini.');
+        }
         
         // LOGIC "LAZY LOAD":
         // Jika tabel training_items kosong untuk file ini, ekstrak dari JSON sekarang.
@@ -79,10 +99,16 @@ class TrainingController extends Controller
      */
     public function getData(Request $request, $id) 
     {
-        // Pastikan ID valid
-        $exists = TextAnalysis::where('id', $id)->exists();
-        if (!$exists) {
+        $user = auth()->user();
+        $analysis = TextAnalysis::where('id', $id)->first();
+
+        if (!$analysis) {
             return response()->json(['error' => 'Analysis not found'], 404);
+        }
+
+        // Authorization
+        if (!$user->isAdmin() && $analysis->user_id !== $user->id) {
+            return response()->json(['error' => 'Forbidden'], 403);
         }
 
         $query = TrainingItem::where('text_analysis_id', $id);
@@ -128,7 +154,13 @@ class TrainingController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $item = TrainingItem::findOrFail($id);
+        $user = auth()->user();
+        $item = TrainingItem::with('textAnalysis:id,user_id')->findOrFail($id);
+
+        // Authorization: users can only correct items from their own analyses
+        if (!$user->isAdmin() && $item->textAnalysis->user_id !== $user->id) {
+            return response()->json(['error' => 'Forbidden'], 403);
+        }
         
         $item->update([
             'corrected_sentiment' => $request->corrected_sentiment,
@@ -147,9 +179,19 @@ class TrainingController extends Controller
      */
     public function bulkCorrect(Request $request)
     {
+        $user = auth()->user();
         $request->validate(['text_ids' => 'required|array', 'corrected_sentiment' => 'required']);
 
-        TrainingItem::whereIn('id', $request->text_ids)->update([
+        $query = TrainingItem::whereIn('id', $request->text_ids);
+
+        // Users can only bulk-correct their own items
+        if (!$user->isAdmin()) {
+            $query->whereHas('textAnalysis', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+        }
+
+        $query->update([
             'corrected_sentiment' => $request->corrected_sentiment,
             'is_corrected' => true,
             'verified_at' => now(),
@@ -164,9 +206,18 @@ class TrainingController extends Controller
      */
     public function export()
     {
-        $data = TrainingItem::with('textAnalysis:id,title')
-            ->where('is_corrected', true)
-            ->get();
+        $user = auth()->user();
+
+        $query = TrainingItem::with('textAnalysis:id,title')->where('is_corrected', true);
+
+        // Users only export their own corrected items
+        if (!$user->isAdmin()) {
+            $query->whereHas('textAnalysis', function ($q) use ($user) {
+                $q->where('user_id', $user->id);
+            });
+        }
+
+        $data = $query->get();
 
         $filename = 'training_dataset_' . date('Y-m-d') . '.csv';
         
@@ -196,26 +247,39 @@ class TrainingController extends Controller
         return response()->stream($callback, 200, $headers);
     }
     
-    // --- TOPIC STOPWORDS ---
+    // --- TOPIC STOPWORDS (admin only) ---
     public function storeStopword(Request $request) {
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat mengelola stopword.');
+        }
         CustomStopword::create(['word' => $request->word, 'added_by' => auth()->id()]);
         return back()->with('success', 'Stopword ditambahkan');
     }
 
     public function destroyStopword($id) {
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat mengelola stopword.');
+        }
         CustomStopword::destroy($id);
         return back()->with('success', 'Stopword dihapus');
     }
     
     public function triggerTraining() {
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat melakukan retrain model.');
+        }
         return back()->with('success', 'Request training dikirim.');
     }
 
     /**
-     * ACTION: SINKRONISASI SEMUA DATA (MASS SYNC)
+     * ACTION: SINKRONISASI SEMUA DATA (MASS SYNC) - admin only
      */
     public function syncAll()
     {
+        if (!auth()->user()->isAdmin()) {
+            abort(403, 'Hanya admin yang dapat melakukan sinkronisasi massal.');
+        }
+
         $analyses = TextAnalysis::with('result')
             ->where('status', 'completed')
             ->get();
@@ -232,10 +296,10 @@ class TrainingController extends Controller
     }
 
     /**
-     * PRIVATE HELPER: BONGKAR JSON KE TABLE
+     * PUBLIC HELPER: BONGKAR JSON KE TABLE
      * Dilengkapi logika pemetaan aspek global ke baris.
      */
-    private function extractJsonToTable(TextAnalysis $analysis)
+    public function extractJsonToTable(TextAnalysis $analysis)
     {
         if (!$analysis->result) return;
 
