@@ -8,6 +8,7 @@ use App\Models\TrainingItem;
 use App\Models\CustomStopword;
 use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class TrainingController extends Controller
@@ -60,20 +61,16 @@ class TrainingController extends Controller
              $this->trainingItemService->extractJsonToTable($analysis);
         }
         
-        // Hitung statistik file
-        $total = $analysis->trainingItems()->count();
-        $corrected = $analysis->trainingItems()->where('is_corrected', true)->count();
-        
-        $accuracy = 0;
-        if($corrected > 0) {
-            $correctMatch = $analysis->trainingItems()
-                ->where('is_corrected', true)
-                ->whereColumn('predicted_sentiment', 'corrected_sentiment')
-                ->count();
-            $accuracy = round(($correctMatch / $corrected) * 100, 1);
-        }
+        // Hitung statistik file + evaluasi model per dokumen
+        $allItems = $analysis->trainingItems()->get();
+        $correctedItems = $allItems->where('is_corrected', true)->values();
 
-        return view('admin.training.show', compact('analysis', 'accuracy', 'total', 'corrected'));
+        $total = $allItems->count();
+        $corrected = $correctedItems->count();
+        $evaluation = $this->buildEvaluationSummary($analysis, $correctedItems);
+        $accuracy = $evaluation['sentiment']['accuracy'] ?? 0;
+
+        return view('admin.training.show', compact('analysis', 'accuracy', 'total', 'corrected', 'evaluation'));
     }
 
     /**
@@ -231,5 +228,237 @@ class TrainingController extends Controller
         }
 
         return back()->with('success', "Berhasil sinkronisasi {$count} file.");
+    }
+
+    private function buildEvaluationSummary(TextAnalysis $analysis, Collection $correctedItems): array
+    {
+        return [
+            'sentiment' => $this->buildSentimentEvaluation($analysis->analysis_type, $correctedItems),
+            'aspect' => $this->buildAspectEvaluation($analysis->analysis_type, $correctedItems),
+            'topic' => $this->buildTopicEvaluation($analysis),
+            'corrected_total' => $correctedItems->count(),
+        ];
+    }
+
+    private function buildSentimentEvaluation(string $analysisType, Collection $correctedItems): ?array
+    {
+        if (!in_array($analysisType, ['sentiment', 'combined'])) {
+            return null;
+        }
+
+        $labels = ['positive', 'neutral', 'negative'];
+        $confusion = [];
+        foreach ($labels as $actual) {
+            foreach ($labels as $predicted) {
+                $confusion[$actual][$predicted] = 0;
+            }
+        }
+
+        $compared = 0;
+        $correct = 0;
+
+        foreach ($correctedItems as $item) {
+            $predicted = strtolower((string) ($item->predicted_sentiment ?? ''));
+            $actual = strtolower((string) ($item->corrected_sentiment ?? ''));
+
+            if (!in_array($predicted, $labels) || !in_array($actual, $labels)) {
+                continue;
+            }
+
+            $confusion[$actual][$predicted]++;
+            $compared++;
+
+            if ($actual === $predicted) {
+                $correct++;
+            }
+        }
+
+        if ($compared === 0) {
+            return [
+                'available' => false,
+                'message' => 'Belum ada data koreksi sentimen untuk evaluasi.',
+            ];
+        }
+
+        $perClass = [];
+        $precisionTotal = 0;
+        $recallTotal = 0;
+        $f1Total = 0;
+
+        foreach ($labels as $label) {
+            $tp = $confusion[$label][$label];
+            $fp = 0;
+            $fn = 0;
+
+            foreach ($labels as $other) {
+                if ($other !== $label) {
+                    $fp += $confusion[$other][$label];
+                    $fn += $confusion[$label][$other];
+                }
+            }
+
+            $precision = ($tp + $fp) > 0 ? $tp / ($tp + $fp) : 0;
+            $recall = ($tp + $fn) > 0 ? $tp / ($tp + $fn) : 0;
+            $f1 = ($precision + $recall) > 0 ? (2 * $precision * $recall) / ($precision + $recall) : 0;
+
+            $perClass[$label] = [
+                'precision' => round($precision * 100, 1),
+                'recall' => round($recall * 100, 1),
+                'f1' => round($f1 * 100, 1),
+                'support' => array_sum($confusion[$label]),
+            ];
+
+            $precisionTotal += $precision;
+            $recallTotal += $recall;
+            $f1Total += $f1;
+        }
+
+        return [
+            'available' => true,
+            'accuracy' => round(($correct / $compared) * 100, 1),
+            'macro_precision' => round(($precisionTotal / count($labels)) * 100, 1),
+            'macro_recall' => round(($recallTotal / count($labels)) * 100, 1),
+            'macro_f1' => round(($f1Total / count($labels)) * 100, 1),
+            'evaluated_rows' => $compared,
+            'per_class' => $perClass,
+            'confusion_matrix' => $confusion,
+            'labels' => $labels,
+        ];
+    }
+
+    private function buildAspectEvaluation(string $analysisType, Collection $correctedItems): ?array
+    {
+        if (!in_array($analysisType, ['aspect', 'combined'])) {
+            return null;
+        }
+
+        $tp = 0;
+        $fp = 0;
+        $fn = 0;
+        $exactMatches = 0;
+        $compared = 0;
+
+        foreach ($correctedItems as $item) {
+            if (is_null($item->corrected_aspects)) {
+                continue;
+            }
+
+            $predicted = $this->normalizeAspects($item->detected_aspects ?? []);
+            $actual = $this->normalizeAspects($item->corrected_aspects ?? []);
+
+            $predSet = array_fill_keys($predicted, true);
+            $actualSet = array_fill_keys($actual, true);
+
+            $intersectCount = count(array_intersect_key($predSet, $actualSet));
+            $tp += $intersectCount;
+            $fp += count(array_diff_key($predSet, $actualSet));
+            $fn += count(array_diff_key($actualSet, $predSet));
+
+            if ($predicted === $actual) {
+                $exactMatches++;
+            }
+
+            $compared++;
+        }
+
+        if ($compared === 0) {
+            return [
+                'available' => false,
+                'message' => 'Belum ada data koreksi aspek untuk evaluasi.',
+            ];
+        }
+
+        $precision = ($tp + $fp) > 0 ? $tp / ($tp + $fp) : 0;
+        $recall = ($tp + $fn) > 0 ? $tp / ($tp + $fn) : 0;
+        $f1 = ($precision + $recall) > 0 ? (2 * $precision * $recall) / ($precision + $recall) : 0;
+
+        return [
+            'available' => true,
+            'exact_match' => round(($exactMatches / $compared) * 100, 1),
+            'precision' => round($precision * 100, 1),
+            'recall' => round($recall * 100, 1),
+            'f1' => round($f1 * 100, 1),
+            'evaluated_rows' => $compared,
+            'tp' => $tp,
+            'fp' => $fp,
+            'fn' => $fn,
+        ];
+    }
+
+    private function buildTopicEvaluation(TextAnalysis $analysis): ?array
+    {
+        if (!in_array($analysis->analysis_type, ['topic', 'combined'])) {
+            return null;
+        }
+
+        $topicResults = $analysis->result->topic_results ?? [];
+        if (is_string($topicResults)) {
+            $topicResults = json_decode($topicResults, true) ?? [];
+        }
+
+        $topics = $topicResults['topics'] ?? [];
+        $wordFrequencies = $topicResults['word_frequencies'] ?? [];
+
+        if (empty($topics)) {
+            return [
+                'available' => false,
+                'message' => 'Data topik belum tersedia untuk evaluasi.',
+            ];
+        }
+
+        $proportions = collect($topics)
+            ->pluck('proportion')
+            ->map(fn ($p) => max(0, (float) $p))
+            ->filter(fn ($p) => $p > 0)
+            ->values();
+
+        $dominantShare = $proportions->isNotEmpty() ? round($proportions->max() * 100, 1) : 0;
+        $avgShare = $proportions->isNotEmpty() ? round(($proportions->sum() / $proportions->count()) * 100, 1) : 0;
+
+        $entropy = 0.0;
+        foreach ($proportions as $p) {
+            $entropy += -($p * log($p));
+        }
+        $maxEntropy = $proportions->count() > 1 ? log($proportions->count()) : 0;
+        $balanceScore = $maxEntropy > 0 ? round(($entropy / $maxEntropy) * 100, 1) : 0;
+
+        $uniqueTopicWords = collect($topics)
+            ->pluck('words')
+            ->flatten()
+            ->filter()
+            ->unique()
+            ->count();
+
+        return [
+            'available' => true,
+            'topic_count' => count($topics),
+            'dominant_topic_share' => $dominantShare,
+            'average_topic_share' => $avgShare,
+            'distribution_balance' => $balanceScore,
+            'unique_topic_words' => $uniqueTopicWords,
+            'word_frequency_terms' => is_array($wordFrequencies) ? count($wordFrequencies) : 0,
+        ];
+    }
+
+    private function normalizeAspects(array|string|null $aspects): array
+    {
+        if (is_string($aspects)) {
+            $decoded = json_decode($aspects, true);
+            $aspects = is_array($decoded) ? $decoded : explode(',', $aspects);
+        }
+
+        if (!is_array($aspects)) {
+            return [];
+        }
+
+        $normalized = array_map(
+            fn ($aspect) => strtolower(trim((string) $aspect)),
+            $aspects
+        );
+
+        $normalized = array_values(array_filter($normalized, fn ($aspect) => $aspect !== ''));
+        sort($normalized);
+
+        return array_values(array_unique($normalized));
     }
 }

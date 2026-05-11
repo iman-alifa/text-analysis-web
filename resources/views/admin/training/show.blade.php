@@ -80,6 +80,138 @@
     </div>
     @endif
 
+    @if(!empty($evaluation))
+    <div class="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+        <div class="mb-4">
+            <h3 class="text-lg font-bold text-gray-900">Rangkuman Evaluasi Model (Per Dokumen)</h3>
+            <p class="text-sm text-gray-500">
+                Evaluasi dihitung dari data yang sudah dikoreksi pada dokumen ini
+                ({{ $evaluation['corrected_total'] ?? 0 }} baris tervalidasi).
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            @if(!empty($evaluation['sentiment']))
+            <div class="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
+                <h4 class="font-semibold text-blue-900 mb-3">Klasifikasi Sentimen</h4>
+                @if(($evaluation['sentiment']['available'] ?? false))
+                    <div class="grid grid-cols-2 gap-2 text-sm mb-3">
+                        <div class="bg-white rounded border border-blue-100 p-2">
+                            <p class="text-gray-500 text-xs">Accuracy</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['accuracy'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-blue-100 p-2">
+                            <p class="text-gray-500 text-xs">Macro F1</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['macro_f1'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-blue-100 p-2">
+                            <p class="text-gray-500 text-xs">Macro Precision</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['macro_precision'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-blue-100 p-2">
+                            <p class="text-gray-500 text-xs">Macro Recall</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['macro_recall'] }}%</p>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-xs border border-blue-100 rounded">
+                            <thead class="bg-blue-100/70 text-blue-900">
+                                <tr>
+                                    <th class="px-2 py-1 text-left">Kelas</th>
+                                    <th class="px-2 py-1 text-right">P</th>
+                                    <th class="px-2 py-1 text-right">R</th>
+                                    <th class="px-2 py-1 text-right">F1</th>
+                                    <th class="px-2 py-1 text-right">Support</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white">
+                                @foreach(($evaluation['sentiment']['per_class'] ?? []) as $label => $metrics)
+                                <tr class="border-t border-blue-50">
+                                    <td class="px-2 py-1 font-medium capitalize">{{ $label }}</td>
+                                    <td class="px-2 py-1 text-right">{{ $metrics['precision'] }}%</td>
+                                    <td class="px-2 py-1 text-right">{{ $metrics['recall'] }}%</td>
+                                    <td class="px-2 py-1 text-right">{{ $metrics['f1'] }}%</td>
+                                    <td class="px-2 py-1 text-right">{{ $metrics['support'] }}</td>
+                                </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @else
+                    <p class="text-sm text-blue-700">{{ $evaluation['sentiment']['message'] ?? 'Data tidak tersedia.' }}</p>
+                @endif
+            </div>
+            @endif
+
+            @if(!empty($evaluation['aspect']))
+            <div class="rounded-lg border border-orange-100 bg-orange-50/40 p-4">
+                <h4 class="font-semibold text-orange-900 mb-3">Ekstraksi Aspek</h4>
+                @if(($evaluation['aspect']['available'] ?? false))
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div class="bg-white rounded border border-orange-100 p-2">
+                            <p class="text-gray-500 text-xs">Exact Match</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['exact_match'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-orange-100 p-2">
+                            <p class="text-gray-500 text-xs">F1</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['f1'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-orange-100 p-2">
+                            <p class="text-gray-500 text-xs">Precision</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['precision'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-orange-100 p-2">
+                            <p class="text-gray-500 text-xs">Recall</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['recall'] }}%</p>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-xs text-orange-800">
+                        <span class="font-medium">TP:</span> {{ $evaluation['aspect']['tp'] }} &bull;
+                        <span class="font-medium">FP:</span> {{ $evaluation['aspect']['fp'] }} &bull;
+                        <span class="font-medium">FN:</span> {{ $evaluation['aspect']['fn'] }} &bull;
+                        <span class="font-medium">Sample:</span> {{ $evaluation['aspect']['evaluated_rows'] }} baris
+                    </div>
+                @else
+                    <p class="text-sm text-orange-700">{{ $evaluation['aspect']['message'] ?? 'Data tidak tersedia.' }}</p>
+                @endif
+            </div>
+            @endif
+
+            @if(!empty($evaluation['topic']))
+            <div class="rounded-lg border border-indigo-100 bg-indigo-50/40 p-4">
+                <h4 class="font-semibold text-indigo-900 mb-3">Identifikasi Topik</h4>
+                @if(($evaluation['topic']['available'] ?? false))
+                    <div class="grid grid-cols-2 gap-2 text-sm">
+                        <div class="bg-white rounded border border-indigo-100 p-2">
+                            <p class="text-gray-500 text-xs">Jumlah Topik</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['topic_count'] }}</p>
+                        </div>
+                        <div class="bg-white rounded border border-indigo-100 p-2">
+                            <p class="text-gray-500 text-xs">Dominant Topic Share</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['dominant_topic_share'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-indigo-100 p-2">
+                            <p class="text-gray-500 text-xs">Rata-rata Share</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['average_topic_share'] }}%</p>
+                        </div>
+                        <div class="bg-white rounded border border-indigo-100 p-2">
+                            <p class="text-gray-500 text-xs">Keseimbangan Distribusi</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['distribution_balance'] }}%</p>
+                        </div>
+                    </div>
+                    <div class="mt-3 text-xs text-indigo-800">
+                        <span class="font-medium">Kata unik topik:</span> {{ $evaluation['topic']['unique_topic_words'] }} &bull;
+                        <span class="font-medium">Term word-frequency:</span> {{ $evaluation['topic']['word_frequency_terms'] }}
+                    </div>
+                @else
+                    <p class="text-sm text-indigo-700">{{ $evaluation['topic']['message'] ?? 'Data tidak tersedia.' }}</p>
+                @endif
+            </div>
+            @endif
+        </div>
+    </div>
+    @endif
+
     {{-- JIKA TIPE ANALISIS ADALAH TOPIC MODELING, KITA SEMBUNYIKAN BAGIAN LIST DATA --}}
     @if($analysis->analysis_type !== 'topic')
     
