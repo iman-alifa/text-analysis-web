@@ -198,7 +198,7 @@
                             <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_recall'] }}%</p>
                         </div>
                     </div>
-                    <p class="text-[11px] text-blue-800 mt-2">Weighted metrics memberikan bobot proporsional per kelas sentimen, jadi evaluasi lebih akurat saat distribusi label tidak seimbang.</p>
+                    <p class="text-[11px] text-blue-800 mt-2">Weighted metrics memberikan bobot proporsional untuk tiap kelas sentimen, sehingga evaluasi lebih akurat saat distribusi label tidak seimbang.</p>
                 @else
                     <p class="text-sm text-blue-700">{{ $evaluation['sentiment']['message'] ?? 'Data sentimen belum tersedia.' }}</p>
                 @endif

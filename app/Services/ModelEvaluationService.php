@@ -188,7 +188,7 @@ class ModelEvaluationService
         $coherence = $this->calculateTopicCoherence($topics, $corpusTexts);
 
         // Batas ini dipakai sebagai rule-of-thumb internal untuk UMass coherence:
-        // skor yang lebih tinggi (kurang negatif, makin mendekati 0) menandakan topik lebih koheren.
+        // nilai yang lebih dekat ke 0 (mis. -0.5) dianggap lebih koheren dibanding nilai yang lebih negatif (mis. -3.0).
         $coherenceLabel = 'Rendah';
         if ($coherence['score'] >= -1.0) {
             $coherenceLabel = 'Baik';
