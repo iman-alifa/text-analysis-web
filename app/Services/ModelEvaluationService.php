@@ -295,8 +295,10 @@ class ModelEvaluationService
                         continue;
                     }
 
-                    // UMass topic coherence berbasis co-occurrence dokumen:
-                    // log((D(w_i, w_j) + 1) / D(w_j)), nilai lebih tinggi = topik lebih koheren.
+                    // UMass topic coherence (Mimno et al., 2011):
+                    // D(w_i, w_j) = jumlah dokumen yang memuat kedua kata,
+                    // D(w_j) = jumlah dokumen yang memuat kata pembanding.
+                    // Rumus: log((D(w_i, w_j) + 1) / D(w_j)); nilai lebih tinggi = topik lebih koheren.
                     $topicPairScores[] = log(($dW1W2 + 1) / $dW2);
                 }
             }
