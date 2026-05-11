@@ -198,7 +198,7 @@
                             <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_recall'] }}%</p>
                         </div>
                     </div>
-                    <p class="text-[11px] text-blue-800 mt-2">Weighted dipakai agar evaluasi lebih adil untuk data sentimen yang tidak seimbang.</p>
+                    <p class="text-[11px] text-blue-800 mt-2">Weighted digunakan agar evaluasi lebih adil untuk data sentimen yang tidak seimbang.</p>
                 @else
                     <p class="text-sm text-blue-700">{{ $evaluation['sentiment']['message'] ?? 'Data sentimen belum tersedia.' }}</p>
                 @endif
@@ -303,6 +303,11 @@
                 $badgeLabel  = $isLow  ? 'Rendah'        : ($isMod ? 'Sedang'       : 'Tinggi');
                 $cardBorder  = $isLow  ? 'border-red-200'              : ($isMod ? 'border-yellow-200'            : 'border-gray-100');
                 $delay       = ($index % 10) * 0.04;
+                $sentimentOptions = [
+                    'positive' => ['😊', 'text-green-700', 'border-green-300'],
+                    'neutral' => ['😐', 'text-gray-600', 'border-gray-300'],
+                    'negative' => ['😞', 'text-red-700', 'border-red-300'],
+                ];
             @endphp
 
             <div class="item-card bg-white rounded-xl shadow-sm border {{ $cardBorder }} p-5 fade-in-up {{ $item->is_corrected ? 'opacity-75' : '' }}"
@@ -366,7 +371,7 @@
                         <div>
                             <p class="text-xs font-medium text-gray-600 mb-1.5">Koreksi Sentimen</p>
                             <div class="flex gap-1.5">
-                                @foreach(['positive' => ['😊','text-green-700','border-green-300'], 'neutral' => ['😐','text-gray-600','border-gray-300'], 'negative' => ['😞','text-red-700','border-red-300']] as $sent => [$emoji, $textColor, $borderColor])
+                                @foreach($sentimentOptions as $sent => [$emoji, $textColor, $borderColor])
                                 <label class="flex-1 cursor-pointer">
                                     <input type="radio"
                                            name="corrections[{{ $index }}][corrected_sentiment]"
