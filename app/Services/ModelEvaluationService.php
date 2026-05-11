@@ -187,8 +187,8 @@ class ModelEvaluationService
         $corpusTexts = $this->resolveCorpusTexts($analysis, $allItems);
         $coherence = $this->calculateTopicCoherence($topics, $corpusTexts);
 
-        // Batas ini dipakai sebagai rule-of-thumb internal:
-        // semakin mendekati 0 berarti keterkaitan kata antartopik makin konsisten.
+        // Batas ini dipakai sebagai rule-of-thumb internal untuk UMass coherence:
+        // skor yang lebih tinggi (kurang negatif, makin mendekati 0) menandakan topik lebih koheren.
         $coherenceLabel = 'Rendah';
         if ($coherence['score'] >= -1.0) {
             $coherenceLabel = 'Baik';
@@ -295,7 +295,7 @@ class ModelEvaluationService
                         continue;
                     }
 
-                    // UMass topic coherence berbasis ko-occurence dokumen:
+                    // UMass topic coherence berbasis co-occurrence dokumen:
                     // log((D(w_i, w_j) + 1) / D(w_j)), nilai lebih tinggi = topik lebih koheren.
                     $topicPairScores[] = log(($dW1W2 + 1) / $dW2);
                 }

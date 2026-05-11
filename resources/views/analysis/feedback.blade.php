@@ -109,7 +109,7 @@
                       d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
             <div class="text-sm text-blue-800 space-y-1">
-                <p class="font-semibold">Apa itu Margin of Confidence?</p>
+                <p class="font-semibold">Apa itu Confidence Score?</p>
                 <p>
                     Nilai <strong>confidence</strong> (0 – 1) menunjukkan seberapa yakin model terhadap prediksinya.
                     Nilai mendekati <span class="font-medium text-red-600">0 (merah)</span> berarti model ragu-ragu —
@@ -198,7 +198,7 @@
                             <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_recall'] }}%</p>
                         </div>
                     </div>
-                    <p class="text-[11px] text-blue-800 mt-2">Weighted digunakan agar evaluasi lebih adil untuk data sentimen yang tidak seimbang.</p>
+                    <p class="text-[11px] text-blue-800 mt-2">Weighted metrics memberi bobot proporsional per kelas sentimen, jadi evaluasi lebih akurat saat distribusi label tidak seimbang.</p>
                 @else
                     <p class="text-sm text-blue-700">{{ $evaluation['sentiment']['message'] ?? 'Data sentimen belum tersedia.' }}</p>
                 @endif
