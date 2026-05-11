@@ -449,6 +449,7 @@ class TrainingController extends Controller
     {
         if (is_string($aspects)) {
             $decoded = json_decode($aspects, true);
+            // Fallback untuk data lama/non-JSON yang disimpan sebagai string CSV "a,b,c".
             $aspects = is_array($decoded) ? $decoded : explode(',', $aspects);
         }
 
