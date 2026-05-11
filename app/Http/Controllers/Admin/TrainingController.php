@@ -415,11 +415,16 @@ class TrainingController extends Controller
         $dominantShare = $proportions->isNotEmpty() ? round($proportions->max() * 100, 1) : 0;
         $avgShare = $proportions->isNotEmpty() ? round(($proportions->sum() / $proportions->count()) * 100, 1) : 0;
 
+        // Shannon entropy untuk mengukur seberapa seimbang distribusi proporsi topik.
+        // Semakin tinggi entropy, semakin merata distribusi topik di dokumen.
         $entropy = 0.0;
         foreach ($proportions as $p) {
-            $entropy += -($p * log($p));
+            if ($p < 1e-10) {
+                continue;
+            }
+            $entropy += -($p * log($p, M_E));
         }
-        $maxEntropy = $proportions->count() > 1 ? log($proportions->count()) : 0;
+        $maxEntropy = $proportions->count() > 1 ? log($proportions->count(), M_E) : 0;
         $balanceScore = $maxEntropy > 0 ? round(($entropy / $maxEntropy) * 100, 1) : 0;
 
         $uniqueTopicWords = collect($topics)
