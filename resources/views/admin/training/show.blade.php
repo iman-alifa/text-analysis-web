@@ -101,16 +101,16 @@
                             <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['accuracy'] }}%</p>
                         </div>
                         <div class="bg-white rounded border border-blue-100 p-2">
-                            <p class="text-gray-500 text-xs">Macro F1</p>
-                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['macro_f1'] }}%</p>
+                            <p class="text-gray-500 text-xs">Weighted F1</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_f1'] }}%</p>
                         </div>
                         <div class="bg-white rounded border border-blue-100 p-2">
-                            <p class="text-gray-500 text-xs">Macro Precision</p>
-                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['macro_precision'] }}%</p>
+                            <p class="text-gray-500 text-xs">Weighted Precision</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_precision'] }}%</p>
                         </div>
                         <div class="bg-white rounded border border-blue-100 p-2">
-                            <p class="text-gray-500 text-xs">Macro Recall</p>
-                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['macro_recall'] }}%</p>
+                            <p class="text-gray-500 text-xs">Weighted Recall</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_recall'] }}%</p>
                         </div>
                     </div>
                     <div class="overflow-x-auto">
@@ -187,16 +187,16 @@
                             <p class="font-bold text-indigo-700">{{ $evaluation['topic']['topic_count'] }}</p>
                         </div>
                         <div class="bg-white rounded border border-indigo-100 p-2">
-                            <p class="text-gray-500 text-xs">Dominant Topic Share</p>
-                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['dominant_topic_share'] }}%</p>
+                            <p class="text-gray-500 text-xs">Coherence Score</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_score'] }}</p>
                         </div>
                         <div class="bg-white rounded border border-indigo-100 p-2">
-                            <p class="text-gray-500 text-xs">Rata-rata Share</p>
-                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['average_topic_share'] }}%</p>
+                            <p class="text-gray-500 text-xs">Kualitas Topik</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_label'] }}</p>
                         </div>
                         <div class="bg-white rounded border border-indigo-100 p-2">
-                            <p class="text-gray-500 text-xs">Keseimbangan Distribusi</p>
-                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['distribution_balance'] }}%</p>
+                            <p class="text-gray-500 text-xs">Pasangan Kata Tervalidasi</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_pairs'] }}</p>
                         </div>
                     </div>
                     <div class="mt-3 text-xs text-indigo-800">

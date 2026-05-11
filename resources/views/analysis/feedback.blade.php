@@ -165,6 +165,113 @@
         </div>
     </div>
 
+    @if(!empty($evaluation))
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 fade-in-up" style="animation-delay:0.18s">
+        <div>
+            <h3 class="text-lg font-bold text-gray-900">Rangkuman Evaluasi Model Dokumen Ini</h3>
+            <p class="text-sm text-gray-500">
+                Metrik dihitung dari data yang sudah dikoreksi.
+                <span class="font-medium text-indigo-600">{{ $evaluation['corrected_total'] ?? 0 }} baris tervalidasi</span>.
+            </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            @if(!empty($evaluation['sentiment']))
+            <div class="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                <h4 class="font-semibold text-blue-900 text-sm mb-3">Klasifikasi Sentimen</h4>
+                @if($evaluation['sentiment']['available'] ?? false)
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-white border border-blue-100 rounded-lg p-2">
+                            <p class="text-gray-500">Accuracy</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['accuracy'] }}%</p>
+                        </div>
+                        <div class="bg-white border border-blue-100 rounded-lg p-2">
+                            <p class="text-gray-500">Weighted F1</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_f1'] }}%</p>
+                        </div>
+                        <div class="bg-white border border-blue-100 rounded-lg p-2">
+                            <p class="text-gray-500">Weighted Precision</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_precision'] }}%</p>
+                        </div>
+                        <div class="bg-white border border-blue-100 rounded-lg p-2">
+                            <p class="text-gray-500">Weighted Recall</p>
+                            <p class="font-bold text-blue-700">{{ $evaluation['sentiment']['weighted_recall'] }}%</p>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-blue-800 mt-2">Weighted dipakai agar evaluasi lebih adil untuk data sentimen yang tidak seimbang.</p>
+                @else
+                    <p class="text-sm text-blue-700">{{ $evaluation['sentiment']['message'] ?? 'Data sentimen belum tersedia.' }}</p>
+                @endif
+            </div>
+            @endif
+
+            @if(!empty($evaluation['aspect']))
+            <div class="rounded-xl border border-orange-100 bg-orange-50/60 p-4">
+                <h4 class="font-semibold text-orange-900 text-sm mb-3">Ekstraksi Aspek</h4>
+                @if($evaluation['aspect']['available'] ?? false)
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-white border border-orange-100 rounded-lg p-2">
+                            <p class="text-gray-500">Exact Match</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['exact_match'] }}%</p>
+                        </div>
+                        <div class="bg-white border border-orange-100 rounded-lg p-2">
+                            <p class="text-gray-500">F1</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['f1'] }}%</p>
+                        </div>
+                        <div class="bg-white border border-orange-100 rounded-lg p-2">
+                            <p class="text-gray-500">Precision</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['precision'] }}%</p>
+                        </div>
+                        <div class="bg-white border border-orange-100 rounded-lg p-2">
+                            <p class="text-gray-500">Recall</p>
+                            <p class="font-bold text-orange-700">{{ $evaluation['aspect']['recall'] }}%</p>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-orange-800 mt-2">
+                        TP: {{ $evaluation['aspect']['tp'] }} &bull;
+                        FP: {{ $evaluation['aspect']['fp'] }} &bull;
+                        FN: {{ $evaluation['aspect']['fn'] }}
+                    </p>
+                @else
+                    <p class="text-sm text-orange-700">{{ $evaluation['aspect']['message'] ?? 'Data aspek belum tersedia.' }}</p>
+                @endif
+            </div>
+            @endif
+
+            @if(!empty($evaluation['topic']))
+            <div class="rounded-xl border border-indigo-100 bg-indigo-50/60 p-4">
+                <h4 class="font-semibold text-indigo-900 text-sm mb-3">Identifikasi Topik</h4>
+                @if($evaluation['topic']['available'] ?? false)
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-white border border-indigo-100 rounded-lg p-2">
+                            <p class="text-gray-500">Jumlah Topik</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['topic_count'] }}</p>
+                        </div>
+                        <div class="bg-white border border-indigo-100 rounded-lg p-2">
+                            <p class="text-gray-500">Coherence Score</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_score'] }}</p>
+                        </div>
+                        <div class="bg-white border border-indigo-100 rounded-lg p-2">
+                            <p class="text-gray-500">Kualitas Topik</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_label'] }}</p>
+                        </div>
+                        <div class="bg-white border border-indigo-100 rounded-lg p-2">
+                            <p class="text-gray-500">Pasangan Kata</p>
+                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_pairs'] }}</p>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-indigo-800 mt-2">
+                        Semakin tinggi coherence score, semakin konsisten keterkaitan kata dalam topik.
+                    </p>
+                @else
+                    <p class="text-sm text-indigo-700">{{ $evaluation['topic']['message'] ?? 'Data topik belum tersedia.' }}</p>
+                @endif
+            </div>
+            @endif
+        </div>
+    </div>
+    @endif
+
     {{-- ═══════════════════════════════════════════════════════════════════ --}}
     {{-- FEEDBACK FORM                                                      --}}
     {{-- ═══════════════════════════════════════════════════════════════════ --}}

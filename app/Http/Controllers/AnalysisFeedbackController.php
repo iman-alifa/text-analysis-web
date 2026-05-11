@@ -4,12 +4,16 @@ namespace App\Http\Controllers;
 
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
+use App\Services\ModelEvaluationService;
 use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
 
 class AnalysisFeedbackController extends Controller
 {
-    public function __construct(private TrainingItemService $trainingItemService) {}
+    public function __construct(
+        private TrainingItemService $trainingItemService,
+        private ModelEvaluationService $modelEvaluationService
+    ) {}
 
     /**
      * Show the feedback form for the given analysis.
@@ -30,13 +34,15 @@ class AnalysisFeedbackController extends Controller
         $items = $analysis->trainingItems()
             ->orderBy('confidence_score', 'asc')
             ->get();
+        $correctedItems = $items->where('is_corrected', true)->values();
+        $evaluation = $this->modelEvaluationService->buildEvaluationSummary($analysis, $correctedItems, $items);
 
         // Count how many corrections this user has already made (across all analyses).
         $userCorrectionCount = TrainingItem::where('verified_by', auth()->id())
             ->where('is_corrected', true)
             ->count();
 
-        return view('analysis.feedback', compact('analysis', 'items', 'userCorrectionCount'));
+        return view('analysis.feedback', compact('analysis', 'items', 'userCorrectionCount', 'evaluation'));
     }
 
     /**
