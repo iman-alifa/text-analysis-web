@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\LandingController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\AnalysisController;
+use App\Http\Controllers\AnalysisFeedbackController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\Admin\TrainingController;
 use App\Http\Controllers\YouTubeScraperController;
@@ -41,6 +42,10 @@ Route::middleware(['auth', 'verified'])->group(function () {
         
         // Delete
         Route::delete('/{id}', [AnalysisController::class, 'destroy'])->name('destroy');
+
+        // Feedback / Active Learning (user's own analyses only)
+        Route::get('/{id}/feedback', [AnalysisFeedbackController::class, 'create'])->name('feedback');
+        Route::post('/{id}/feedback', [AnalysisFeedbackController::class, 'store'])->name('feedback.store');
     });
 
     Route::prefix('youtube')->name('youtube.')->group(function () {
