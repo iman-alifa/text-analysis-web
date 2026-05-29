@@ -6,11 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
 use App\Models\CustomStopword;
+use App\Services\ModelEvaluationService;
+use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class TrainingController extends Controller
 {
+    public function __construct(
+        private TrainingItemService $trainingItemService,
+        private ModelEvaluationService $modelEvaluationService
+    ) {}
     /**
      * HALAMAN 1: INDEX (DASHBOARD)
      */
@@ -55,23 +61,19 @@ class TrainingController extends Controller
         // LOGIC "LAZY LOAD":
         // Jika tabel training_items kosong untuk file ini, ekstrak dari JSON sekarang.
         if ($analysis->trainingItems()->count() === 0) {
-             $this->extractJsonToTable($analysis);
+             $this->trainingItemService->extractJsonToTable($analysis);
         }
         
-        // Hitung statistik file
-        $total = $analysis->trainingItems()->count();
-        $corrected = $analysis->trainingItems()->where('is_corrected', true)->count();
-        
-        $accuracy = 0;
-        if($corrected > 0) {
-            $correctMatch = $analysis->trainingItems()
-                ->where('is_corrected', true)
-                ->whereColumn('predicted_sentiment', 'corrected_sentiment')
-                ->count();
-            $accuracy = round(($correctMatch / $corrected) * 100, 1);
-        }
+        // Hitung statistik file + evaluasi model per dokumen
+        $allItems = $analysis->trainingItems()->get();
+        $correctedItems = $allItems->where('is_corrected', true)->values();
 
-        return view('admin.training.show', compact('analysis', 'accuracy', 'total', 'corrected'));
+        $total = $allItems->count();
+        $corrected = $correctedItems->count();
+        $evaluation = $this->modelEvaluationService->buildEvaluationSummary($analysis, $correctedItems, $allItems);
+        $accuracy = $evaluation['sentiment']['accuracy'] ?? 0;
+
+        return view('admin.training.show', compact('analysis', 'accuracy', 'total', 'corrected', 'evaluation'));
     }
 
     /**
@@ -224,105 +226,10 @@ class TrainingController extends Controller
         foreach ($analyses as $analysis) {
             if ($analysis->trainingItems()->exists()) continue;
             
-            $this->extractJsonToTable($analysis);
+            $this->trainingItemService->extractJsonToTable($analysis);
             $count++;
         }
 
         return back()->with('success', "Berhasil sinkronisasi {$count} file.");
-    }
-
-    /**
-     * PRIVATE HELPER: BONGKAR JSON KE TABLE
-     * Dilengkapi logika pemetaan aspek global ke baris.
-     */
-    private function extractJsonToTable(TextAnalysis $analysis)
-    {
-        if (!$analysis->result) return;
-
-        // 1. SIAPKAN KAMUS ASPEK (Dari data global aspect_results)
-        // Struktur aspect_results: [{"aspect": "hasil", ...}, {"aspect": "harga", ...}]
-        $globalAspectsRaw = $analysis->result->aspect_results ?? [];
-        if (is_string($globalAspectsRaw)) {
-            $globalAspectsRaw = json_decode($globalAspectsRaw, true);
-        }
-
-        $aspectKeywords = [];
-        if (is_array($globalAspectsRaw)) {
-            foreach ($globalAspectsRaw as $item) {
-                if (isset($item['aspect'])) {
-                    $aspectKeywords[] = strtolower($item['aspect']);
-                }
-            }
-        }
-
-        // 2. SIAPKAN DATA BARIS (Dari kolom predictions)
-        // Struktur predictions: [{"text": "...", "sentiment": "...", ...}]
-        $sourceData = $analysis->result->predictions 
-                   ?? $analysis->result->result 
-                   ?? []; 
-
-        $rows = [];
-        if (is_string($sourceData)) {
-            $rows = json_decode($sourceData, true);
-        } elseif (is_array($sourceData)) {
-            $rows = $sourceData;
-        }
-
-        // Handle wrapper "results" jika ada
-        if (isset($rows['results']) && is_array($rows['results'])) {
-            $rows = $rows['results'];
-        }
-
-        if (!is_array($rows) || empty($rows)) return;
-
-        $batch = [];
-        $now = now();
-
-        foreach ($rows as $row) {
-            if (empty($row['text'])) continue;
-
-            // 3. Normalisasi Sentimen & Confidence
-            $sentimentLabel = 'neutral';
-            if (isset($row['sentiment'])) {
-                $sentimentLabel = is_array($row['sentiment']) 
-                    ? ($row['sentiment']['label'] ?? 'neutral') 
-                    : $row['sentiment'];
-            }
-            $confidence = $row['confidence'] ?? $row['score'] ?? 0;
-
-            // 4. LOGIKA PENTING: MAPPING ASPEK
-            // Jika baris tidak punya aspek, cari dari kamus global
-            $rowAspects = $row['aspects'] ?? [];
-
-            if (empty($rowAspects) && !empty($aspectKeywords)) {
-                $textLower = strtolower($row['text']);
-                foreach ($aspectKeywords as $keyword) {
-                    // Regex \b untuk mencocokkan kata utuh (misal: "app" tidak match "apple")
-                    if (preg_match("/\b" . preg_quote($keyword, '/') . "\b/i", $textLower)) {
-                        $rowAspects[] = $keyword;
-                    }
-                }
-            }
-
-            $batch[] = [
-                'text_analysis_id' => $analysis->id,
-                'text_content' => $row['text'],
-                'predicted_sentiment' => strtolower($sentimentLabel),
-                'confidence_score' => (float) $confidence,
-                'detected_aspects' => json_encode(array_values(array_unique($rowAspects))), // Hapus duplikat
-                'is_corrected' => false,
-                'created_at' => $now,
-                'updated_at' => $now,
-            ];
-
-            if (count($batch) >= 200) {
-                TrainingItem::insert($batch);
-                $batch = [];
-            }
-        }
-        
-        if (!empty($batch)) {
-            TrainingItem::insert($batch);
-        }
     }
 }

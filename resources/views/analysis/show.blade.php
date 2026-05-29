@@ -154,11 +154,31 @@
                 </svg>
                 Export CSV
             </a>
+            <a href="{{ route('analysis.feedback', $analysis->id) }}"
+               class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
+                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                Berikan Feedback
+            </a>
         </div>
         @endif
     </div>
 
     <!-- Status Alert & Content -->
+    @if(session('feedback_success'))
+    <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-5 flex items-start gap-3">
+        <svg class="w-6 h-6 text-indigo-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        <div>
+            <p class="font-semibold text-indigo-900">Koreksi Berhasil Disimpan!</p>
+            <p class="text-sm text-indigo-700 mt-0.5">{{ session('feedback_success') }}</p>
+        </div>
+    </div>
+    @endif
+
     @if($analysis->status == 'processing')
         <!-- Alert Box -->
         <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-6">
