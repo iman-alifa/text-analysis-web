@@ -517,9 +517,11 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                                     <p>📊 <strong>Total records:</strong> <span id="preview-total">-</span></p>
                                     <p>✅ <strong>Valid records:</strong> <span id="preview-valid">-</span></p>
                                 </div>
-                                <div id="preview-sample" class="mt-3 bg-white rounded p-3 text-sm">
-                                    <p class="font-medium text-gray-700 mb-2">Sample 3 baris pertama (dari kolom terpilih):</p>
-                                    <div id="preview-content" class="space-y-1 font-mono text-xs text-gray-600">
+                                <div id="preview-sample" class="mt-3 bg-white rounded-lg p-0 border border-gray-200 overflow-hidden text-sm w-full">
+                                    <div class="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                                        <p class="font-medium text-gray-700" id="preview-title">Sample Data (3 Baris Pertama)</p>
+                                    </div>
+                                    <div id="preview-content" class="p-0 overflow-x-auto w-full">
                                         <!-- Will be populated by JavaScript -->
                                     </div>
                                 </div>
@@ -911,15 +913,22 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                 columnSelect.appendChild(option);
             });
             
-            // Auto-select first column that likely contains text
-            const textColumns = data.headers.filter(h => 
-                h.toLowerCase().includes('text') || 
-                h.toLowerCase().includes('review') || 
-                h.toLowerCase().includes('comment') ||
-                h.toLowerCase().includes('content') ||
-                h.toLowerCase().includes('komentar') ||
-                h.toLowerCase().includes('ulasan')
-            );
+            // Auto-select first column that likely contains text (excluding IDs, links, dates)
+            const textColumns = data.headers.filter(h => {
+                const lower = h.toLowerCase();
+                // Exclude columns that are clearly IDs, links, dates, or numeric keys
+                if (lower === 'id' || lower.endsWith('_id') || lower.endsWith(' id') || 
+                    lower.includes('url') || lower.includes('link') || 
+                    lower.includes('date') || lower.includes('time') || lower.includes('tanggal')) {
+                    return false;
+                }
+                return lower.includes('text') || 
+                       lower.includes('review') || 
+                       lower.includes('comment') ||
+                       lower.includes('content') ||
+                       lower.includes('komentar') ||
+                       lower.includes('ulasan');
+            });
             
             if (textColumns.length > 0) {
                 columnSelect.value = textColumns[0];
@@ -957,41 +966,71 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
             const previewContent = document.getElementById('preview-content');
             previewContent.innerHTML = '';
             
-            data.sample.slice(0, 3).forEach((row, index) => {
-                const div = document.createElement('div');
-                div.className = 'text-gray-700';
+            if (typeof data.sample[0] === 'object' && data.sample[0] !== null) {
+                // Render as Table
+                let tableHtml = '<table class="min-w-full divide-y divide-gray-200 text-left text-sm whitespace-nowrap">';
                 
-                let textToShow = '';
+                // Headers
+                tableHtml += '<thead class="bg-gray-50"><tr>';
+                tableHtml += '<th scope="col" class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-10">#</th>';
                 
-                if (typeof row === 'object') {
-                    // For CSV/Excel with headers
-                    if (hasHeader && selectedColumn) {
-                        // Show selected column by name
-                        textToShow = row[selectedColumn] || Object.values(row)[0];
-                    } else if (!hasHeader && selectedColumn !== undefined && !isNaN(selectedColumn)) {
-                        // Show selected column by index
-                        const values = Object.values(row);
-                        textToShow = values[selectedColumn] || values[0];
-                    } else {
-                        // Fallback to first column
-                        textToShow = Object.values(row)[0];
-                    }
-                } else {
-                    // For plain text
-                    textToShow = row;
-                }
+                const headers = data.headers || Object.keys(data.sample[0]);
+                headers.forEach((header, index) => {
+                    const isSelected = (hasHeader && header === selectedColumn) || (!hasHeader && index === selectedColumn);
+                    const bgClass = isSelected ? 'bg-blue-100 text-blue-800' : 'text-gray-500';
+                    tableHtml += `<th scope="col" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider ${bgClass}">
+                        ${header} ${isSelected ? '<span class="ml-1">✓</span>' : ''}
+                    </th>`;
+                });
+                tableHtml += '</tr></thead>';
                 
-                div.textContent = `${index + 1}. ${textToShow}`;
-                previewContent.appendChild(div);
-            });
+                // Body
+                tableHtml += '<tbody class="bg-white divide-y divide-gray-200">';
+                data.sample.slice(0, 3).forEach((row, index) => {
+                    tableHtml += `<tr class="hover:bg-gray-50 transition-colors">`;
+                    tableHtml += `<td class="px-4 py-3 text-gray-500 text-xs">${index + 1}</td>`;
+                    
+                    headers.forEach((header, hIndex) => {
+                        const val = row[header] !== undefined ? row[header] : (Object.values(row)[hIndex] || '');
+                        // Truncate for display
+                        const displayVal = String(val).length > 80 ? String(val).substring(0, 80) + '...' : val;
+                        
+                        const isSelected = (hasHeader && header === selectedColumn) || (!hasHeader && hIndex === selectedColumn);
+                        const textClass = isSelected ? 'font-medium text-blue-900 bg-blue-50/50' : 'text-gray-700';
+                        
+                        tableHtml += `<td class="px-4 py-3 ${textClass}" title="${String(val).replace(/"/g, '&quot;')}">
+                            ${displayVal}
+                        </td>`;
+                    });
+                    
+                    tableHtml += `</tr>`;
+                });
+                tableHtml += '</tbody></table>';
+                
+                previewContent.innerHTML = tableHtml;
+            } else {
+                // Render as Plain Text List
+                const listContainer = document.createElement('div');
+                listContainer.className = 'p-4 space-y-2';
+                
+                data.sample.slice(0, 3).forEach((row, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'text-gray-700 bg-gray-50 p-3 rounded-lg border border-gray-100 font-mono text-xs break-words whitespace-pre-wrap';
+                    div.textContent = `${index + 1}. ${row}`;
+                    listContainer.appendChild(div);
+                });
+                previewContent.appendChild(listContainer);
+            }
             
             // Show message if no column selected
-            if ((!hasHeader && (selectedColumn === undefined || isNaN(selectedColumn))) || 
-                (hasHeader && !selectedColumn)) {
-                const warningDiv = document.createElement('div');
-                warningDiv.className = 'text-yellow-600 text-xs mt-2 italic';
-                warningDiv.textContent = '⚠️ Menampilkan kolom pertama. Silakan pilih kolom yang ingin dianalisis.';
-                previewContent.appendChild(warningDiv);
+            if (typeof data.sample[0] === 'object' && data.sample[0] !== null) {
+                if ((!hasHeader && (selectedColumn === undefined || isNaN(selectedColumn))) || 
+                    (hasHeader && !selectedColumn)) {
+                    const warningDiv = document.createElement('div');
+                    warningDiv.className = 'bg-yellow-50 text-yellow-700 p-3 text-sm border-t border-yellow-100 flex items-center';
+                    warningDiv.innerHTML = '<svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg> Menampilkan semua kolom. Silakan pilih satu kolom teks yang ingin dianalisis.';
+                    previewContent.appendChild(warningDiv);
+                }
             }
         }
     }

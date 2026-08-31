@@ -8,6 +8,9 @@ use Exception;
 
 class NLPApiService
 {
+    /** Minimal sampel yang diterima endpoint /api/retrain/* di sisi Python */
+    public const MIN_RETRAIN_SAMPLES = 10;
+
     private string $apiUrl;
     private int $timeout;
     private int $batchSize;
@@ -112,55 +115,61 @@ class NLPApiService
 
     private function batchSentimentAnalysis(array $texts, array $config, $progressCallback = null): array
     {
-        $batches = array_chunk($texts, $this->batchSize);
+        // preserve_keys supaya setiap prediksi bisa dipetakan balik ke posisi
+        // teks aslinya, walaupun ada batch yang gagal di tengah jalan.
+        $batches = array_chunk($texts, $this->batchSize, true);
         $totalBatches = count($batches);
-        
+
         $allPredictions = [];
-        $sentimentCounts = ['positive' => 0, 'negative' => 0, 'neutral' => 0];
-        
+        $failedBatches = [];
+
         Log::info("Processing {$totalBatches} batches for sentiment analysis");
 
         foreach ($batches as $index => $batch) {
             $batchNumber = $index + 1;
-            
+            $originalIndexes = array_keys($batch);
+
             Log::info("Processing batch {$batchNumber}/{$totalBatches}");
-            
+
             if ($progressCallback) {
                 $progress = 40 + (($batchNumber / $totalBatches) * 30);
                 call_user_func($progressCallback, $progress, "Menganalisis sentimen batch {$batchNumber}/{$totalBatches}...");
             }
 
             try {
-                $result = $this->executeSentimentAnalysis($batch, $config);
-                
-                if (isset($result['results']['predictions'])) {
-                    $allPredictions = array_merge($allPredictions, $result['results']['predictions']);
-                    
-                    if (isset($result['results']['distribution'])) {
-                        foreach ($result['results']['distribution'] as $sentiment => $count) {
-                            $sentimentCounts[$sentiment] += $count;
-                        }
+                $result = $this->executeSentimentAnalysis(array_values($batch), $config);
+
+                $predictions = $result['results']['predictions'] ?? [];
+
+                foreach ($predictions as $position => $prediction) {
+                    if (isset($originalIndexes[$position])) {
+                        $prediction['original_index'] = $originalIndexes[$position];
                     }
+                    $allPredictions[] = $prediction;
                 }
-                
+
                 usleep(100000);
-                
+
             } catch (Exception $e) {
+                // Satu batch gagal tidak boleh membatalkan seluruh analisis.
+                // Batch yang gagal dicatat dan dilaporkan lewat metrics.
                 Log::error("Batch {$batchNumber} failed: " . $e->getMessage());
-                throw new Exception("Gagal memproses batch {$batchNumber}: " . $e->getMessage());
+                $failedBatches[] = [
+                    'batch' => $batchNumber,
+                    'texts' => count($batch),
+                    'error' => $e->getMessage(),
+                ];
             }
         }
 
-        $totalTexts = count($allPredictions);
-        $distribution = $sentimentCounts;
-        
-        $metrics = [
-            'total_texts' => $totalTexts,
-            'positive_percentage' => $totalTexts > 0 ? round(($sentimentCounts['positive'] / $totalTexts) * 100, 2) : 0,
-            'negative_percentage' => $totalTexts > 0 ? round(($sentimentCounts['negative'] / $totalTexts) * 100, 2) : 0,
-            'neutral_percentage' => $totalTexts > 0 ? round(($sentimentCounts['neutral'] / $totalTexts) * 100, 2) : 0,
-        ];
+        if (empty($allPredictions)) {
+            throw new Exception(
+                'Analisis sentimen gagal: seluruh ' . $totalBatches . ' batch tidak berhasil diproses.'
+            );
+        }
 
+        $distribution = $this->calculateSentimentDistribution($allPredictions);
+        $metrics = $this->calculateSentimentMetrics($allPredictions, $distribution, $totalBatches, $failedBatches);
         $summary = $this->generateSentimentSummary($metrics, $distribution);
 
         return [
@@ -172,6 +181,68 @@ class NLPApiService
                 'summary' => $summary
             ]
         ];
+    }
+
+    /**
+     * Hitung distribusi sentimen sebagai PERSENTASE, sama seperti yang
+     * dikembalikan endpoint Python untuk request tunggal.
+     *
+     * Sebelumnya kode ini menjumlahkan persentase antar-batch seolah-olah count,
+     * sehingga dataset >batch_size menghasilkan total ratusan persen.
+     */
+    private function calculateSentimentDistribution(array $predictions): array
+    {
+        $counts = ['positive' => 0, 'neutral' => 0, 'negative' => 0];
+
+        foreach ($predictions as $prediction) {
+            $label = strtolower((string) ($prediction['sentiment'] ?? 'neutral'));
+
+            if (array_key_exists($label, $counts)) {
+                $counts[$label]++;
+            }
+        }
+
+        $total = max(1, array_sum($counts));
+
+        return [
+            'positive' => round(($counts['positive'] / $total) * 100, 2),
+            'neutral'  => round(($counts['neutral'] / $total) * 100, 2),
+            'negative' => round(($counts['negative'] / $total) * 100, 2),
+        ];
+    }
+
+    private function calculateSentimentMetrics(
+        array $predictions,
+        array $distribution,
+        int $totalBatches = 0,
+        array $failedBatches = []
+    ): array {
+        $confidences = array_filter(
+            array_map(fn ($prediction) => $prediction['confidence'] ?? null, $predictions),
+            fn ($confidence) => $confidence !== null
+        );
+
+        $metrics = [
+            'total_texts' => count($predictions),
+            'total_analyzed' => count($predictions),
+            'positive_percentage' => $distribution['positive'],
+            'neutral_percentage' => $distribution['neutral'],
+            'negative_percentage' => $distribution['negative'],
+            'avg_confidence' => $confidences ? round(array_sum($confidences) / count($confidences), 4) : 0.0,
+            'min_confidence' => $confidences ? round(min($confidences), 4) : 0.0,
+            'max_confidence' => $confidences ? round(max($confidences), 4) : 0.0,
+        ];
+
+        if (!empty($failedBatches)) {
+            $metrics['failed_batches'] = $failedBatches;
+            $metrics['batch_summary'] = sprintf(
+                '%d dari %d batch berhasil diproses.',
+                $totalBatches - count($failedBatches),
+                $totalBatches
+            );
+        }
+
+        return $metrics;
     }
 
     /**
@@ -250,11 +321,15 @@ class NLPApiService
         string $mode,
         $progressCallback = null
     ): array {
-        $batches = array_chunk($texts, $this->batchSize);
+        $batches = array_chunk($texts, $this->batchSize, true);
         $totalBatches = count($batches);
         
         // Aggregated aspect data
         $aggregatedAspects = [];
+        // Aspek per dokumen dari Python, dipetakan ke indeks teks aslinya.
+        // Dipakai untuk mengisi training_items tanpa menebak lewat keyword.
+        $documentAspects = array_fill(0, count($texts), []);
+        $failedBatches = [];
         
         Log::info("Processing {$totalBatches} batches for aspect analysis", [
             'total_texts' => count($texts),
@@ -272,8 +347,18 @@ class NLPApiService
                 call_user_func($progressCallback, $progress, "Mengekstrak aspek batch {$batchNumber}/{$totalBatches}...");
             }
 
+            $originalIndexes = array_keys($batch);
+
             try {
-                $result = $this->executeAspectAnalysis($batch, $config, $predefinedAspects, $mode);
+                $result = $this->executeAspectAnalysis(array_values($batch), $config, $predefinedAspects, $mode);
+
+                if (isset($result['results']['document_aspects']) && is_array($result['results']['document_aspects'])) {
+                    foreach ($result['results']['document_aspects'] as $position => $aspectsOfDocument) {
+                        if (isset($originalIndexes[$position])) {
+                            $documentAspects[$originalIndexes[$position]] = array_values((array) $aspectsOfDocument);
+                        }
+                    }
+                }
                 
                 // Log untuk debugging
                 Log::info("Batch {$batchNumber} response structure", [
@@ -335,8 +420,18 @@ class NLPApiService
                 
             } catch (Exception $e) {
                 Log::error("Batch {$batchNumber} failed: " . $e->getMessage());
-                throw new Exception("Gagal memproses batch {$batchNumber}: " . $e->getMessage());
+                $failedBatches[] = [
+                    'batch' => $batchNumber,
+                    'texts' => count($batch),
+                    'error' => $e->getMessage(),
+                ];
             }
+        }
+
+        if (empty($aggregatedAspects) && count($failedBatches) === $totalBatches) {
+            throw new Exception(
+                'Ekstraksi aspek gagal: seluruh ' . $totalBatches . ' batch tidak berhasil diproses.'
+            );
         }
 
         Log::info("Aggregation complete", [
@@ -376,12 +471,24 @@ class NLPApiService
             ? $this->generateAspectSummary($finalAspects) 
             : 'Tidak ada aspek yang teridentifikasi dari analisis.';
 
+        $results = [
+            'aspect_sentiments' => $finalAspects,
+            'document_aspects' => $documentAspects,
+            'summary' => $summary
+        ];
+
+        if (!empty($failedBatches)) {
+            $results['failed_batches'] = $failedBatches;
+            $results['batch_summary'] = sprintf(
+                '%d dari %d batch berhasil diproses.',
+                $totalBatches - count($failedBatches),
+                $totalBatches
+            );
+        }
+
         return [
             'status' => 'success',
-            'results' => [
-                'aspect_sentiments' => $finalAspects,
-                'summary' => $summary
-            ]
+            'results' => $results
         ];
     }
 
@@ -441,18 +548,141 @@ class NLPApiService
             
             $topicResult = $this->analyzeTopic($texts, $config);
 
+            $sentiment = $sentimentResult['results'] ?? $sentimentResult;
+            $aspect = $aspectResult['results'] ?? $aspectResult;
+            $topic = $topicResult['results'] ?? $topicResult;
+
+            // Endpoint /api/analyze/combined menghitung PMI aspek-topik sendiri,
+            // tapi jalur batch ini memanggil ketiga analisis terpisah. Jadi PMI
+            // diminta lewat endpoint association agar hasilnya tetap ada.
+            if ($progressCallback) {
+                call_user_func($progressCallback, 68, 'Menghitung asosiasi aspek-topik...');
+            }
+
+            $association = $this->analyzeAssociation(
+                $aspect['document_aspects'] ?? [],
+                $topic['document_topics'] ?? [],
+                (int) ($topic['num_topics'] ?? 0)
+            );
+
             return [
                 'status' => 'success',
                 'results' => [
-                    'sentiment' => $sentimentResult['results'] ?? $sentimentResult,
-                    'aspect' => $aspectResult['results'] ?? $aspectResult,
-                    'topic' => $topicResult['results'] ?? $topicResult
+                    'sentiment' => $sentiment,
+                    'aspect' => $aspect,
+                    'topic' => $topic,
+                    'association' => $association
                 ]
             ];
             
         } catch (Exception $e) {
             Log::error('Combined Analysis Error: ' . $e->getMessage());
             throw $e;
+        }
+    }
+
+    /**
+     * Kirim data hasil koreksi user untuk melatih ulang model sentimen.
+     * Payload mengikuti SentimentRetrainRequest: [{text, label}], minimal 10 sampel.
+     */
+    public function retrainSentiment(array $trainingData, int $epochs = 3, float $learningRate = 0.00002): array
+    {
+        return $this->executeRetrain('sentiment', $trainingData, $epochs, $learningRate);
+    }
+
+    /**
+     * Kirim data hasil koreksi user untuk melatih ulang model ekstraksi aspek.
+     * Payload mengikuti AspectRetrainRequest: [{text, aspects: []}], minimal 10 sampel.
+     */
+    public function retrainAspect(array $trainingData, int $epochs = 3, float $learningRate = 0.00002): array
+    {
+        return $this->executeRetrain('aspect', $trainingData, $epochs, $learningRate);
+    }
+
+    private function executeRetrain(
+        string $type,
+        array $trainingData,
+        int $epochs,
+        float $learningRate
+    ): array {
+        if (count($trainingData) < self::MIN_RETRAIN_SAMPLES) {
+            throw new Exception(sprintf(
+                'Data training %s belum cukup: %d sampel, minimal %d.',
+                $type,
+                count($trainingData),
+                self::MIN_RETRAIN_SAMPLES
+            ));
+        }
+
+        Log::info("Mengirim {$type} retraining ke NLP API", [
+            'samples' => count($trainingData),
+            'epochs' => $epochs,
+        ]);
+
+        // Fine-tuning jauh lebih lama dari inference, jadi timeout digandakan.
+        $response = Http::timeout($this->timeout * 2)
+            ->post("{$this->apiUrl}/api/retrain/{$type}", [
+                'training_data' => array_values($trainingData),
+                'epochs' => $epochs,
+                'learning_rate' => $learningRate,
+            ]);
+
+        if ($response->successful()) {
+            $result = $response->json();
+
+            if (($result['status'] ?? null) !== 'success') {
+                throw new Exception("Retraining {$type} ditolak NLP API: " . $response->body());
+            }
+
+            return $result['results'] ?? [];
+        }
+
+        throw new Exception("Retraining {$type} gagal: " . $response->body());
+    }
+
+    /**
+     * Hitung asosiasi aspek-topik (PMI) untuk hasil yang sudah dianalisis.
+     * Mengembalikan null (bukan exception) kalau data belum lengkap atau
+     * endpoint tidak tersedia — asosiasi bersifat pelengkap, bukan inti analisis.
+     */
+    public function analyzeAssociation(
+        array $documentAspects,
+        array $documentTopics,
+        int $numTopics,
+        int $minMentions = 3
+    ): ?array {
+        if (empty($documentAspects) || empty($documentTopics) || $numTopics <= 0) {
+            Log::info('Association analysis dilewati: document_aspects/document_topics tidak lengkap');
+            return null;
+        }
+
+        if (count($documentAspects) !== count($documentTopics)) {
+            Log::warning('Association analysis dilewati: jumlah dokumen tidak sama', [
+                'aspects' => count($documentAspects),
+                'topics' => count($documentTopics),
+            ]);
+            return null;
+        }
+
+        try {
+            $response = Http::timeout($this->timeout)
+                ->post("{$this->apiUrl}/api/analyze/association", [
+                    'document_aspects' => array_values($documentAspects),
+                    'document_topics' => array_values($documentTopics),
+                    'num_topics' => $numTopics,
+                    'min_mentions' => $minMentions,
+                ]);
+
+            if ($response->successful()) {
+                return $response->json()['results'] ?? null;
+            }
+
+            Log::warning('Association analysis failed: ' . $response->body());
+            return null;
+
+        } catch (Exception $e) {
+            Log::warning('Association analysis error: ' . $e->getMessage());
+            return null;
         }
     }
 

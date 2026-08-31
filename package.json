@@ -22,6 +22,7 @@
         "aos": "^3.0.0-beta.6",
         "chart.js": "^4.5.1",
         "chartjs-plugin-datalabels": "^2.2.0",
-        "swiper": "^12.0.3"
+        "swiper": "^12.0.3",
+        "wordcloud": "^1.2.3"
     }
 }

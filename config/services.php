@@ -35,6 +35,19 @@ return [
         ],
     ],
 
+    /*
+     * Dibaca lewat config() dan bukan env() langsung, supaya tetap bekerja
+     * setelah `php artisan config:cache` (env() mengembalikan null di sana).
+     */
+    'gemini' => [
+        'key' => env('GEMINI_API_KEY'),
+        'model' => env('GEMINI_MODEL', 'gemini-3.5-flash'),
+    ],
+
+    'youtube' => [
+        'key' => env('YOUTUBE_API_KEY'),
+    ],
+
     'nlp_api' => [
         'url' => env('NLP_API_URL', 'http://localhost:8001'),
         'timeout' => env('NLP_API_TIMEOUT', 7200),

@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(php artisan *)",
+      "Bash(ls \"c:\\\\Users\\\\Iman\\\\.claude\\\\plans\\\\\" 2>&1)",
+      "Read(//c/Users/Iman/.claude/**)",
+      "Bash(awk 'NR>=300 && NR<=380 {print NR\": \"$0}' c:/Skripsi/text-analysis-web/resources/views/analysis/show.blade.php)",
+      "Bash(awk 'NR>=330 && NR<=360 {print NR\": \"$0}' c:/Skripsi/text-analysis-web/resources/views/analysis/show.blade.php)"
+    ]
+  }
+}

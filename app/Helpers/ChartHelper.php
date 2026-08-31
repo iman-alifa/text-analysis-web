@@ -74,6 +74,135 @@ class ChartHelper
     }
 
     /**
+     * Susun data asosiasi aspek-topik untuk halaman hasil.
+     *
+     * PMI dihitung di NLP API (AssociationService); crosstab dihitung di sini
+     * dari document_aspects + document_topics yang sudah tersimpan, karena
+     * keduanya murni pencacahan dokumen, bukan inference model.
+     *
+     * Mengembalikan null kalau data aslinya tidak ada — pemanggil wajib
+     * menampilkan keadaan kosong, bukan angka contoh.
+     */
+    public static function prepareAssociationData(
+        ?array $association,
+        array $documentAspects,
+        ?array $topicResults
+    ): ?array {
+        if (empty($association['heatmap_matrix']) || empty($topicResults['topics'])) {
+            return null;
+        }
+
+        $documentTopics = $topicResults['document_topics'] ?? [];
+
+        if (empty($documentTopics)) {
+            return null;
+        }
+
+        $interpretation = $topicResults['interpretation'] ?? [];
+
+        // Urutan topik menentukan urutan kolom pada kedua tabel
+        $topicIds = [];
+        $labels = [];
+        $descriptions = [];
+
+        foreach ($topicResults['topics'] as $index => $topic) {
+            $topicId = $topic['topic_id'] ?? $index;
+
+            if ($topicId < 0) {
+                continue; // outlier BERTopic tidak punya skor PMI
+            }
+
+            $topicIds[] = $topicId;
+            $labels[] = $interpretation[$topicId]['label']
+                ?? $topic['topic_label']
+                ?? ('Topik #' . ($topicId + 1));
+            $descriptions[] = implode(', ', array_slice($topic['words'] ?? $topic['keywords'] ?? [], 0, 3));
+        }
+
+        if (empty($topicIds)) {
+            return null;
+        }
+
+        // Aspek yang lolos filter min_mentions di sisi Python
+        $aspects = array_values(array_filter(array_map(
+            fn ($row) => $row['aspect'] ?? null,
+            $association['heatmap_matrix']
+        )));
+
+        if (empty($aspects)) {
+            return null;
+        }
+
+        $counts = [];
+        foreach ($aspects as $aspect) {
+            $counts[$aspect] = array_fill_keys($topicIds, 0);
+        }
+
+        foreach ($documentAspects as $documentIndex => $documentAspectList) {
+            $topicId = $documentTopics[$documentIndex] ?? -1;
+
+            if (!in_array($topicId, $topicIds, true)) {
+                continue;
+            }
+
+            foreach (array_unique((array) $documentAspectList) as $aspect) {
+                $aspect = strtolower(trim((string) $aspect));
+
+                if (isset($counts[$aspect])) {
+                    $counts[$aspect][$topicId]++;
+                }
+            }
+        }
+
+        $crosstab = [];
+        foreach ($counts as $aspect => $perTopic) {
+            $mentions = array_sum($perTopic);
+
+            if ($mentions === 0) {
+                continue;
+            }
+
+            $crosstab[] = [
+                'aspect' => ucfirst($aspect),
+                'mentions' => $mentions,
+                'topics' => array_map(
+                    fn ($count) => (int) round(($count / $mentions) * 100),
+                    array_values($perTopic)
+                ),
+            ];
+        }
+
+        usort($crosstab, fn ($a, $b) => $b['mentions'] <=> $a['mentions']);
+
+        $pmi = [];
+        foreach ($association['heatmap_matrix'] as $row) {
+            $scores = [];
+
+            foreach ($topicIds as $topicId) {
+                $scores[] = (float) ($row["topic_{$topicId}"] ?? 0);
+            }
+
+            $pmi[] = [
+                'aspect' => ucfirst($row['aspect'] ?? '-'),
+                'scores' => $scores,
+            ];
+        }
+
+        usort($pmi, fn ($a, $b) => max($b['scores']) <=> max($a['scores']));
+
+        if (empty($crosstab)) {
+            return null;
+        }
+
+        return [
+            'topics_label' => $labels,
+            'topics_desc' => $descriptions,
+            'crosstab' => array_slice($crosstab, 0, 10),
+            'pmi' => array_slice($pmi, 0, 10),
+        ];
+    }
+
+    /**
      * Generate topic chart data
      */
     public static function prepareTopicChartData(array $topics): array

@@ -10,6 +10,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class AnalysisController extends Controller
 {
@@ -126,7 +128,11 @@ class AnalysisController extends Controller
 
             // Prepare metadata
             $metadata = [];
-            
+
+            if ($request->preprocessing_config_id) {
+                $metadata['preprocessing_config_id'] = (int) $request->preprocessing_config_id;
+            }
+
             if ($request->num_topics) {
                 $metadata['num_topics'] = $request->num_topics;
             }
@@ -174,8 +180,11 @@ class AnalysisController extends Controller
             }
 
             // Add metadata if not empty
+            // PENTING: jangan json_encode di sini. Kolom metadata sudah di-cast
+            // 'array' di model, jadi encoding manual membuat data ter-encode dua kali
+            // dan seluruh isinya (num_topics, predefined_aspects) jadi tidak terbaca.
             if (!empty($metadata)) {
-                $data['metadata'] = json_encode($metadata);
+                $data['metadata'] = $metadata;
             }
 
             // Create analysis
@@ -305,11 +314,21 @@ class AnalysisController extends Controller
         }
 
         // Aspect chart data
-        if ($result->aspect_results) {
-            $data['aspect'] = \App\Helpers\ChartHelper::prepareAspectChartData(
-                $result->aspect_results
-            );
+        $aspects = $result->normalizedAspectResults();
+
+        if (!empty($aspects)) {
+            $data['aspect'] = \App\Helpers\ChartHelper::prepareAspectChartData($aspects);
         }
+
+        $data['aspects'] = $aspects;
+
+        // Asosiasi aspek-topik (PMI). Null berarti belum ada data asli,
+        // dan view harus menampilkan keadaan kosong.
+        $data['association'] = \App\Helpers\ChartHelper::prepareAssociationData(
+            $result->association_results,
+            $result->document_aspects ?? [],
+            $result->topic_results
+        );
 
         // Topic chart data
         if ($result->topic_results && isset($result->topic_results['topics'])) {
@@ -329,6 +348,90 @@ class AnalysisController extends Controller
     }
     
     /**
+     * Export ringkasan hasil analisis ke PDF.
+     */
+    public function exportPdf($id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+                                ->with('result')
+                                ->findOrFail($id);
+
+        if ($analysis->status !== 'completed' || !$analysis->result) {
+            return redirect()->route('analysis.show', $analysis->id)
+                             ->with('error', 'Analisis belum selesai, hasil belum bisa diekspor.');
+        }
+
+        $pdf = Pdf::loadView('analysis.export-pdf', [
+            'analysis' => $analysis,
+            'result' => $analysis->result,
+        ])->setPaper('a4');
+
+        return $pdf->download($this->exportFilename($analysis, 'pdf'));
+    }
+
+    /**
+     * Export hasil analisis per teks ke CSV.
+     */
+    public function exportCsv($id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+                                ->with('result')
+                                ->findOrFail($id);
+
+        if ($analysis->status !== 'completed' || !$analysis->result) {
+            return redirect()->route('analysis.show', $analysis->id)
+                             ->with('error', 'Analisis belum selesai, hasil belum bisa diekspor.');
+        }
+
+        $filename = $this->exportFilename($analysis, 'csv');
+        $predictions = $analysis->result->predictions ?? [];
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        $callback = function () use ($predictions) {
+            $handle = fopen('php://output', 'w');
+
+            // BOM supaya Excel membaca karakter Indonesia dengan benar
+            fwrite($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+            fputcsv($handle, ['no', 'teks', 'teks_preprocessed', 'sentimen', 'confidence', 'aspek']);
+
+            foreach ($predictions as $index => $prediction) {
+                $sentiment = $prediction['sentiment'] ?? null;
+
+                if (is_array($sentiment)) {
+                    $sentiment = $sentiment['label'] ?? null;
+                }
+
+                fputcsv($handle, [
+                    $index + 1,
+                    $prediction['original_text'] ?? $prediction['text'] ?? '',
+                    $prediction['processed_text'] ?? '',
+                    $sentiment ?? '',
+                    $prediction['confidence'] ?? '',
+                    implode(', ', (array) ($prediction['aspects'] ?? [])),
+                ]);
+            }
+
+            fclose($handle);
+        };
+
+        return response()->stream($callback, 200, $headers);
+    }
+
+    private function exportFilename(TextAnalysis $analysis, string $extension): string
+    {
+        $slug = Str::slug($analysis->title) ?: 'analisis';
+
+        return "{$slug}-{$analysis->id}-" . now()->format('Ymd-His') . ".{$extension}";
+    }
+
+    /**
      * Delete analysis
      */
     public function destroy($id)
@@ -336,6 +439,8 @@ class AnalysisController extends Controller
         $analysis = TextAnalysis::where('user_id', Auth::id())->findOrFail($id);
         
         // Delete file if exists
+        // Disk 'public' mengikuti FileProcessingService::saveFile(), yang
+        // menyimpan upload lewat storeAs(..., 'public').
         if ($analysis->file_path && Storage::disk('public')->exists($analysis->file_path)) {
             Storage::disk('public')->delete($analysis->file_path);
         }
@@ -404,6 +509,56 @@ class AnalysisController extends Controller
         return response()->json([
             'can_poll' => true,
             'status' => $analysis->getStatusForPolling()
+        ]);
+    }
+
+    /**
+     * Generate topic interpretation via LLM
+     */
+    public function generateTopicInterpretation($id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+                                ->findOrFail($id);
+        
+        $result = $analysis->result;
+        
+        if (!$result || empty($result->topic_results['topics'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Hasil topic modeling tidak ditemukan'
+            ], 404);
+        }
+
+        // Jika interpretasi sudah ada, langsung kembalikan
+        if (isset($result->topic_results['interpretation']) && !empty($result->topic_results['interpretation'])) {
+            return response()->json([
+                'success' => true,
+                'data' => $result->topic_results['interpretation'],
+                'message' => 'Interpretasi sudah ada'
+            ]);
+        }
+
+        $llmService = new \App\Services\LlmService();
+        $interpretations = $llmService->generateTopicInterpretations($result->topic_results['topics']);
+
+        if (empty($interpretations)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menghasilkan interpretasi dari AI. Cek konfigurasi API Key atau coba lagi nanti.'
+            ], 500);
+        }
+
+        // Simpan interpretasi ke dalam JSON topic_results
+        $topicResults = $result->topic_results;
+        $topicResults['interpretation'] = $interpretations;
+        
+        $result->topic_results = $topicResults;
+        $result->save();
+
+        return response()->json([
+            'success' => true,
+            'data' => $interpretations,
+            'message' => 'Interpretasi berhasil dibuat'
         ]);
     }
 }

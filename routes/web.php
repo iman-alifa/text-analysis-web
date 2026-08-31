@@ -23,7 +23,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/create', [AnalysisController::class, 'create'])->name('create');
         Route::post('/store', [AnalysisController::class, 'store'])->name('store');
         Route::post('/upload-file', [AnalysisController::class, 'uploadFile'])->name('upload-file');
-        Route::post('/process', [AnalysisController::class, 'process'])->name('process');
         Route::get('/{id}', [AnalysisController::class, 'show'])->name('show');
         
         Route::get('/{id}/poll-status', [AnalysisController::class, 'pollStatus'])
@@ -40,6 +39,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/{id}/export-pdf', [AnalysisController::class, 'exportPdf'])->name('export-pdf');
         Route::get('/{id}/export-csv', [AnalysisController::class, 'exportCsv'])->name('export-csv');
         
+        // AI Generation Route
+        Route::post('/{id}/generate-topic-interpretation', [AnalysisController::class, 'generateTopicInterpretation'])->name('generate-topic-interpretation');
+        
         // Delete
         Route::delete('/{id}', [AnalysisController::class, 'destroy'])->name('destroy');
 
@@ -52,6 +54,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/scraper', [YouTubeScraperController::class, 'index'])->name('scraper');
         Route::post('/search', [YouTubeScraperController::class, 'search'])->name('search');
         Route::post('/scrape-comments', [YouTubeScraperController::class, 'scrapeComments'])->name('scrape-comments');
+        Route::post('/scrape-by-url', [YouTubeScraperController::class, 'scrapeByUrl'])->name('scrape-by-url');
+        Route::get('/api-status', [YouTubeScraperController::class, 'checkApiStatus'])->name('api-status');
+        Route::post('/video-info', [YouTubeScraperController::class, 'getVideoInfo'])->name('video-info');
         Route::get('/download/{filename}', [YouTubeScraperController::class, 'download'])->name('download');
     });
     

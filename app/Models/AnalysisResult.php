@@ -17,6 +17,8 @@ class AnalysisResult extends Model
         'sentiment_distribution',
         'aspect_results',
         'topic_results',
+        'association_results',
+        'document_aspects',
         'metrics',
         'summary',
         'visualizations',
@@ -32,15 +34,105 @@ class AnalysisResult extends Model
         'sentiment_distribution' => 'array',
         'aspect_results' => 'array',
         'topic_results' => 'array',
+        'association_results' => 'array',
+        'document_aspects' => 'array',
         'metrics' => 'array',
         'visualizations' => 'array',
         'result' => 'array', 
         'corrected_aspects' => 'array'
     ];
 
+    /**
+     * Sebagian baris lama (dan data seeder) tersimpan double-encoded: kolom
+     * ber-cast 'array' diisi string hasil json_encode manual, sehingga cast
+     * mengembalikan string. Normalisasi di sini supaya view, chart, dan
+     * TrainingItemService tidak perlu menangani dua bentuk data.
+     */
+    protected function castAttribute($key, $value)
+    {
+        $casted = parent::castAttribute($key, $value);
+
+        if (is_string($casted) && ($this->getCasts()[$key] ?? null) === 'array') {
+            $decoded = json_decode($casted, true);
+
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return $casted;
+    }
+
     public function analysis(): BelongsTo
     {
         return $this->belongsTo(TextAnalysis::class, 'text_analysis_id');
+    }
+
+    /**
+     * Samakan bentuk aspect_results dari berbagai versi kode.
+     *
+     * Yang ditemui di database: bentuk sekarang {aspect, count, sentiments},
+     * bentuk lama {aspect, positive, neutral, negative} (count, bukan persen),
+     * dan bentuk lama tanpa nama aspek sama sekali (tidak bisa ditampilkan,
+     * jadi dilewati daripada memunculkan kartu kosong).
+     *
+     * @return array<int, array{aspect: string, count: int, sentiments: array}>
+     */
+    public function normalizedAspectResults(): array
+    {
+        $rows = $this->aspect_results;
+
+        if (!is_array($rows)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($rows as $key => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $name = $row['aspect'] ?? (is_string($key) ? $key : null);
+
+            if (!$name) {
+                continue;
+            }
+
+            $sentiments = $row['sentiments'] ?? null;
+
+            if (!is_array($sentiments)) {
+                // Bentuk lama menyimpan jumlah dokumen per label, bukan persentase
+                $counts = [
+                    'positive' => (int) ($row['positive'] ?? 0),
+                    'neutral' => (int) ($row['neutral'] ?? 0),
+                    'negative' => (int) ($row['negative'] ?? 0),
+                ];
+                $total = array_sum($counts);
+
+                if ($total === 0) {
+                    continue;
+                }
+
+                $sentiments = [
+                    'positive' => round(($counts['positive'] / $total) * 100, 1),
+                    'neutral' => round(($counts['neutral'] / $total) * 100, 1),
+                    'negative' => round(($counts['negative'] / $total) * 100, 1),
+                ];
+            }
+
+            $normalized[] = [
+                'aspect' => (string) $name,
+                'count' => (int) ($row['count'] ?? $row['total'] ?? 0),
+                'sentiments' => [
+                    'positive' => $sentiments['positive'] ?? 0,
+                    'neutral' => $sentiments['neutral'] ?? 0,
+                    'negative' => $sentiments['negative'] ?? 0,
+                ],
+            ];
+        }
+
+        return $normalized;
     }
 
     // Helper methods

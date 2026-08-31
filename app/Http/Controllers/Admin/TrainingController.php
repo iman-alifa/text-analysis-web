@@ -6,6 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
 use App\Models\CustomStopword;
+use App\Models\ModelTraining;
+use App\Models\EvaluationSnapshot;
+use App\Jobs\RetrainModel;
+use App\Services\NLPApiService;
 use App\Services\ModelEvaluationService;
 use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
@@ -48,7 +52,13 @@ class TrainingController extends Controller
         // 3. Stopwords
         $stopwords = CustomStopword::latest()->get();
 
-        return view('admin.training.index', compact('stats', 'batches', 'stopwords'));
+        // 4. Riwayat retraining model (loop active learning)
+        $trainings = ModelTraining::with('user')->latest()->limit(10)->get();
+
+        // 5. Riwayat metrik evaluasi antar-iterasi
+        $snapshots = EvaluationSnapshot::latest()->limit(20)->get();
+
+        return view('admin.training.index', compact('stats', 'batches', 'stopwords', 'trainings', 'snapshots'));
     }
 
     /**
@@ -209,8 +219,126 @@ class TrainingController extends Controller
         return back()->with('success', 'Stopword dihapus');
     }
     
-    public function triggerTraining() {
-        return back()->with('success', 'Request training dikirim.');
+    /**
+     * Kirim seluruh data yang sudah dikoreksi ke endpoint retraining NLP API.
+     *
+     * Sebelumnya method ini hanya menampilkan flash message tanpa melakukan
+     * apa pun, sehingga loop active learning tidak pernah benar-benar tertutup.
+     */
+    public function triggerTraining(Request $request)
+    {
+        $validated = $request->validate([
+            'model_type' => 'nullable|in:sentiment,aspect,both',
+            'epochs' => 'nullable|integer|min:1|max:20',
+        ]);
+
+        $modelType = $validated['model_type'] ?? 'both';
+        $epochs = (int) ($validated['epochs'] ?? 3);
+
+        if (ModelTraining::running()->exists()) {
+            return back()->with('error', 'Masih ada proses training yang berjalan. Tunggu sampai selesai.');
+        }
+
+        $items = TrainingItem::where('is_corrected', true)->get();
+
+        if ($items->isEmpty()) {
+            return back()->with('error', 'Belum ada data terkoreksi untuk dilatih.');
+        }
+
+        $payloads = [
+            'sentiment' => $this->buildSentimentTrainingData($items),
+            'aspect' => $this->buildAspectTrainingData($items),
+        ];
+
+        $dispatched = [];
+        $skipped = [];
+        $trainings = [];
+
+        foreach ($payloads as $type => $data) {
+            if ($modelType !== 'both' && $modelType !== $type) {
+                continue;
+            }
+
+            if (count($data) < NLPApiService::MIN_RETRAIN_SAMPLES) {
+                $skipped[] = sprintf(
+                    '%s (%d dari minimal %d sampel)',
+                    $type,
+                    count($data),
+                    NLPApiService::MIN_RETRAIN_SAMPLES
+                );
+                continue;
+            }
+
+            $training = ModelTraining::create([
+                'model_type' => $type,
+                'status' => 'pending',
+                'total_samples' => count($data),
+                'epochs' => $epochs,
+                'learning_rate' => 0.00002,
+                'triggered_by' => auth()->id(),
+            ]);
+
+            RetrainModel::dispatch($training, $data);
+            $trainings[] = $training;
+            $dispatched[] = sprintf('%s (%d sampel)', $type, count($data));
+        }
+
+        if (empty($dispatched)) {
+            return back()->with('error', 'Data belum cukup untuk training: ' . implode(', ', $skipped));
+        }
+
+        // Potret metrik sebelum model dilatih ulang. Snapshot berikutnya (saat
+        // retraining dipicu lagi) menjadi pembanding untuk melihat perbaikan.
+        $this->modelEvaluationService->captureSnapshot(
+            $trainings[0] ?? null,
+            'Sebelum retraining: ' . implode(', ', $dispatched)
+        );
+
+        $message = 'Training dikirim ke NLP API: ' . implode(', ', $dispatched)
+                 . '. Pantau statusnya di tabel Riwayat Training.';
+
+        if (!empty($skipped)) {
+            $message .= ' Dilewati: ' . implode(', ', $skipped) . '.';
+        }
+
+        return back()->with('success', $message);
+    }
+
+    /**
+     * Format sesuai SentimentRetrainRequest di NLP API: [{text, label}].
+     */
+    private function buildSentimentTrainingData($items): array
+    {
+        $validLabels = ['positive', 'neutral', 'negative'];
+
+        return $items
+            ->filter(fn ($item) => in_array(strtolower((string) $item->corrected_sentiment), $validLabels, true))
+            ->filter(fn ($item) => filled($item->text_content))
+            ->map(fn ($item) => [
+                'text' => $item->text_content,
+                'label' => strtolower($item->corrected_sentiment),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Format sesuai AspectRetrainRequest di NLP API: [{text, aspects: []}].
+     */
+    private function buildAspectTrainingData($items): array
+    {
+        return $items
+            ->filter(fn ($item) => !empty($item->corrected_aspects) && filled($item->text_content))
+            ->map(fn ($item) => [
+                'text' => $item->text_content,
+                'aspects' => array_values(array_filter(array_map(
+                    fn ($aspect) => trim((string) $aspect),
+                    (array) $item->corrected_aspects
+                ))),
+            ])
+            ->filter(fn ($row) => !empty($row['aspects']))
+            ->values()
+            ->all();
     }
 
     /**

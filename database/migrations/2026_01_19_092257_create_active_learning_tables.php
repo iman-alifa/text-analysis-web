@@ -13,6 +13,10 @@ return new class extends Migration
     public function up()
     {
         // 1. Tabel untuk menyimpan pecahan baris dari JSON AnalysisResult
+        if (Schema::hasTable('training_items')) {
+            return;
+        }
+
         Schema::create('training_items', function (Blueprint $table) {
             $table->id();
             $table->foreignId('text_analysis_id')->constrained('text_analyses')->onDelete('cascade');
@@ -38,12 +42,15 @@ return new class extends Migration
         });
 
         // 2. Tabel untuk Stopwords (Topic Identification Refinement)
-        Schema::create('custom_stopwords', function (Blueprint $table) {
-            $table->id();
-            $table->string('word')->unique();
-            $table->foreignId('added_by')->constrained('users');
-            $table->timestamps();
-        });
+        // Sudah mungkin dibuat migrasi update_tables_for_active_learning.
+        if (!Schema::hasTable('custom_stopwords')) {
+            Schema::create('custom_stopwords', function (Blueprint $table) {
+                $table->id();
+                $table->string('word')->unique();
+                $table->foreignId('added_by')->constrained('users');
+                $table->timestamps();
+            });
+        }
     }
 
     /**

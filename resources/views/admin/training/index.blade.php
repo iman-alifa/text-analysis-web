@@ -24,9 +24,17 @@
                 </button>
             </form>
 
-            <form action="{{ route('admin.training.trigger') }}" method="POST">
+            <form action="{{ route('admin.training.trigger') }}" method="POST" class="flex gap-2">
                 @csrf
-                <button type="submit" onclick="return confirm('Mulai training model?')" 
+                <select name="model_type"
+                        class="rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                    <option value="both">Sentimen + Aspek</option>
+                    <option value="sentiment">Sentimen saja</option>
+                    <option value="aspect">Aspek saja</option>
+                </select>
+                <input type="number" name="epochs" value="3" min="1" max="20" title="Jumlah epoch"
+                       class="w-20 rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                <button type="submit" onclick="return confirm('Kirim data terkoreksi ke NLP API untuk melatih ulang model?')" 
                         class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition text-sm font-medium">
                     Retrain Model
                 </button>
@@ -174,5 +182,188 @@
             {{ $batches->links() }}
         </div>
     </div>
+
+    {{-- Riwayat retraining: bukti loop active learning benar-benar berjalan --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div class="p-6 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-900">Riwayat Training Model</h2>
+            <p class="mt-1 text-sm text-gray-600">
+                Hasil pengiriman data terkoreksi ke NLP API. Training berjalan di background,
+                jadi pastikan queue worker aktif.
+            </p>
+        </div>
+
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+                <thead class="bg-gray-50">
+                    <tr class="text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        <th class="px-6 py-3">Waktu</th>
+                        <th class="px-6 py-3">Model</th>
+                        <th class="px-6 py-3">Sampel</th>
+                        <th class="px-6 py-3">Epoch</th>
+                        <th class="px-6 py-3">Status</th>
+                        <th class="px-6 py-3">Hasil</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    @forelse($trainings as $training)
+                    <tr>
+                        <td class="px-6 py-3 text-gray-600 whitespace-nowrap">
+                            {{ $training->created_at->format('d M Y H:i') }}
+                            @if($training->duration)
+                                <span class="block text-xs text-gray-400">durasi {{ $training->duration }}</span>
+                            @endif
+                        </td>
+                        <td class="px-6 py-3 font-medium text-gray-900 capitalize">{{ $training->model_type }}</td>
+                        <td class="px-6 py-3 text-gray-600">{{ $training->total_samples }}</td>
+                        <td class="px-6 py-3 text-gray-600">{{ $training->epochs }}</td>
+                        <td class="px-6 py-3">
+                            @php
+                                $badge = match($training->status) {
+                                    'completed' => 'bg-green-100 text-green-800',
+                                    'failed' => 'bg-red-100 text-red-800',
+                                    'running' => 'bg-blue-100 text-blue-800',
+                                    default => 'bg-gray-100 text-gray-700',
+                                };
+                            @endphp
+                            <span class="px-2 py-1 rounded-full text-xs font-medium {{ $badge }}">
+                                {{ ucfirst($training->status) }}
+                            </span>
+                        </td>
+                        <td class="px-6 py-3 text-gray-600">
+                            @if($training->status === 'failed')
+                                <span class="text-red-600">{{ Str::limit($training->error_message, 80) }}</span>
+                            @elseif($training->result)
+                                <span class="font-mono text-xs">{{ Str::limit(json_encode($training->result), 90) }}</span>
+                            @else
+                                <span class="text-gray-400">&mdash;</span>
+                            @endif
+                        </td>
+                    </tr>
+                    @empty
+                    <tr>
+                        <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                            Belum ada training yang dijalankan.
+                        </td>
+                    </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {{-- Perkembangan metrik antar-iterasi active learning --}}
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div class="p-6 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-900">Perkembangan Evaluasi Model</h2>
+            <p class="mt-1 text-sm text-gray-600">
+                Metrik direkam setiap kali retraining dipicu, sehingga perbaikan model
+                antar-iterasi bisa ditelusuri.
+            </p>
+        </div>
+
+        @php $chronological = $snapshots->reverse()->values(); @endphp
+
+        @if($chronological->isEmpty())
+            <p class="px-6 py-8 text-center text-gray-500">
+                Belum ada rekaman evaluasi. Rekaman pertama dibuat saat Anda memicu retraining.
+            </p>
+        @else
+            <div class="p-6">
+                <div class="h-64">
+                    <canvas id="evaluationTrendChart"></canvas>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto border-t border-gray-100">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50">
+                        <tr class="text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                            <th class="px-6 py-3">Waktu</th>
+                            <th class="px-6 py-3">Data terkoreksi</th>
+                            <th class="px-6 py-3">Akurasi sentimen</th>
+                            <th class="px-6 py-3">F1 sentimen</th>
+                            <th class="px-6 py-3">F1 aspek</th>
+                            <th class="px-6 py-3">Catatan</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        @foreach($snapshots as $snapshot)
+                        <tr>
+                            <td class="px-6 py-3 text-gray-600 whitespace-nowrap">{{ $snapshot->created_at->format('d M Y H:i') }}</td>
+                            <td class="px-6 py-3 text-gray-600">{{ $snapshot->corrected_total }}</td>
+                            <td class="px-6 py-3 text-gray-900 font-medium">
+                                {{ $snapshot->sentiment_accuracy !== null ? $snapshot->sentiment_accuracy . '%' : '—' }}
+                            </td>
+                            <td class="px-6 py-3 text-gray-600">
+                                {{ $snapshot->sentiment_weighted_f1 !== null ? $snapshot->sentiment_weighted_f1 . '%' : '—' }}
+                            </td>
+                            <td class="px-6 py-3 text-gray-600">
+                                {{ $snapshot->aspect_f1 !== null ? $snapshot->aspect_f1 . '%' : '—' }}
+                            </td>
+                            <td class="px-6 py-3 text-gray-500">{{ $snapshot->note }}</td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        @endif
+    </div>
 </div>
 @endsection
+
+@push('scripts')
+@if($snapshots->isNotEmpty())
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const canvas = document.getElementById('evaluationTrendChart');
+    if (!canvas || typeof Chart === 'undefined') return;
+
+    const snapshots = @json($snapshots->reverse()->values());
+
+    new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: snapshots.map(s => new Date(s.created_at).toLocaleDateString('id-ID', {
+                day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+            })),
+            datasets: [
+                {
+                    label: 'Akurasi sentimen (%)',
+                    data: snapshots.map(s => s.sentiment_accuracy),
+                    borderColor: 'rgb(79, 70, 229)',
+                    backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                    tension: 0.3,
+                    spanGaps: true,
+                },
+                {
+                    label: 'F1 sentimen (%)',
+                    data: snapshots.map(s => s.sentiment_weighted_f1),
+                    borderColor: 'rgb(16, 185, 129)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.3,
+                    spanGaps: true,
+                },
+                {
+                    label: 'F1 aspek (%)',
+                    data: snapshots.map(s => s.aspect_f1),
+                    borderColor: 'rgb(249, 115, 22)',
+                    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+                    tension: 0.3,
+                    spanGaps: true,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, max: 100, ticks: { callback: value => value + '%' } }
+            },
+            plugins: { legend: { position: 'bottom' } }
+        }
+    });
+});
+</script>
+@endif
+@endpush
