@@ -74,6 +74,28 @@ class TextAnalysis extends Model
     }
 
     // Accessors
+
+    /**
+     * Baris lama tersimpan double-encoded (json_encode manual + cast 'array'),
+     * sehingga cast mengembalikan string JSON, bukan array. Accessor ini
+     * menormalkan keduanya supaya num_topics / predefined_aspects tetap terbaca
+     * pada analisis lama maupun baru.
+     */
+    public function getMetadataAttribute($value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        $decoded = json_decode((string) $value, true);
+
+        if (is_string($decoded)) {
+            $decoded = json_decode($decoded, true);
+        }
+
+        return is_array($decoded) ? $decoded : [];
+    }
+
     public function getStatusBadgeAttribute(): string
     {
         return match($this->status) {

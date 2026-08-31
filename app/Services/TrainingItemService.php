@@ -15,6 +15,10 @@ class TrainingItemService
     {
         if (!$analysis->result) return;
 
+        // Idempotent: pemanggilan kedua sebelumnya menggandakan seluruh baris
+        // (dan koreksi yang sudah dibuat user ikut terduplikasi).
+        if ($analysis->trainingItems()->exists()) return;
+
         // 1. Build aspect keyword dictionary from global aspect_results
         $globalAspectsRaw = $analysis->result->aspect_results ?? [];
         if (is_string($globalAspectsRaw)) {
@@ -54,16 +58,20 @@ class TrainingItemService
         foreach ($rows as $row) {
             if (empty($row['text'])) continue;
 
-            // Normalise sentiment
-            $sentimentLabel = 'neutral';
+            // Normalise sentiment. Analisis bertipe 'aspect' tidak menghasilkan
+            // sentimen sama sekali, jadi biarkan null daripada mengarang 'neutral'
+            // yang akan dihitung sebagai prediksi salah saat evaluasi.
+            $sentimentLabel = null;
             if (isset($row['sentiment'])) {
                 $sentimentLabel = is_array($row['sentiment'])
-                    ? ($row['sentiment']['label'] ?? 'neutral')
+                    ? ($row['sentiment']['label'] ?? null)
                     : $row['sentiment'];
             }
             $confidence = $row['confidence'] ?? $row['score'] ?? 0;
 
-            // Map aspects from global dictionary if not present on the row
+            // Aspek per baris kini dikirim NLPApiService (document_aspects).
+            // Keyword matching di bawah hanya cadangan untuk hasil analisis lama
+            // yang tersimpan sebelum document_aspects ikut disimpan.
             $rowAspects = $row['aspects'] ?? [];
             if (empty($rowAspects) && !empty($aspectKeywords)) {
                 $textLower = strtolower($row['text']);
@@ -77,7 +85,7 @@ class TrainingItemService
             $batch[] = [
                 'text_analysis_id' => $analysis->id,
                 'text_content'     => $row['text'],
-                'predicted_sentiment' => strtolower($sentimentLabel),
+                'predicted_sentiment' => $sentimentLabel ? strtolower($sentimentLabel) : null,
                 'confidence_score'    => (float) $confidence,
                 'detected_aspects'    => json_encode(array_values(array_unique($rowAspects))),
                 'is_corrected'        => false,

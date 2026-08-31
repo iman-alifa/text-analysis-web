@@ -2,7 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\EvaluationSnapshot;
+use App\Models\ModelTraining;
 use App\Models\TextAnalysis;
+use App\Models\TrainingItem;
 use Illuminate\Support\Collection;
 
 class ModelEvaluationService
@@ -15,6 +18,45 @@ class ModelEvaluationService
             'topic' => $this->buildTopicEvaluation($analysis, $allItems),
             'corrected_total' => $correctedItems->count(),
         ];
+    }
+
+    /**
+     * Evaluasi global atas seluruh data terkoreksi (lintas analisis), dipakai
+     * untuk membandingkan performa model antar-iterasi active learning.
+     */
+    public function buildGlobalEvaluation(?Collection $correctedItems = null): array
+    {
+        $items = $correctedItems ?? TrainingItem::where('is_corrected', true)->get();
+
+        return [
+            'sentiment' => $this->buildSentimentEvaluation('sentiment', $items),
+            'aspect' => $this->buildAspectEvaluation('aspect', $items),
+            'corrected_total' => $items->count(),
+        ];
+    }
+
+    /**
+     * Simpan potret metrik saat ini supaya perubahannya bisa ditelusuri
+     * setelah model dilatih ulang.
+     */
+    public function captureSnapshot(?ModelTraining $training = null, ?string $note = null): EvaluationSnapshot
+    {
+        $evaluation = $this->buildGlobalEvaluation();
+        $sentiment = $evaluation['sentiment'] ?? [];
+        $aspect = $evaluation['aspect'] ?? [];
+
+        return EvaluationSnapshot::create([
+            'model_training_id' => $training?->id,
+            'note' => $note,
+            'corrected_total' => $evaluation['corrected_total'],
+            'sentiment_accuracy' => ($sentiment['available'] ?? false) ? $sentiment['accuracy'] : null,
+            'sentiment_weighted_f1' => ($sentiment['available'] ?? false) ? $sentiment['weighted_f1'] : null,
+            'sentiment_rows' => ($sentiment['available'] ?? false) ? $sentiment['evaluated_rows'] : 0,
+            'aspect_f1' => ($aspect['available'] ?? false) ? $aspect['f1'] : null,
+            'aspect_exact_match' => ($aspect['available'] ?? false) ? $aspect['exact_match'] : null,
+            'aspect_rows' => ($aspect['available'] ?? false) ? $aspect['evaluated_rows'] : 0,
+            'metrics' => $evaluation,
+        ]);
     }
 
     public function buildSentimentEvaluation(string $analysisType, Collection $correctedItems): ?array

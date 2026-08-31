@@ -139,28 +139,28 @@
         </div>
 
         @if($analysis->status == 'completed')
-        <div class="flex flex-wrap gap-3">
-            <a href="{{ route('analysis.export-pdf', $analysis->id) }}" 
-               class="inline-flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="flex flex-wrap gap-2">
+            <a href="{{ route('analysis.export-pdf', $analysis->id) }}"
+               class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-red-500 to-red-600 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md hover:from-red-600 hover:to-red-700 transform hover:-translate-y-0.5 transition-all duration-200">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/>
                 </svg>
-                Export PDF
+                <span>Export PDF</span>
             </a>
-            <a href="{{ route('analysis.export-csv', $analysis->id) }}" 
-               class="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <a href="{{ route('analysis.export-csv', $analysis->id) }}"
+               class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-600 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md hover:from-emerald-600 hover:to-green-700 transform hover:-translate-y-0.5 transition-all duration-200">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
-                Export CSV
+                <span>Export CSV</span>
             </a>
             <a href="{{ route('analysis.feedback', $analysis->id) }}"
-               class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">
-                <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium rounded-lg shadow-sm hover:shadow-md hover:from-indigo-600 hover:to-purple-700 transform hover:-translate-y-0.5 transition-all duration-200">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                           d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
                 </svg>
-                Berikan Feedback
+                <span>Feedback</span>
             </a>
         </div>
         @endif
@@ -657,7 +657,8 @@
         @endif
 
         <!-- Aspect Analysis Results -->
-        @if(($analysis->analysis_type == 'aspect' || $analysis->analysis_type == 'combined') && $result->aspect_results)
+        @php $aspectRows = $chartData['aspects'] ?? []; @endphp
+        @if(($analysis->analysis_type == 'aspect' || $analysis->analysis_type == 'combined') && !empty($aspectRows))
         <div class="space-y-6">
             <!-- Aspect Chart -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -671,7 +672,7 @@
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                 <h3 class="text-lg font-semibold text-gray-900 mb-4">Detail Aspek</h3>
                 <div class="space-y-4">
-                    @foreach($result->aspect_results as $aspect)
+                    @foreach($aspectRows as $aspect)
                     <div class="border border-gray-200 rounded-lg p-4">
                         <div class="flex items-center justify-between mb-3">
                             <h4 class="font-semibold text-gray-900 capitalize">{{ $aspect['aspect'] }}</h4>
@@ -715,31 +716,78 @@
                     </div>
                 </div>
 
-                <!-- Word Cloud -->
+                <!-- Word Cloud (wordcloud2.js) -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                    <h3 class="text-lg font-semibold text-gray-900 mb-4">Word Cloud</h3>
-                    <div class="flex flex-wrap justify-center items-center p-4" id="wordCloud">
-                        @if(isset($result->topic_results['word_frequencies']))
-                            @foreach(array_slice($result->topic_results['word_frequencies'], 0, 30) as $word)
-                            <span class="word-cloud-item" style="font-size: {{ 12 + ($word['frequency'] / 2) }}px;">
-                                {{ $word['word'] }}
-                            </span>
-                            @endforeach
-                        @endif
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold text-gray-900">Word Cloud</h3>
+                        <span class="text-xs text-gray-400">{{ count($result->topic_results['word_frequencies'] ?? []) }} kata</span>
                     </div>
+                    <div id="wordCloudCanvas" class="w-full" style="height: 360px;">
+                        <canvas id="wordCloudCanvasEl" style="width:100%; height:100%;"></canvas>
+                    </div>
+                    @if(isset($result->topic_results['word_frequencies']) && count($result->topic_results['word_frequencies']) > 0)
+                        @php
+                            $wordFreqs = array_slice($result->topic_results['word_frequencies'], 0, 60);
+                            // Hitung range frekuensi untuk normalisasi ukuran (10-72 px)
+                            $maxFreq = max(array_column($wordFreqs, 'frequency')) ?: 1;
+                            $minFreq = min(array_column($wordFreqs, 'frequency')) ?: 1;
+                            $wordCloudList = [];
+                            foreach ($wordFreqs as $w) {
+                                $range = max(1, $maxFreq - $minFreq);
+                                $norm = ($w['frequency'] - $minFreq) / $range; // 0..1
+                                // wordcloud2.js menggunakan list of [word, weight]
+                                $wordCloudList[] = [$w['word'], max(8, $norm * 60 + 8)];
+                            }
+                        @endphp
+                        <script>
+                            window.__wordCloudData = @json($wordCloudList);
+                        </script>
+                    @endif
                 </div>
             </div>
 
             <!-- Topic Details -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-4">Detail Topik</h3>
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900">Detail Topik</h3>
+                    @if(!isset($result->topic_results['interpretation']))
+                        <button id="btnGenerateAI" class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-sm font-medium rounded-lg hover:from-purple-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all">
+                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                            Generate Interpretasi AI
+                        </button>
+                    @else
+                        <span class="inline-flex items-center px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200">
+                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                            Diinterpretasikan oleh AI
+                        </span>
+                    @endif
+                </div>
+
+                <div id="aiLoadingIndicator" class="hidden mb-4 p-4 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center">
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span class="text-sm font-medium text-indigo-700">AI sedang memproses kata kunci untuk menghasilkan interpretasi... (Bisa memakan waktu 5-10 detik)</span>
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     @foreach($result->topic_results['topics'] as $topic)
                     <div class="border border-gray-200 rounded-lg p-4">
                         <div class="flex items-center justify-between mb-3">
-                            <h4 class="font-semibold text-gray-900">Topik #{{ $topic['topic_id'] + 1 }}</h4>
-                            <span class="text-sm text-gray-500">{{ round($topic['proportion'] * 100, 1) }}%</span>
+                            <h4 class="font-semibold text-gray-900" id="topic-label-{{ $topic['topic_id'] }}">
+                                @if(isset($result->topic_results['interpretation'][$topic['topic_id']]))
+                                    {{ $result->topic_results['interpretation'][$topic['topic_id']]['label'] }}
+                                @else
+                                    Topik #{{ $topic['topic_id'] + 1 }}
+                                @endif
+                            </h4>
+                            <span class="text-sm text-gray-500">{{ round(($topic['proportion'] ?? 0) * 100, 1) }}%</span>
                         </div>
+                        
+                        <p class="text-sm text-gray-700 mb-3 @if(!isset($result->topic_results['interpretation'][$topic['topic_id']])) hidden @endif" id="topic-desc-{{ $topic['topic_id'] }}">
+                            @if(isset($result->topic_results['interpretation'][$topic['topic_id']]))
+                                {{ $result->topic_results['interpretation'][$topic['topic_id']]['description'] }}
+                            @endif
+                        </p>
+
                         <div class="flex flex-wrap gap-2">
                             @foreach(array_slice($topic['words'], 0, 8) as $word)
                             <span class="px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full">
@@ -757,8 +805,226 @@
         </div>
         @endif
 
+        <!-- Aspect-Topic Association Results -->
+        @if($analysis->analysis_type == 'combined' && !empty($aspectRows) && $result->topic_results)
+        <div class="space-y-6 mt-10">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    Asosiasi Aspek & Topik
+                </h3>
+                <span class="px-3 py-1 bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-800 rounded-full text-xs font-semibold tracking-wide border border-indigo-200">Advanced Insight</span>
+            </div>
+            
+            <div class="bg-blue-50/50 border border-blue-100 p-4 rounded-xl flex gap-4 items-start">
+                <div class="flex-shrink-0 mt-0.5">
+                    <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                </div>
+                <p class="text-sm text-blue-800 leading-relaxed">
+                    Analisis ini menghubungkan aspek yang diekstrak (level token) dengan topik dokumen (level dokumen) menggunakan <strong>Pointwise Mutual Information (PMI)</strong> untuk menemukan kekuatan asosiasi statistik. Dokumen menjadi jembatan antara entitas spesifik dengan tema wacana secara keseluruhan.
+                </p>
+            </div>
+
+            @php
+                // Sumber data asli: association_results (PMI dari NLP API) +
+                // document_aspects/document_topics. Tidak ada lagi contoh angka
+                // bawaan di sini, karena data mock sempat tampil seolah hasil analisis.
+                $associationData = $chartData['association'] ?? null;
+            @endphp
+
+            @if(!$associationData)
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
+                <p class="text-gray-600">Data asosiasi aspek&ndash;topik belum tersedia untuk analisis ini.</p>
+                <p class="mt-2 text-sm text-gray-500">
+                    PMI hanya dihitung saat analisis gabungan menghasilkan aspek dan topik sekaligus.
+                    Jalankan ulang analisis agar asosiasi ikut tersimpan.
+                </p>
+            </div>
+            @else
+            @php
+
+                // Generate Insights Secara Dinamis (Rule-Based / Opsi A)
+                if (!isset($associationData['insights']) || empty($associationData['insights'])) {
+                    $insights = [];
+                    $pmiData = $associationData['pmi'];
+                    $crosstabData = $associationData['crosstab'];
+                    $topicsLabel = $associationData['topics_label'];
+                    $topicsDesc = $associationData['topics_desc'];
+                    
+                    // 1. Cari Asosiasi Terkuat (PMI Tertinggi)
+                    $maxPmi = -999;
+                    $bestAspect = '';
+                    $bestTopicIdx = -1;
+                    
+                    foreach($pmiData as $row) {
+                        foreach($row['scores'] as $idx => $score) {
+                            if ($score > $maxPmi) {
+                                $maxPmi = $score;
+                                $bestAspect = $row['aspect'];
+                                $bestTopicIdx = $idx;
+                            }
+                        }
+                    }
+                    
+                    if ($maxPmi > 0 && $bestTopicIdx !== -1) {
+                        $topicName = $topicsLabel[$bestTopicIdx];
+                        $topicKeywords = $topicsDesc[$bestTopicIdx] ?? '';
+                        $descText = $topicKeywords ? ", yang dicirikan oleh kata kunci <em>$topicKeywords</em>" : "";
+                        $insights[] = "Aspek <strong>".strtolower($bestAspect)."</strong> menunjukkan asosiasi terkuat dengan $topicName (PMI = +" . number_format($maxPmi, 2) . ")$descText. Hal ini mengindikasikan bahwa narasi tentang aspek ini sangat spesifik dan melekat erat pada konteks wacana topik tersebut.";
+                    }
+                    
+                    // 2. Cari Aspek yang Paling Banyak Dibicarakan (Mentions Tertinggi)
+                    $maxMentions = -1;
+                    $topAspectCrosstab = null;
+                    foreach($crosstabData as $row) {
+                        if ($row['mentions'] > $maxMentions) {
+                            $maxMentions = $row['mentions'];
+                            $topAspectCrosstab = $row;
+                        }
+                    }
+
+                    if ($topAspectCrosstab && $topAspectCrosstab['aspect'] !== $bestAspect) {
+                        $aspectName = strtolower($topAspectCrosstab['aspect']);
+                        // Cari topik dominan untuk aspek ini
+                        $maxTopicPercent = -1;
+                        $dominanTopicIdx = -1;
+                        foreach($topAspectCrosstab['topics'] as $idx => $percent) {
+                            if ($percent > $maxTopicPercent) {
+                                $maxTopicPercent = $percent;
+                                $dominanTopicIdx = $idx;
+                            }
+                        }
+                        
+                        if ($dominanTopicIdx !== -1) {
+                            $topicName = $topicsLabel[$dominanTopicIdx];
+                            $insights[] = "Sementara itu, aspek <strong>$aspectName</strong> merupakan entitas yang paling banyak dibicarakan (muncul $maxMentions kali). Aspek ini mendominasi pembicaraan pada $topicName (sebesar $maxTopicPercent%), menunjukkan bahwa ini adalah subjek utama yang menjadi sorotan sentral dalam topik tersebut.";
+                        }
+                    }
+                    
+                    // Fallback jika tidak ada insight yang ter-generate
+                    if (empty($insights)) {
+                        $insights[] = "Data asosiasi berhasil dihitung, namun tidak ditemukan pola dominan yang cukup kuat untuk disorot.";
+                    }
+                    
+                    $associationData['insights'] = $insights;
+                }
+
+                function getPmiColorClass($value) {
+                    if ($value >= 0.5) return 'bg-amber-600 text-amber-50 shadow-sm border border-amber-700/50';
+                    if ($value >= 0.3) return 'bg-amber-400 text-amber-900 border border-amber-500/50';
+                    if ($value >= 0.1) return 'bg-blue-100 text-blue-800 border border-blue-200';
+                    if ($value > 0) return 'bg-blue-50 text-blue-700 border border-blue-100';
+                    if ($value >= -0.2) return 'bg-gray-100 text-gray-600 border border-gray-200';
+                    if ($value >= -0.5) return 'bg-gray-200 text-gray-700 border border-gray-300';
+                    return 'bg-emerald-50 text-emerald-800 border border-emerald-200'; 
+                }
+
+                function getCrosstabColorClass($percentage) {
+                    if ($percentage >= 70) return 'bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded';
+                    if ($percentage >= 40) return 'bg-blue-50 text-blue-800 font-medium px-2 py-0.5 rounded';
+                    return 'text-gray-500 font-medium';
+                }
+            @endphp
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Tabel Distribusi -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                    <h4 class="text-base font-semibold text-gray-900 mb-1">Distribusi Proporsi Aspek × Topik</h4>
+                    <p class="text-xs text-gray-500 mb-4">Persentase dokumen mengandung aspek tertentu yang masuk ke setiap topik.</p>
+                    
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse min-w-[500px]">
+                            <thead>
+                                <tr>
+                                    <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">Aspek</th>
+                                    <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200 text-center">Mentions</th>
+                                    @foreach($associationData['topics_label'] as $label)
+                                    <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200 text-center whitespace-nowrap">{{ $label }}</th>
+                                    @endforeach
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100">
+                                @foreach($associationData['crosstab'] as $row)
+                                <tr class="hover:bg-gray-50/50 transition-colors">
+                                    <td class="py-3 px-4 text-sm font-medium text-gray-900">{{ $row['aspect'] }}</td>
+                                    <td class="py-3 px-4 text-sm text-gray-600 text-center">{{ $row['mentions'] }}</td>
+                                    @foreach($row['topics'] as $val)
+                                    <td class="py-3 px-4 text-sm text-center">
+                                        <span class="{{ getCrosstabColorClass($val) }}">~{{ $val }}%</span>
+                                    </td>
+                                    @endforeach
+                                </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Heatmap PMI -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col">
+                    <h4 class="text-base font-semibold text-gray-900 mb-1">Kekuatan Asosiasi Statistik (Heatmap PMI)</h4>
+                    <p class="text-xs text-gray-500 mb-4">PMI (Pointwise Mutual Information) > 0 menandakan asosiasi kuat.</p>
+                    
+                    <div class="flex-1 flex flex-col justify-center overflow-x-auto">
+                        <div class="min-w-[360px]">
+                            <!-- Header Grid -->
+                            <div class="grid grid-cols-[80px_repeat(3,1fr)] gap-2 mb-2">
+                                <div></div>
+                                @foreach($associationData['topics_label'] as $index => $label)
+                                <div class="text-center flex flex-col justify-end">
+                                    <span class="text-xs font-semibold text-gray-600">{{ $label }}</span>
+                                    @if(!empty($associationData['topics_desc'][$index]))
+                                    <span class="text-[10px] text-gray-400 font-normal leading-tight mt-1">{{ $associationData['topics_desc'][$index] }}</span>
+                                    @endif
+                                </div>
+                                @endforeach
+                            </div>
+                            
+                            <!-- Body Grid -->
+                            <div class="grid grid-cols-[80px_repeat(3,1fr)] gap-2">
+                                @foreach($associationData['pmi'] as $row)
+                                <div class="flex items-center text-sm font-medium text-gray-900">{{ $row['aspect'] }}</div>
+                                @foreach($row['scores'] as $score)
+                                <div class="text-center rounded-lg py-2 text-sm font-medium transition-transform hover:scale-105 {{ getPmiColorClass($score) }}">
+                                    {{ $score > 0 ? '+'.$score : $score }}
+                                </div>
+                                @endforeach
+                                @endforeach
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Legend -->
+                    <div class="mt-6 flex flex-wrap gap-4 pt-4 border-t border-gray-100">
+                        <div class="flex items-center gap-2 text-xs text-gray-600">
+                            <div class="w-3.5 h-3.5 rounded bg-amber-600"></div> Asosiasi Kuat
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-gray-600">
+                            <div class="w-3.5 h-3.5 rounded bg-blue-100 border border-blue-200"></div> Asosiasi Positif
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-gray-600">
+                            <div class="w-3.5 h-3.5 rounded bg-gray-200 border border-gray-300"></div> Jarang Bersama
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Insight Narasi -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h4 class="text-base font-semibold text-gray-900 mb-4">Interpretasi Hasil</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    @foreach($associationData['insights'] as $insight)
+                    <div class="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-lg p-4 border-l-4 border-l-amber-500">
+                        <p class="text-sm text-gray-700 leading-relaxed">{!! $insight !!}</p>
+                    </div>
+                    @endforeach
+                </div>
+            </div>
+            @endif
+        </div>
+        @endif
+
     @endif
-</div>
 
 {{-- ✅ POLLING SCRIPT - Updated with Progress Tracking --}}
 @if($analysis->status == 'pending' || $analysis->status == 'processing')
@@ -1079,6 +1345,7 @@ document.addEventListener('DOMContentLoaded', function() {
 @if($analysis->status == 'completed' && $analysis->result)
 @push('scripts')
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
 <script>
     // ==========================================
     // Sentiment Chart
@@ -1140,8 +1407,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // ==========================================
     // Aspect Chart
     // ==========================================
-    @if($result->aspect_results)
-    const aspectData = @json($result->aspect_results);
+    @if(!empty($chartData['aspects']))
+    const aspectData = @json($chartData['aspects'] ?? []);
     
     const aspectCtx = document.getElementById('aspectChart');
     if (aspectCtx) {
@@ -1225,7 +1492,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const topicCtx = document.getElementById('topicChart');
     if (topicCtx) {
         const topicLabels = topicData.map(t => 'Topik #' + (t.topic_id + 1));
-        const topicProportions = topicData.map(t => (t.proportion * 100).toFixed(1));
+        const topicProportions = topicData.map(t => ((t.proportion ?? 0) * 100).toFixed(1));
         new Chart(topicCtx, {
             type: 'bar',
             data: {
@@ -1339,4 +1606,112 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 @endpush
 @endif
+
+@push('scripts')
+<script>
+(function() {
+    var data = window.__wordCloudData;
+    var canvas = document.getElementById('wordCloudCanvasEl');
+    if (!canvas || !data || data.length === 0) return;
+
+    var parent = canvas.parentElement;
+    canvas.width = parent.clientWidth;
+    canvas.height = parent.clientHeight;
+
+    WordCloud(canvas, {
+        list: data,
+        gridSize: 8,
+        weightFactor: function(size) { return size * 1.6; },
+        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+        fontWeight: '600',
+        color: function(word, weight) {
+            if (weight > 40) return '#4338ca';
+            if (weight > 25) return '#6366f1';
+            if (weight > 15) return '#818cf8';
+            return '#a5b4fc';
+        },
+        backgroundColor: '#ffffff',
+        rotateRatio: 0.3,
+        rotationSteps: 2,
+        minSize: 10,
+        shuffle: false,
+        drawOutOfBound: false,
+        shrinkToFit: true,
+        click: function(item) {
+            var search = document.getElementById('searchPredictions');
+            if (search && item && item[0]) {
+                search.value = item[0];
+                search.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        }
+    });
+})();
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const btnGenerateAI = document.getElementById('btnGenerateAI');
+    if (btnGenerateAI) {
+        btnGenerateAI.addEventListener('click', function() {
+            const btn = this;
+            const loadingIndicator = document.getElementById('aiLoadingIndicator');
+            
+            // Show loading
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="animate-spin h-4 w-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Memproses...';
+            loadingIndicator.classList.remove('hidden');
+            
+            // Get CSRF Token (assuming it's in meta tag, otherwise Laravel handles it if using standard setup)
+            const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+            
+            fetch('{{ route("analysis.generate-topic-interpretation", $analysis->id) }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': token || '{{ csrf_token() }}',
+                    'Accept': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Update UI with interpretations
+                    for (const [topicId, interpretation] of Object.entries(data.data)) {
+                        const labelEl = document.getElementById('topic-label-' + topicId);
+                        const descEl = document.getElementById('topic-desc-' + topicId);
+                        
+                        if (labelEl) labelEl.textContent = interpretation.label;
+                        if (descEl) {
+                            descEl.textContent = interpretation.description;
+                            descEl.classList.remove('hidden');
+                        }
+                    }
+                    
+                    // Change button to success state
+                    btn.outerHTML = `<span class="inline-flex items-center px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200">
+                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                        Diinterpretasikan oleh AI
+                    </span>`;
+                } else {
+                    alert(data.message || 'Gagal menghasilkan interpretasi.');
+                    // Reset button
+                    btn.disabled = false;
+                    btn.innerHTML = '<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Generate Interpretasi AI';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Terjadi kesalahan koneksi ke server.');
+                // Reset button
+                btn.disabled = false;
+                btn.innerHTML = '<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Generate Interpretasi AI';
+            })
+            .finally(() => {
+                loadingIndicator.classList.add('hidden');
+            });
+        });
+    }
+});
+</script>
+@endpush
 @endsection

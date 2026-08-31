@@ -5,6 +5,8 @@ namespace App\Jobs;
 use App\Models\TextAnalysis;
 use App\Models\AnalysisResult;
 use App\Models\AnalysisLog;
+use App\Models\CustomStopword;
+use App\Models\PreprocessingConfig;
 use App\Services\NLPApiService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -80,7 +82,7 @@ class ProcessTextAnalysis implements ShouldQueue
                 case 'aspect':
                     $this->updateProgress(40, 'Memulai ekstraksi aspek...');
                     $predefinedAspects = $this->getPredefinedAspects();
-                    $mode = $predefinedAspects ? 'rule-based' : 'automatic';
+                    $mode = $this->getAspectMode($predefinedAspects);
                     $result = $nlpService->analyzeAspect($texts, $preprocessingConfig, $predefinedAspects, $mode, $progressCallback);
                     break;
 
@@ -223,16 +225,91 @@ class ProcessTextAnalysis implements ShouldQueue
         // throw $e;
     }
 
+    /**
+     * Ambil konfigurasi preprocessing yang dipilih user, bukan nilai hardcoded.
+     * Urutan: config pilihan user -> config default di database -> fallback statis.
+     * Custom stopword dari admin selalu digabungkan ke config manapun.
+     */
     protected function getPreprocessingConfig(): array
     {
-        return [
+        $fallback = [
             'case_folding' => true,
             'remove_punctuation' => true,
             'remove_numbers' => false,
             'remove_stopwords' => true,
             'stemming' => true,
-            'lemmatization' => false
+            'lemmatization' => false,
+            'custom_stopwords' => [],
         ];
+
+        $config = null;
+        $configId = $this->analysis->metadata['preprocessing_config_id'] ?? null;
+
+        try {
+            if ($configId) {
+                $config = PreprocessingConfig::find($configId);
+            }
+
+            if (!$config) {
+                $config = PreprocessingConfig::where('is_default', true)->first();
+            }
+        } catch (Exception $e) {
+            Log::warning('Gagal memuat preprocessing config: ' . $e->getMessage());
+        }
+
+        $resolved = $config ? $config->toApiFormat() : $fallback;
+
+        $resolved['custom_stopwords'] = array_values(array_unique(array_merge(
+            $resolved['custom_stopwords'] ?? [],
+            $this->getCustomStopwords()
+        )));
+
+        Log::info("Preprocessing config untuk analisis {$this->analysis->id}", [
+            'config_id' => $config->id ?? null,
+            'config_name' => $config->name ?? 'fallback',
+            'custom_stopwords' => count($resolved['custom_stopwords']),
+        ]);
+
+        return $resolved;
+    }
+
+    /**
+     * Stopword tambahan yang dikelola admin lewat halaman training.
+     */
+    protected function getCustomStopwords(): array
+    {
+        try {
+            return CustomStopword::pluck('word')
+                ->map(fn ($word) => strtolower(trim((string) $word)))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+        } catch (Exception $e) {
+            Log::warning('Gagal memuat custom stopwords: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Mode ekstraksi aspek: pakai pilihan user bila ada, kalau tidak
+     * tentukan dari ada/tidaknya daftar aspek yang ditentukan sendiri.
+     */
+    protected function getAspectMode(?array $predefinedAspects): string
+    {
+        $mode = $this->analysis->metadata['aspect_mode'] ?? null;
+
+        if (in_array($mode, ['automatic', 'rule-based'], true)) {
+            // Mode rule-based tanpa daftar aspek tidak ada artinya bagi Python
+            if ($mode === 'rule-based' && empty($predefinedAspects)) {
+                Log::warning("Analisis {$this->analysis->id}: mode rule-based tanpa predefined_aspects, fallback ke automatic");
+                return 'automatic';
+            }
+
+            return $mode;
+        }
+
+        return $predefinedAspects ? 'rule-based' : 'automatic';
     }
 
     protected function getPredefinedAspects(): ?array
@@ -254,6 +331,8 @@ class ProcessTextAnalysis implements ShouldQueue
             'sentiment_distribution' => null,
             'aspect_results' => null,
             'topic_results' => null,
+            'association_results' => null,
+            'document_aspects' => null,
             'metrics' => null,
             'summary' => null
         ];
@@ -262,27 +341,23 @@ class ProcessTextAnalysis implements ShouldQueue
 
         switch ($this->analysis->analysis_type) {
             case 'sentiment':
-                if (isset($analysisResults['predictions'])) {
-                    $predictions = $analysisResults['predictions'];
-                    
-                    foreach ($predictions as $index => &$prediction) {
-                        if (isset($originalTexts[$index])) {
-                            $prediction['original_text'] = $originalTexts[$index];
-                            $prediction['processed_text'] = $prediction['text'];
-                            $prediction['text'] = $originalTexts[$index];
-                        }
-                    }
-                    
-                    $data['predictions'] = $predictions;
-                }
-                
+                $data['predictions'] = $this->attachOriginalTexts(
+                    $analysisResults['predictions'] ?? [],
+                    $originalTexts
+                );
                 $data['sentiment_distribution'] = $analysisResults['distribution'] ?? null;
                 $data['metrics'] = $analysisResults['metrics'] ?? null;
                 $data['summary'] = $analysisResults['summary'] ?? null;
                 break;
 
             case 'aspect':
+                $documentAspects = $analysisResults['document_aspects'] ?? [];
+
                 $data['aspect_results'] = $analysisResults['aspect_sentiments'] ?? null;
+                $data['document_aspects'] = $documentAspects ?: null;
+                // Tanpa baris prediksi per teks, TrainingItemService tidak punya
+                // apa pun untuk dipecah sehingga halaman feedback selalu kosong.
+                $data['predictions'] = $this->buildAspectPredictions($originalTexts, $documentAspects);
                 $data['summary'] = $analysisResults['summary'] ?? null;
                 break;
 
@@ -292,23 +367,18 @@ class ProcessTextAnalysis implements ShouldQueue
                 break;
 
             case 'combined':
-                if (isset($analysisResults['sentiment']['predictions'])) {
-                    $predictions = $analysisResults['sentiment']['predictions'];
-                    
-                    foreach ($predictions as $index => &$prediction) {
-                        if (isset($originalTexts[$index])) {
-                            $prediction['original_text'] = $originalTexts[$index];
-                            $prediction['processed_text'] = $prediction['text'];
-                            $prediction['text'] = $originalTexts[$index];
-                        }
-                    }
-                    
-                    $data['predictions'] = $predictions;
-                }
-                
+                $documentAspects = $analysisResults['aspect']['document_aspects'] ?? [];
+
+                $data['predictions'] = $this->attachOriginalTexts(
+                    $analysisResults['sentiment']['predictions'] ?? [],
+                    $originalTexts,
+                    $documentAspects
+                );
                 $data['sentiment_distribution'] = $analysisResults['sentiment']['distribution'] ?? null;
                 $data['aspect_results'] = $analysisResults['aspect']['aspect_sentiments'] ?? null;
                 $data['topic_results'] = $analysisResults['topic'] ?? null;
+                $data['association_results'] = $analysisResults['association'] ?? null;
+                $data['document_aspects'] = $documentAspects ?: null;
                 $data['metrics'] = $analysisResults['sentiment']['metrics'] ?? null;
                 $data['summary'] = $this->generateCombinedSummary($analysisResults);
                 break;
@@ -318,6 +388,54 @@ class ProcessTextAnalysis implements ShouldQueue
             ['text_analysis_id' => $this->analysis->id],
             $data
         );
+    }
+
+    /**
+     * Kembalikan teks asli (sebelum preprocessing) ke setiap prediksi.
+     *
+     * Pemetaan memakai original_index yang dikirim NLPApiService saat batching,
+     * supaya posisi tetap benar walaupun ada batch yang gagal di tengah.
+     */
+    protected function attachOriginalTexts(
+        array $predictions,
+        array $originalTexts,
+        array $documentAspects = []
+    ): array {
+        foreach ($predictions as $position => &$prediction) {
+            $index = $prediction['original_index'] ?? $position;
+
+            if (isset($originalTexts[$index])) {
+                $prediction['original_text'] = $originalTexts[$index];
+                $prediction['processed_text'] = $prediction['text'] ?? null;
+                $prediction['text'] = $originalTexts[$index];
+            }
+
+            if (!empty($documentAspects[$index])) {
+                $prediction['aspects'] = array_values(array_unique($documentAspects[$index]));
+            }
+        }
+
+        return $predictions;
+    }
+
+    /**
+     * Susun baris prediksi untuk analisis aspek, yang tidak menghasilkan
+     * prediksi sentimen per teks dari Python.
+     */
+    protected function buildAspectPredictions(array $originalTexts, array $documentAspects): array
+    {
+        $predictions = [];
+
+        foreach ($originalTexts as $index => $text) {
+            $predictions[] = [
+                'text' => $text,
+                'original_text' => $text,
+                'original_index' => $index,
+                'aspects' => array_values(array_unique($documentAspects[$index] ?? [])),
+            ];
+        }
+
+        return $predictions;
     }
 
     protected function generateCombinedSummary(array $results): string

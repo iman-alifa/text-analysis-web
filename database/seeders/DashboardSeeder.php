@@ -127,7 +127,7 @@ class DashboardSeeder extends Seeder
                 'file_type' => $datasetData['file_type'],
                 'file_size' => rand(50000, 500000),
                 'total_rows' => $datasetData['total_rows'],
-                'columns' => json_encode(['id', 'text', 'timestamp']),
+                'columns' => ['id', 'text', 'timestamp'],
                 'is_processed' => true,
             ]);
         }
@@ -187,7 +187,7 @@ class DashboardSeeder extends Seeder
                 'title' => $title,
                 'description' => 'Deskripsi detail untuk ' . strtolower($title),
                 'input_type' => $inputType,
-                'raw_data' => json_encode($randomTexts),
+                'raw_data' => $randomTexts,
                 'file_path' => $inputType !== 'manual' ? 'uploads/' . $user->id . '/file_' . $i . '.' . $inputType : null,
                 'file_name' => $inputType !== 'manual' ? 'data_' . $i . '.' . $inputType : null,
                 'total_records' => $totalRecords,
@@ -332,23 +332,23 @@ class DashboardSeeder extends Seeder
         // Create result
         AnalysisResult::create([
             'text_analysis_id' => $analysis->id,
-            'preprocessed_data' => json_encode([
+            'preprocessed_data' => [
                 'original_count' => count($texts),
                 'processed_count' => count($texts),
                 'removed_stopwords' => rand(50, 200),
                 'stemmed_words' => rand(100, 300),
-            ]),
-            'predictions' => json_encode($predictions),
-            'sentiment_distribution' => json_encode($sentimentDistribution),
-            'aspect_results' => json_encode($aspectResults),
-            'topic_results' => json_encode($topicResults),
-            'metrics' => json_encode($metrics),
+            ],
+            'predictions' => $predictions,
+            'sentiment_distribution' => $sentimentDistribution,
+            'aspect_results' => $aspectResults,
+            'topic_results' => $topicResults,
+            'metrics' => $metrics,
             'summary' => $summary,
-            'visualizations' => json_encode([
+            'visualizations' => [
                 'sentiment_chart' => 'charts/sentiment_' . $analysis->id . '.png',
                 'wordcloud' => 'charts/wordcloud_' . $analysis->id . '.png',
                 'topic_chart' => 'charts/topics_' . $analysis->id . '.png',
-            ]),
+            ],
         ]);
     }
 }
