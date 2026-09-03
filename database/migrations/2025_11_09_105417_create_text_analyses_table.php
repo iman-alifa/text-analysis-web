@@ -25,7 +25,7 @@ return new class extends Migration
             $table->timestamp('completed_at')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index(['user_id', 'status']);
             $table->index('created_at');
         });

@@ -43,11 +43,11 @@ class PreprocessingConfigResolver
                 $config = PreprocessingConfig::find($configId);
             }
 
-            if (!$config) {
+            if (! $config) {
                 $config = PreprocessingConfig::where('is_default', true)->first();
             }
         } catch (Exception $e) {
-            Log::warning('Gagal memuat preprocessing config: ' . $e->getMessage());
+            Log::warning('Gagal memuat preprocessing config: '.$e->getMessage());
         }
 
         $resolved = $config ? $config->toApiFormat() : self::FALLBACK;
@@ -103,7 +103,8 @@ class PreprocessingConfigResolver
                 ->values()
                 ->all();
         } catch (Exception $e) {
-            Log::warning('Gagal memuat custom stopwords: ' . $e->getMessage());
+            Log::warning('Gagal memuat custom stopwords: '.$e->getMessage());
+
             return [];
         }
     }

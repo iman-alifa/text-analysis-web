@@ -12,7 +12,7 @@ class AspectResultNormalizationTest extends TestCase
 {
     private function makeResult(array $aspectResults): AnalysisResult
     {
-        $result = new AnalysisResult();
+        $result = new AnalysisResult;
         $result->setRawAttributes(['aspect_results' => json_encode($aspectResults)]);
 
         return $result;

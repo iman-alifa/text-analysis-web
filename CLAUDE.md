@@ -238,3 +238,161 @@ Repo belum pernah diformat Pint (`./vendor/bin/pint --test` melaporkan 66 isu di
 sekaligus dalam commit tersendiri agar tidak bercampur dengan perubahan fungsional.
 
 Tes: **126**.
+
+## Penyisiran lanjutan (3 Sep 2026, setelah push)
+
+Sisi `nlp-api-service` sudah diperbaiki pemiliknya: checkpoint hasil retraining
+kini dimuat saat startup, `init.py` sudah menjadi `__init__.py`, sintaks Pydantic
+v2 dipakai, dan direktori `tests/` sudah terisi. Blocker fine-tuning yang dulu
+dicatat di sini sudah tidak berlaku.
+
+Temuan baru di `text-analysis-web` dan perbaikannya:
+
+1. **Path traversal pada rute unduh YouTube.** `download($filename)` menyambung
+   nama berkas dari URL langsung ke `storage_path('app/public/exports/')` tanpa
+   penyaringan. Karena responsnya memakai `deleteFileAfterSend(true)`, celah itu
+   bukan hanya membocorkan berkas di luar direktori exports tetapi juga
+   **menghapusnya**. Kini nama dilewatkan `basename()`, dibatasi pola
+   `^[A-Za-z0-9._-]+\.(csv|xlsx|txt)$`, dan hasil `realpath()` wajib berada di
+   dalam direktori exports.
+
+2. **Dua angka koherensi topik untuk analisis yang sama.** Halaman feedback
+   menampilkan skor hasil perhitungan PHP (`ModelEvaluationService::calculateTopicCoherence`),
+   sementara halaman hasil menampilkan `quality.c_v` dari NLP API. Keduanya
+   implementasi berbeda dan pasti berselisih - berbahaya untuk dikutip di
+   naskah. `buildTopicEvaluation()` kini mendahulukan blok `quality` dari API
+   (`source: 'nlp-api'`) dan hanya jatuh ke perhitungan PHP untuk analisis lama
+   yang belum menyimpannya (`source: 'php-fallback'`). Label mutunya disatukan
+   lewat `labelKoherensi()` agar satu angka tidak dilabeli berbeda di dua halaman.
+
+3. **Baris `training_items` yatim ikut dihitung dan ikut dilatih.**
+   `TextAnalysis` memakai soft delete, sehingga `onDelete('cascade')` pada
+   `training_items` tidak pernah berjalan. Pada database pengembangan ditemukan
+   **4.307 baris** milik 94 analisis terhapus - tidak muncul di daftar file mana
+   pun, tidak bisa dikoreksi siapa pun, tetapi ikut menggelembungkan "Total Data
+   Baris" (4.885 alih-alih 578). Statistik admin, `triggerTraining`,
+   `previewTraining`, dan export CSV kini semuanya dibatasi
+   `whereHas('textAnalysis')`.
+
+   Catatan: dari 292 koreksi yang ada, **nol** di antaranya milik analisis
+   terhapus, jadi data latih untuk studi kasus tidak terpengaruh. Baris yatimnya
+   sendiri sengaja tidak dihapus - itu keputusan pemilik data.
+
+Tes: **137**.
+
+## Perombakan daftar prediksi & koreksi (3 Sep 2026)
+
+Dua halaman terberat dirombak ke paginasi sisi server. Ukuran diukur pada
+analisis 72 (289 prediksi):
+
+| Halaman | Sebelum | Sesudah |
+|---|---|---|
+| `/analysis/{id}` | 2.734 KB | **380 KB** |
+| `/analysis/{id}/feedback` | 2.110 KB | **217 KB** |
+
+**Daftar prediksi** (`PredictionQueryService`): penyaringan (sentimen + antrean
+tinjauan), pencarian, dan paginasi dikerjakan di server lewat
+`GET /analysis/{id}/predictions`. Halaman pertama tetap dirender di server
+sehingga daftarnya tampil tanpa JavaScript; halaman berikutnya diambil AJAX dan
+mengembalikan HTML dari partial yang sama (`analysis.partials.prediction-list`),
+jadi markup kartu tidak digandakan di JavaScript. Permintaan yang tertinggal
+dibatalkan lewat `AbortController` supaya hasil lama tidak menimpa penyaringan
+yang lebih baru, dan pencarian di-debounce 300 ms.
+
+Prediksi disimpan sebagai satu kolom JSON, bukan baris tabel, sehingga
+paginasinya memotong array di PHP - bukan query SQL. Itu tetap jauh lebih murah
+daripada merender seluruh baris.
+
+**Ikon sentimen** kini satu sprite `<symbol>` yang dirujuk `<use>`, bukan tiga
+varian SVG penuh yang diulang di setiap kartu - itu penyumbang terbesar berat
+per kartu.
+
+**Halaman koreksi** memakai paginator Eloquent biasa (25 baris, paling tidak
+yakin lebih dulu). Evaluasi tetap dihitung dari seluruh baris, hanya renderingnya
+yang dibatasi. Setelah menyimpan, pengguna kembali ke halaman koreksi yang sama
+alih-alih dilempar ke halaman hasil, karena alurnya biasanya berlanjut ke
+halaman berikutnya.
+
+Aksesibilitas: tombol penyaring memakai `role="group"` + `aria-pressed`, kotak
+cari punya label, daftar prediksi memakai `aria-live`/`aria-busy`, dan tombol
+"Lihat teks terproses" memakai `aria-expanded`/`aria-controls`.
+
+Seluruh basis kode kini lolos `./vendor/bin/pint` (118 file). Tes: **152**.
+
+## Interpretasi AI di halaman hasil (3 Sep 2026)
+
+Tombol "Generate Interpretasi AI" yang lama hanya melabeli topik. Kini ada lima
+bagian yang bisa dinarasikan: `overview`, `sentiment`, `aspect`, `topic`,
+`association` (`AnalysisInterpretationService::SECTIONS`), lewat satu endpoint
+`POST /analysis/{id}/interpret/{section}` (`throttle:10,1`).
+
+Tiga aturan yang mengikat:
+
+1. **Narasi AI adalah lapisan tambahan, bukan pengganti.** Ringkasan template
+   (`NLPApiService::generateSentimentSummary`, `generateAspectSummary`) dan narasi
+   PMI berbasis aturan tetap tampil. Halaman hasil harus tetap bermakna ketika
+   `GEMINI_API_KEY` kosong atau kuotanya habis.
+2. **Dibangkitkan saat diminta, bukan di dalam job.** `ProcessTextAnalysis` tidak
+   boleh bergantung pada layanan luar yang bisa gagal, dan tiap pemanggilan
+   memotong kuota harian.
+3. **Angka dikirim ke model, bukan diminta dihitung model.** Prompt memuat
+   larangan eksplisit menghitung ulang atau menyebut angka yang tidak ada di
+   payload. Seluruh statistik tetap berasal dari pipeline.
+
+Hasil disimpan di kolom baru `analysis_results.ai_interpretations` (JSON per
+bagian), **bukan** diselipkan ke `topic_results` seperti versi lama - menumpang
+di kolom hasil model membuat narasi ikut hilang setiap analisis diproses ulang.
+Pengecualian: label topik tetap *juga* ditulis ke `topic_results['interpretation']`
+karena heatmap asosiasi dan export PDF membacanya dari sana.
+
+Tiap entri membawa `model`, `prompt_version`, dan `generated_at`. Ini wajib:
+naskah harus bisa menyebut model dan tanggal pembangkitan. Naikkan
+`LlmService::PROMPT_VERSION` setiap kali susunan prompt berubah.
+
+### Yang diperbaiki pada fitur lama
+
+1. **Tidak bisa diuji.** `LlmService` memakai Guzzle mentah, jadi `Http::fake()`
+   tidak menyentuhnya dan ini satu-satunya bagian sistem tanpa tes. Kini memakai
+   facade `Http` dan diinjeksi, bukan `new \App\Services\LlmService` di controller.
+2. **JSON diminta lewat prompt, bukan skema.** Kini memakai `response_schema`
+   (structured output). Tambalan "kalau LLM membalas indeks 1-based, kurangi 1"
+   dihapus; `topic_id` yang tidak ada di daftar topik sekarang ditolak, bukan
+   ditebak.
+3. **Sekali jadi tidak bisa diulang.** Ada `regenerate`, jadi label yang keliru
+   tidak perlu diperbaiki lewat database.
+4. **Rute tanpa throttle.** Satu-satunya rute AJAX di grup itu yang tidak punya
+   throttle; kini `10,1`.
+5. **Prompt tanpa konteks korpus.** Judul dan jumlah teks ikut dikirim. Sebaliknya
+   ada larangan mengutip judul di dalam kalimat - judul sering berupa catatan
+   teknis ("Final combined 15:17:59") dan terbaca janggal.
+6. **Provenance** disimpan (lihat di atas).
+
+### Model
+
+Jangan mengejar versi terbaru. Diuji 3 Sep 2026 dengan API key proyek ini:
+`gemini-3.5-flash` -> 200, `gemini-3.8-flash` -> 503. Yang lebih penting, model
+**dipatok versinya** dan bukan alias `gemini-flash-latest`: narasi yang dikutip
+di naskah harus bisa direproduksi berbulan-bulan kemudian. `GEMINI_TIMEOUT` (45)
+dan `GEMINI_RETRY` (2) menyusul, karena narasi lebih panjang daripada label topik
+dan sering terpotong pada batas 30 detik yang lama.
+
+### Bug lama yang ikut ketemu
+
+1. **Dua fungsi global dideklarasikan di dalam `@php` pada `show.blade.php`**
+   (`getPmiColorClass`, `getCrosstabColorClass`). Merender view itu dua kali dalam
+   satu proses PHP memicu `Cannot redeclare` - artinya dua tes yang membuka
+   halaman hasil analisis gabungan akan saling menjatuhkan. Diganti closure.
+2. **Nama aspek disisipkan ke HTML tanpa escape** pada narasi PMI, lalu dicetak
+   dengan `{!! !!}`. Nama aspek bisa berasal dari masukan pengguna
+   (`predefined_aspects`), jadi itu jalur XSS tersimpan. Narasinya pindah ke
+   `AssociationInsightService` yang meng-`e()` setiap nilai, dan sekaligus keluar
+   dari berkas tampilan sehingga bisa diuji dan dipakai ulang.
+3. **`$topic['size']` dibaca tanpa penjaga** - sama seperti `proportion` dulu,
+   halaman hasil 500 untuk topik yang datanya tidak memuat kunci itu.
+4. Narasi AI kini ikut pada **export PDF** beserta model dan tanggalnya.
+
+Diverifikasi terhadap Gemini sungguhan pada analisis 95: kelima bagian berhasil,
+dan angkanya cocok persis dengan `sentiment_distribution` tersimpan (60/35/5 dari
+60 teks) - model tidak mengarang angka.
+
+Tes: **173**. Yang baru: `AiInterpretationTest` (15), `AssociationInsightTest` (6).

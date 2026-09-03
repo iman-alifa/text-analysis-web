@@ -4,8 +4,8 @@ namespace Tests\Feature;
 
 use App\Jobs\ProcessTextAnalysis;
 use App\Services\NLPApiService;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 /**
@@ -22,26 +22,26 @@ class QueueTimeoutConfigTest extends TestCase
 {
     public function test_retry_after_antrean_melebihi_timeout_job(): void
     {
-        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis());
+        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis);
         $retryAfter = config('queue.connections.database.retry_after');
 
         $this->assertGreaterThan(
             $job->timeout,
             $retryAfter,
             'retry_after harus > timeout job, atau job yang masih berjalan '
-            . 'dilepas kembali ke antrean dan diproses ganda'
+            .'dilepas kembali ke antrean dan diproses ganda'
         );
     }
 
     public function test_timeout_http_lebih_kecil_dari_timeout_job(): void
     {
-        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis());
+        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis);
 
         $this->assertLessThan(
             $job->timeout,
             config('services.nlp_api.timeout'),
             'Timeout HTTP harus < timeout job, supaya job yang menghentikan '
-            . 'pekerjaan macet dan bisa mencatat sebabnya'
+            .'pekerjaan macet dan bisa mencatat sebabnya'
         );
     }
 
@@ -49,15 +49,15 @@ class QueueTimeoutConfigTest extends TestCase
     {
         $this->assertInstanceOf(
             ShouldBeUnique::class,
-            new ProcessTextAnalysis(new \App\Models\TextAnalysis())
+            new ProcessTextAnalysis(new \App\Models\TextAnalysis)
         );
     }
 
     public function test_kunci_unik_dipisah_per_analisis(): void
     {
-        $satu = new \App\Models\TextAnalysis();
+        $satu = new \App\Models\TextAnalysis;
         $satu->id = 1;
-        $dua = new \App\Models\TextAnalysis();
+        $dua = new \App\Models\TextAnalysis;
         $dua->id = 2;
 
         $this->assertNotSame(
@@ -69,13 +69,13 @@ class QueueTimeoutConfigTest extends TestCase
 
     public function test_kunci_unik_bertahan_selama_job_berjalan(): void
     {
-        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis());
+        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis);
 
         $this->assertGreaterThan(
             $job->timeout,
             $job->uniqueFor,
             'Kunci unik harus hidup lebih lama daripada job, atau job kedua '
-            . 'bisa masuk sebelum yang pertama selesai'
+            .'bisa masuk sebelum yang pertama selesai'
         );
     }
 
@@ -96,7 +96,7 @@ class QueueTimeoutConfigTest extends TestCase
             ], 200),
         ]);
 
-        $this->assertTrue((new NLPApiService())->warmUp());
+        $this->assertTrue((new NLPApiService)->warmUp());
     }
 
     /**
@@ -107,7 +107,7 @@ class QueueTimeoutConfigTest extends TestCase
     {
         Http::fake(['*/api/warmup' => Http::response('kacau', 500)]);
 
-        $this->assertFalse((new NLPApiService())->warmUp());
+        $this->assertFalse((new NLPApiService)->warmUp());
     }
 
     public function test_warmup_melaporkan_belum_siap_bila_ada_model_gagal(): void
@@ -121,6 +121,6 @@ class QueueTimeoutConfigTest extends TestCase
             ], 200),
         ]);
 
-        $this->assertFalse((new NLPApiService())->warmUp());
+        $this->assertFalse((new NLPApiService)->warmUp());
     }
 }

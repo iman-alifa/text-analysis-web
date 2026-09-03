@@ -57,7 +57,7 @@ class RetrainTriggerTest extends TestCase
         $this->seedCorrectedItems(12);
 
         $response = $this->actingAs($this->admin())
-                         ->post(route('admin.training.trigger'), ['model_type' => 'sentiment', 'epochs' => 4]);
+            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment', 'epochs' => 4]);
 
         $response->assertRedirect();
         $response->assertSessionHas('success');
@@ -77,12 +77,12 @@ class RetrainTriggerTest extends TestCase
 
         // Buat sebagian prediksi salah supaya akurasi tidak bulat 100%
         TrainingItem::where('text_analysis_id', $analysis->id)
-                    ->limit(3)
-                    ->update(['predicted_sentiment' => 'positive']);
+            ->limit(3)
+            ->update(['predicted_sentiment' => 'positive']);
 
         $this->actingAs($this->admin())
-             ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
-             ->assertSessionHas('success');
+            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->assertSessionHas('success');
 
         $snapshot = EvaluationSnapshot::firstOrFail();
 
@@ -99,8 +99,8 @@ class RetrainTriggerTest extends TestCase
         $this->seedCorrectedItems(3);
 
         $this->actingAs($this->admin())
-             ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
-             ->assertSessionHas('error');
+            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->assertSessionHas('error');
 
         $this->assertSame(0, ModelTraining::count());
         Queue::assertNothingPushed();
@@ -120,8 +120,8 @@ class RetrainTriggerTest extends TestCase
         ]);
 
         $this->actingAs($this->admin())
-             ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
-             ->assertSessionHas('error');
+            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->assertSessionHas('error');
 
         Queue::assertNothingPushed();
     }
@@ -132,8 +132,8 @@ class RetrainTriggerTest extends TestCase
         $this->seedCorrectedItems(12);
 
         $this->actingAs(User::factory()->create(['role' => 'user']))
-             ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
-             ->assertForbidden();
+            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->assertForbidden();
 
         Queue::assertNothingPushed();
     }

@@ -267,6 +267,13 @@
         </div>
         @endif
 
+        @include('analysis.partials.ai-interpretation', [
+            'section' => 'overview',
+            'judul' => 'Ringkasan Eksekutif AI',
+            'keterangan' => 'Menyatukan seluruh bagian hasil menjadi satu gambaran utuh.',
+            'stored' => $aiSections['overview'] ?? null,
+        ])
+
         <!-- Metrics Cards -->
         @php
             // Hanya nilai tunggal yang layak jadi kartu. metrics juga memuat
@@ -335,13 +342,17 @@
                 </div>
             </div>
 
+            @include('analysis.partials.ai-interpretation', [
+                'section' => 'sentiment',
+                'judul' => 'Interpretasi AI: Sentimen',
+                'keterangan' => 'Penjelasan naratif atas distribusi sentimen di atas.',
+                'stored' => $aiSections['sentiment'] ?? null,
+            ])
+
             <!-- Predictions List -->
             @if($result->predictions)
             @php
                 $reviewQueue = $result->metrics['review_queue'] ?? null;
-                // Indeks antrean mengacu ke posisi teks masukan, bukan urutan baris
-                // tersimpan - keduanya bisa berbeda bila ada batch yang gagal.
-                $reviewRanks = $reviewQueue ? array_flip($reviewQueue['indices']) : [];
                 $qualityCounters = collect([
                     'total_empty' => ['label' => 'baris kosong', 'note' => 'tidak ikut dihitung dalam persentase'],
                     'total_truncated' => ['label' => 'teks terpotong', 'note' => 'melebihi 512 token, ekornya tidak dinilai'],
@@ -357,22 +368,22 @@
                         </div>
                         
                         <!-- Filter Buttons -->
-                        <div class="flex gap-2">
-                            <button onclick="filterPredictions('all')" class="filter-btn active px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white" data-filter="all">
+                        <div class="flex gap-2 flex-wrap" role="group" aria-label="Saring prediksi">
+                            <button type="button" onclick="filterPredictions('all')" class="filter-btn active px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white" data-filter="all" aria-pressed="true">
                                 Semua
                             </button>
                             @if($reviewQueue && $reviewQueue['count'] > 0)
-                            <button onclick="filterPredictions('review')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" data-filter="review">
+                            <button type="button" onclick="filterPredictions('review')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" data-filter="review" aria-pressed="false">
                                 Perlu Ditinjau ({{ $reviewQueue['count'] }})
                             </button>
                             @endif
-                            <button onclick="filterPredictions('positive')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="positive">
+                            <button type="button" onclick="filterPredictions('positive')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="positive" aria-pressed="false">
                                 Positif
                             </button>
-                            <button onclick="filterPredictions('neutral')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="neutral">
+                            <button type="button" onclick="filterPredictions('neutral')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="neutral" aria-pressed="false">
                                 Netral
                             </button>
-                            <button onclick="filterPredictions('negative')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="negative">
+                            <button type="button" onclick="filterPredictions('negative')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="negative" aria-pressed="false">
                                 Negatif
                             </button>
                         </div>
@@ -407,243 +418,178 @@
 
                 <!-- Search Box -->
                 <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <input type="text"
+                    <label for="searchPredictions" class="sr-only">Cari teks prediksi</label>
+                    <input type="search"
                         id="searchPredictions"
+                        autocomplete="off"
                         placeholder="Cari teks..." 
                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                 </div>
                 
                 <div class="p-6">
                     <!-- Predictions Container -->
-                    <div id="predictions-container" class="space-y-3 max-h-[600px] overflow-y-auto">
-                        @foreach($result->predictions as $index => $pred)
-                        @php
-                            $originalIndex = $pred['original_index'] ?? $index;
-                            $reviewRank = $reviewRanks[$originalIndex] ?? -1;
-                            $method = $pred['method'] ?? null;
-                        @endphp
-                        <div class="prediction-card {{ $pred['sentiment'] }} p-4 rounded-lg{{ $reviewRank >= 0 ? ' ring-1 ring-amber-300' : '' }}"
-                            data-sentiment="{{ $pred['sentiment'] }}"
-                            data-review-rank="{{ $reviewRank }}"
-                            data-original-order="{{ $index }}"
-                            data-text="{{ strtolower($pred['text']) }}">
-                            <div class="flex items-start justify-between gap-4">
-                                <!-- Text Content -->
-                                <div class="flex-1 min-w-0">
-                                    <!-- Original Text (Displayed) -->
-                                    <div class="mb-2">
-                                        <p class="text-gray-800 leading-relaxed">{{ $pred['text'] }}</p>
-                                    </div>
-                                    
-                                    <!-- Metadata -->
-                                    <div class="flex flex-wrap items-center gap-3">
-                                        <!-- Sentiment Badge -->
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                            @if($pred['sentiment'] == 'positive') bg-green-100 text-green-800
-                                            @elseif($pred['sentiment'] == 'negative') bg-red-100 text-red-800
-                                            @else bg-gray-100 text-gray-800
-                                            @endif">
-                                            @if($pred['sentiment'] == 'positive')
-                                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                                                </svg>
-                                            @elseif($pred['sentiment'] == 'negative')
-                                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
-                                                </svg>
-                                            @else
-                                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/>
-                                                </svg>
-                                            @endif
-                                            {{ ucfirst($pred['sentiment']) }}
-                                        </span>
-                                        
-                                        <!-- Confidence -->
-                                        @if(isset($pred['confidence']))
-                                        <span class="text-xs text-gray-500 flex items-center">
-                                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                                <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"/>
-                                                <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 100 2h.01a1 1 0 100-2H7zm3 0a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/>
-                                            </svg>
-                                            Confidence: <strong class="ml-1">{{ round($pred['confidence'] * 100, 1) }}%</strong>
-                                        </span>
-                                        @endif
-                                        
-                                        <!-- Asal prediksi: model sungguhan atau jalur cadangan -->
-                                        @if($method && $method !== 'indobert')
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
-                                            @if($method === 'rule-based') bg-orange-100 text-orange-800
-                                            @elseif($method === 'error') bg-red-100 text-red-800
-                                            @else bg-gray-100 text-gray-600
-                                            @endif">
-                                            @if($method === 'rule-based') Tanpa model
-                                            @elseif($method === 'empty') Tidak dinilai
-                                            @else Gagal dinilai @endif
-                                        </span>
-                                        @endif
+                    {{-- Sprite ikon: tiga varian yang sama dulu diulang penuh
+                         pada setiap kartu, dan itu bagian terbesar dari berat
+                         halaman ketika prediksinya ratusan. --}}
+                    <svg class="hidden" aria-hidden="true">
+                        <symbol id="ikon-sentimen-positive" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </symbol>
+                        <symbol id="ikon-sentimen-negative" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                        </symbol>
+                        <symbol id="ikon-sentimen-neutral" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/>
+                        </symbol>
+                    </svg>
 
-                                        <!-- Show Processed Text Toggle (Optional) -->
-                                        @if(isset($pred['processed_text']) && $pred['processed_text'] != $pred['text'])
-                                        <button 
-                                            onclick="toggleProcessedText({{ $index }})" 
-                                            class="text-xs text-blue-600 hover:text-blue-800 flex items-center">
-                                            <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                            </svg>
-                                            Lihat teks terproses
-                                        </button>
-                                        @endif
-                                    </div>
-                                    
-                                    <!-- Processed Text (Hidden by default) -->
-                                    @if(isset($pred['processed_text']) && $pred['processed_text'] != $pred['text'])
-                                    <div id="processed-text-{{ $index }}" class="hidden mt-3 p-3 bg-gray-50 rounded border border-gray-200">
-                                        <p class="text-xs text-gray-500 mb-1 font-semibold">Teks Setelah Preprocessing:</p>
-                                        <p class="text-sm text-gray-700 font-mono">{{ $pred['processed_text'] }}</p>
-                                    </div>
-                                    @endif
-                                    
-                                    <!-- Sentiment Scores (if available) -->
-                                    @if(isset($pred['scores']))
-                                    <div class="mt-3 space-y-1">
-                                        <p class="text-xs text-gray-500 font-semibold mb-2">Skor Detail:</p>
-                                        @foreach($pred['scores'] as $sentiment => $score)
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-xs text-gray-600 w-20 capitalize">{{ $sentiment }}:</span>
-                                            <div class="flex-1 bg-gray-200 rounded-full h-2">
-                                                <div class="h-2 rounded-full transition-all duration-500
-                                                    @if($sentiment == 'positive') bg-green-500
-                                                    @elseif($sentiment == 'negative') bg-red-500
-                                                    @else bg-gray-500
-                                                    @endif"
-                                                    style="width: {{ $score * 100 }}%">
-                                                </div>
-                                            </div>
-                                            <span class="text-xs text-gray-600 w-12 text-right">{{ round($score * 100, 1) }}%</span>
-                                        </div>
-                                        @endforeach
-                                    </div>
-                                    @endif
-                                </div>
-                                
-                                <!-- Index Number -->
-                                <div class="flex-shrink-0">
-                                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-600 text-sm font-semibold">
-                                        {{ $index + 1 }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                        @endforeach
+                    <div id="predictions-container"
+                         class="space-y-3"
+                         aria-live="polite"
+                         aria-busy="false">
+                        @include('analysis.partials.prediction-list', [
+                            'items' => $predictionPage['items'],
+                            'meta' => $predictionPage['meta'],
+                        ])
                     </div>
-                    
-                    <!-- Results Count -->
-                    <div class="mt-4 text-center text-sm text-gray-500">
-                        <span id="predictions-count">Menampilkan {{ count($result->predictions) }} dari {{ count($result->predictions) }} prediksi</span>
+
+                    {{-- Kontrol halaman --}}
+                    <div id="predictions-pagination" class="mt-4 flex items-center justify-between gap-4 flex-wrap">
+                        <p class="text-sm text-gray-500" id="predictions-count">
+                            Menampilkan {{ $predictionPage['meta']['from'] }}&ndash;{{ $predictionPage['meta']['to'] }}
+                            dari {{ $predictionPage['meta']['filtered'] }} prediksi
+                        </p>
+
+                        <div class="flex items-center gap-2">
+                            <button type="button" id="predictions-prev"
+                                    class="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    disabled>
+                                Sebelumnya
+                            </button>
+                            <span class="text-sm text-gray-600" id="predictions-page-label">
+                                Halaman {{ $predictionPage['meta']['page'] }} dari {{ $predictionPage['meta']['last_page'] }}
+                            </span>
+                            <button type="button" id="predictions-next"
+                                    class="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                    {{ $predictionPage['meta']['last_page'] > 1 ? '' : 'disabled' }}>
+                                Berikutnya
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
 
             @push('scripts')
             <script>
-                // Hanya jumlahnya yang dipakai. Menanam seluruh array prediksi
-                // di sini menggandakan berat halaman - datanya sudah dirender
-                // sebagai kartu HTML - dan pada 885 teks halaman ini mencapai
-                // 7,8 MB hanya karena salinan JSON tersebut.
-                const totalPredictions = {{ count($result->predictions) }};
-                let currentFilter = 'all';
-                
-                // Toggle processed text visibility
-                function toggleProcessedText(index) {
-                    const element = document.getElementById(`processed-text-${index}`);
-                    if (element) {
-                        element.classList.toggle('hidden');
-                    }
-                }
-                
-                // Filter predictions by sentiment
-                function filterPredictions(sentiment) {
-                    currentFilter = sentiment;
-                    
-                    // Update button states
-                    document.querySelectorAll('.filter-btn').forEach(btn => {
-                        btn.classList.remove('active', 'bg-blue-600', 'text-white');
-                        btn.classList.add('bg-gray-100', 'text-gray-700');
-                    });
-                    
-                    const activeBtn = document.querySelector(`[data-filter="${sentiment}"]`);
-                    if (activeBtn) {
-                        activeBtn.classList.add('active', 'bg-blue-600', 'text-white');
-                        activeBtn.classList.remove('bg-gray-100', 'text-gray-700');
-                    }
-                    
-                    applyFilters();
-                }
-                
-                // Search functionality
-                document.getElementById('searchPredictions')?.addEventListener('input', function(e) {
-                    applyFilters();
-                });
-                
-                // Apply filters
-                function applyFilters() {
-                    const searchTerm = document.getElementById('searchPredictions')?.value.toLowerCase() || '';
+                // Daftar prediksi dimuat per halaman dari server. Sebelumnya
+                // seluruh baris dirender sekaligus lalu disaring di browser,
+                // sehingga halaman hasil untuk 289 prediksi mencapai 2,7 MB.
+                (function () {
                     const container = document.getElementById('predictions-container');
-                    const cards = document.querySelectorAll('.prediction-card');
-                    let visibleCount = 0;
+                    if (!container) return;
 
-                    // Mode tinjauan: urutkan dari yang paling tidak yakin, sesuai
-                    // urutan indices dari API. Mode lain kembali ke urutan asli.
-                    if (container) {
-                        const ordered = Array.from(cards).sort((a, b) => {
-                            const rankA = parseInt(a.dataset.reviewRank ?? -1, 10);
-                            const rankB = parseInt(b.dataset.reviewRank ?? -1, 10);
+                    const searchInput = document.getElementById('searchPredictions');
+                    const countLabel = document.getElementById('predictions-count');
+                    const pageLabel = document.getElementById('predictions-page-label');
+                    const prevBtn = document.getElementById('predictions-prev');
+                    const nextBtn = document.getElementById('predictions-next');
+                    const endpoint = @json(route('analysis.predictions', $analysis->id));
 
-                            if (currentFilter === 'review') {
-                                return rankA - rankB;
-                            }
+                    let state = { filter: 'all', q: '', page: 1, lastPage: {{ $predictionPage['meta']['last_page'] }} };
+                    let pending = null;
 
-                            return parseInt(a.dataset.originalOrder ?? 0, 10) - parseInt(b.dataset.originalOrder ?? 0, 10);
+                    function setLoading(loading) {
+                        container.setAttribute('aria-busy', loading ? 'true' : 'false');
+                        container.classList.toggle('opacity-50', loading);
+                    }
+
+                    function muat() {
+                        // Permintaan sebelumnya dibatalkan supaya hasil yang datang
+                        // terlambat tidak menimpa penyaringan yang lebih baru.
+                        if (pending) pending.abort();
+                        pending = new AbortController();
+
+                        const params = new URLSearchParams({ filter: state.filter, page: state.page });
+                        if (state.q) params.set('q', state.q);
+
+                        setLoading(true);
+
+                        fetch(`${endpoint}?${params}`, {
+                            headers: { 'Accept': 'application/json' },
+                            signal: pending.signal,
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (!data.success) return;
+
+                            container.innerHTML = data.html;
+                            state.page = data.meta.page;
+                            state.lastPage = data.meta.last_page;
+
+                            countLabel.textContent = data.meta.filtered === 0
+                                ? 'Tidak ada prediksi yang cocok'
+                                : `Menampilkan ${data.meta.from}\u2013${data.meta.to} dari ${data.meta.filtered} prediksi`;
+                            pageLabel.textContent = `Halaman ${data.meta.page} dari ${data.meta.last_page}`;
+                            prevBtn.disabled = data.meta.page <= 1;
+                            nextBtn.disabled = data.meta.page >= data.meta.last_page;
+                        })
+                        .catch(error => {
+                            if (error.name === 'AbortError') return;
+                            container.innerHTML = '<p class="py-8 text-center text-red-600">Gagal memuat prediksi.</p>';
+                        })
+                        .finally(() => setLoading(false));
+                    }
+
+                    window.filterPredictions = function (filter) {
+                        state.filter = filter;
+                        state.page = 1;
+
+                        document.querySelectorAll('.filter-btn').forEach(btn => {
+                            // Kelas amber milik tombol tinjauan ikut dilepas, kalau tidak
+                            // dua kelas latar aktif bersamaan saat tombol itu dipilih.
+                            btn.classList.remove('active', 'bg-blue-600', 'text-white', 'bg-amber-100', 'text-amber-800', 'hover:bg-amber-200');
+                            btn.classList.add('bg-gray-100', 'text-gray-700');
+                            btn.setAttribute('aria-pressed', 'false');
                         });
 
-                        ordered.forEach(card => container.appendChild(card));
-                    }
-
-                    cards.forEach(card => {
-                        const sentiment = card.dataset.sentiment;
-                        const text = card.dataset.text;
-                        const reviewRank = parseInt(card.dataset.reviewRank ?? -1, 10);
-
-                        let shouldShow = true;
-
-                        // Filter antrean tinjauan
-                        if (currentFilter === 'review') {
-                            shouldShow = reviewRank >= 0;
-                        } else if (currentFilter !== 'all' && sentiment !== currentFilter) {
-                            shouldShow = false;
+                        const activeBtn = document.querySelector(`[data-filter="${filter}"]`);
+                        if (activeBtn) {
+                            activeBtn.classList.add('active', 'bg-blue-600', 'text-white');
+                            activeBtn.classList.remove('bg-gray-100', 'text-gray-700');
+                            activeBtn.setAttribute('aria-pressed', 'true');
                         }
 
-                        // Filter by search term
-                        if (searchTerm && !text.includes(searchTerm)) {
-                            shouldShow = false;
-                        }
-                        
-                        // Show/hide card
-                        if (shouldShow) {
-                            card.style.display = 'block';
-                            visibleCount++;
-                        } else {
-                            card.style.display = 'none';
-                        }
+                        muat();
+                    };
+
+                    window.toggleProcessedText = function (index) {
+                        const element = document.getElementById(`processed-text-${index}`);
+                        if (!element) return;
+
+                        const tampil = element.classList.toggle('hidden') === false;
+                        const tombol = document.querySelector(`[aria-controls="processed-text-${index}"]`);
+                        if (tombol) tombol.setAttribute('aria-expanded', tampil ? 'true' : 'false');
+                    };
+
+                    let debounce = null;
+                    searchInput?.addEventListener('input', function () {
+                        clearTimeout(debounce);
+                        // Ditunda agar setiap ketikan tidak memicu satu permintaan.
+                        debounce = setTimeout(() => {
+                            state.q = this.value.trim();
+                            state.page = 1;
+                            muat();
+                        }, 300);
                     });
-                    
-                    // Update count
-                    const countEl = document.getElementById('predictions-count');
-                    if (countEl) {
-                        countEl.textContent = `Menampilkan ${visibleCount} dari ${totalPredictions} prediksi`;
-                    }
-                }
+
+                    prevBtn?.addEventListener('click', () => {
+                        if (state.page > 1) { state.page -= 1; muat(); }
+                    });
+
+                    nextBtn?.addEventListener('click', () => {
+                        if (state.page < state.lastPage) { state.page += 1; muat(); }
+                    });
+                })();
             </script>
             @endpush
             @endif
@@ -702,6 +648,13 @@
                     @endforeach
                 </div>
             </div>
+
+            @include('analysis.partials.ai-interpretation', [
+                'section' => 'aspect',
+                'judul' => 'Interpretasi AI: Aspek',
+                'keterangan' => 'Aspek mana yang paling disorot dan mana yang sentimennya bermasalah.',
+                'stored' => $aiSections['aspect'] ?? null,
+            ])
         </div>
         @endif
 
@@ -815,18 +768,29 @@
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold text-gray-900">Detail Topik</h3>
-                    @if(!isset($result->topic_results['interpretation']))
-                        <button id="btnGenerateAI" class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-sm font-medium rounded-lg hover:from-purple-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                            Generate Interpretasi AI
+                    @php $topikSudahDilabeli = ! empty($result->topic_results['interpretation']); @endphp
+                    <div class="flex items-center gap-2 flex-wrap">
+                        @if($topikSudahDilabeli)
+                            <span id="badgeTopikAI" class="inline-flex items-center px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200">
+                                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                                Diinterpretasikan oleh AI
+                            </span>
+                        @endif
+
+                        {{-- Tombol tetap ada setelah label terbentuk: label yang
+                             kurang tepat harus bisa dibangkitkan ulang tanpa
+                             menyunting database. --}}
+                        <button type="button" id="btnGenerateAI"
+                                data-ai-url="{{ route('analysis.interpret', ['id' => $analysis->id, 'section' => 'topic']) }}"
+                                data-sudah="{{ $topikSudahDilabeli ? '1' : '0' }}"
+                                class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-purple-500 to-indigo-600 text-white text-sm font-medium rounded-lg hover:from-purple-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all disabled:opacity-60 disabled:cursor-not-allowed">
+                            <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                            <span id="labelBtnGenerateAI">{{ $topikSudahDilabeli ? 'Bangkitkan Ulang Label' : 'Generate Interpretasi AI' }}</span>
                         </button>
-                    @else
-                        <span class="inline-flex items-center px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200">
-                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
-                            Diinterpretasikan oleh AI
-                        </span>
-                    @endif
+                    </div>
                 </div>
+
+                <p id="aiTopikError" class="hidden mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2" role="alert"></p>
 
                 <div id="aiLoadingIndicator" class="hidden mb-4 p-4 bg-indigo-50 rounded-lg border border-indigo-100 flex items-center justify-center">
                     <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -861,7 +825,7 @@
                             @endforeach
                         </div>
                         <p class="mt-3 text-sm text-gray-600">
-                            Muncul pada {{ $topic['size'] }} teks
+                            Muncul pada {{ $topic['size'] ?? 0 }} teks
                         </p>
                     </div>
                     @endforeach
@@ -907,88 +871,34 @@
             </div>
             @else
             @php
-
-                // Generate Insights Secara Dinamis (Rule-Based / Opsi A)
-                if (!isset($associationData['insights']) || empty($associationData['insights'])) {
-                    $insights = [];
-                    $pmiData = $associationData['pmi'];
-                    $crosstabData = $associationData['crosstab'];
-                    $topicsLabel = $associationData['topics_label'];
-                    $topicsDesc = $associationData['topics_desc'];
-                    
-                    // 1. Cari Asosiasi Terkuat (PMI Tertinggi)
-                    $maxPmi = -999;
-                    $bestAspect = '';
-                    $bestTopicIdx = -1;
-                    
-                    foreach($pmiData as $row) {
-                        foreach($row['scores'] as $idx => $score) {
-                            if ($score > $maxPmi) {
-                                $maxPmi = $score;
-                                $bestAspect = $row['aspect'];
-                                $bestTopicIdx = $idx;
-                            }
-                        }
-                    }
-                    
-                    if ($maxPmi > 0 && $bestTopicIdx !== -1) {
-                        $topicName = $topicsLabel[$bestTopicIdx];
-                        $topicKeywords = $topicsDesc[$bestTopicIdx] ?? '';
-                        $descText = $topicKeywords ? ", yang dicirikan oleh kata kunci <em>$topicKeywords</em>" : "";
-                        $insights[] = "Aspek <strong>".strtolower($bestAspect)."</strong> menunjukkan asosiasi terkuat dengan $topicName (PMI = +" . number_format($maxPmi, 2) . ")$descText. Hal ini mengindikasikan bahwa narasi tentang aspek ini sangat spesifik dan melekat erat pada konteks wacana topik tersebut.";
-                    }
-                    
-                    // 2. Cari Aspek yang Paling Banyak Dibicarakan (Mentions Tertinggi)
-                    $maxMentions = -1;
-                    $topAspectCrosstab = null;
-                    foreach($crosstabData as $row) {
-                        if ($row['mentions'] > $maxMentions) {
-                            $maxMentions = $row['mentions'];
-                            $topAspectCrosstab = $row;
-                        }
-                    }
-
-                    if ($topAspectCrosstab && $topAspectCrosstab['aspect'] !== $bestAspect) {
-                        $aspectName = strtolower($topAspectCrosstab['aspect']);
-                        // Cari topik dominan untuk aspek ini
-                        $maxTopicPercent = -1;
-                        $dominanTopicIdx = -1;
-                        foreach($topAspectCrosstab['topics'] as $idx => $percent) {
-                            if ($percent > $maxTopicPercent) {
-                                $maxTopicPercent = $percent;
-                                $dominanTopicIdx = $idx;
-                            }
-                        }
-                        
-                        if ($dominanTopicIdx !== -1) {
-                            $topicName = $topicsLabel[$dominanTopicIdx];
-                            $insights[] = "Sementara itu, aspek <strong>$aspectName</strong> merupakan entitas yang paling banyak dibicarakan (muncul $maxMentions kali). Aspek ini mendominasi pembicaraan pada $topicName (sebesar $maxTopicPercent%), menunjukkan bahwa ini adalah subjek utama yang menjadi sorotan sentral dalam topik tersebut.";
-                        }
-                    }
-                    
-                    // Fallback jika tidak ada insight yang ter-generate
-                    if (empty($insights)) {
-                        $insights[] = "Data asosiasi berhasil dihitung, namun tidak ditemukan pola dominan yang cukup kuat untuk disorot.";
-                    }
-                    
-                    $associationData['insights'] = $insights;
+                // Narasi berbasis aturan disusun di AssociationInsightService,
+                // bukan di sini: 60 baris analisis di dalam berkas tampilan
+                // tidak bisa diuji, tidak bisa dipakai ulang oleh export PDF,
+                // dan dulu menyisipkan nama aspek ke HTML tanpa escape.
+                if (empty($associationData['insights'])) {
+                    $associationData['insights'] = app(\App\Services\AssociationInsightService::class)
+                        ->build($associationData);
                 }
 
-                function getPmiColorClass($value) {
+                // Closure, bukan function: `function foo()` di dalam @php
+                // mendeklarasikan fungsi global, sehingga merender view ini dua
+                // kali dalam satu proses PHP (mis. di dalam satu berkas tes)
+                // memicu "Cannot redeclare".
+                $warnaPmi = function ($value) {
                     if ($value >= 0.5) return 'bg-amber-600 text-amber-50 shadow-sm border border-amber-700/50';
                     if ($value >= 0.3) return 'bg-amber-400 text-amber-900 border border-amber-500/50';
                     if ($value >= 0.1) return 'bg-blue-100 text-blue-800 border border-blue-200';
                     if ($value > 0) return 'bg-blue-50 text-blue-700 border border-blue-100';
                     if ($value >= -0.2) return 'bg-gray-100 text-gray-600 border border-gray-200';
                     if ($value >= -0.5) return 'bg-gray-200 text-gray-700 border border-gray-300';
-                    return 'bg-emerald-50 text-emerald-800 border border-emerald-200'; 
-                }
+                    return 'bg-emerald-50 text-emerald-800 border border-emerald-200';
+                };
 
-                function getCrosstabColorClass($percentage) {
+                $warnaCrosstab = function ($percentage) {
                     if ($percentage >= 70) return 'bg-amber-100 text-amber-900 font-semibold px-2 py-0.5 rounded';
                     if ($percentage >= 40) return 'bg-blue-50 text-blue-800 font-medium px-2 py-0.5 rounded';
                     return 'text-gray-500 font-medium';
-                }
+                };
             @endphp
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1015,7 +925,7 @@
                                     <td class="py-3 px-4 text-sm text-gray-600 text-center">{{ $row['mentions'] }}</td>
                                     @foreach($row['topics'] as $val)
                                     <td class="py-3 px-4 text-sm text-center">
-                                        <span class="{{ getCrosstabColorClass($val) }}">~{{ $val }}%</span>
+                                        <span class="{{ $warnaCrosstab($val) }}">~{{ $val }}%</span>
                                     </td>
                                     @endforeach
                                 </tr>
@@ -1050,7 +960,7 @@
                                 @foreach($associationData['pmi'] as $row)
                                 <div class="flex items-center text-sm font-medium text-gray-900">{{ $row['aspect'] }}</div>
                                 @foreach($row['scores'] as $score)
-                                <div class="text-center rounded-lg py-2 text-sm font-medium transition-transform hover:scale-105 {{ getPmiColorClass($score) }}">
+                                <div class="text-center rounded-lg py-2 text-sm font-medium transition-transform hover:scale-105 {{ $warnaPmi($score) }}">
                                     {{ $score > 0 ? '+'.$score : $score }}
                                 </div>
                                 @endforeach
@@ -1076,7 +986,8 @@
 
             <!-- Insight Narasi -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h4 class="text-base font-semibold text-gray-900 mb-4">Interpretasi Hasil</h4>
+                <h4 class="text-base font-semibold text-gray-900 mb-1">Interpretasi Hasil</h4>
+                <p class="text-sm text-gray-500 mb-4">Disusun otomatis dari nilai PMI dan tabel silang di atas.</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     @foreach($associationData['insights'] as $insight)
                     <div class="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-lg p-4 border-l-4 border-l-amber-500">
@@ -1085,6 +996,13 @@
                     @endforeach
                 </div>
             </div>
+
+            @include('analysis.partials.ai-interpretation', [
+                'section' => 'association',
+                'judul' => 'Interpretasi AI: Asosiasi Aspek & Topik',
+                'keterangan' => 'Penjelasan naratif atas keterkaitan PMI di atas.',
+                'stored' => $aiSections['association'] ?? null,
+            ])
             @endif
         </div>
         @endif
@@ -1715,65 +1633,157 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const btnGenerateAI = document.getElementById('btnGenerateAI');
-    if (btnGenerateAI) {
-        btnGenerateAI.addEventListener('click', function() {
-            const btn = this;
-            const loadingIndicator = document.getElementById('aiLoadingIndicator');
-            
-            // Show loading
+    // ---------------------------------------------------------------- AI
+    // Satu penangan untuk semua tombol interpretasi. Bagian "topic" memakai
+    // markup lamanya sendiri karena keluarannya label per topik, bukan paragraf.
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '{{ csrf_token() }}';
+
+    function mintaInterpretasi(url, regenerate) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrf,
+                'Accept': 'application/json',
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({ regenerate: regenerate ? 1 : 0 }),
+        }).then(async (response) => {
+            const data = await response.json().catch(() => ({}));
+
+            if (!response.ok || !data.success) {
+                // 429 datang dari throttle rute, bukan dari Gemini.
+                throw new Error(
+                    response.status === 429
+                        ? 'Terlalu banyak permintaan. Tunggu satu menit lalu coba lagi.'
+                        : (data.message || 'Gagal menghasilkan interpretasi.')
+                );
+            }
+
+            return data;
+        });
+    }
+
+    // --- Narasi per bagian (overview, sentiment, aspect, association)
+    document.querySelectorAll('[data-ai-interpret]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            const blok = btn.closest('[data-ai-block]');
+            const kotakError = blok.querySelector('[data-ai-error]');
+            const hasil = blok.querySelector('[data-ai-hasil]');
+            const label = btn.querySelector('[data-ai-label]');
+            const teksAwal = label.textContent;
+
+            // Kotak hasil yang sudah terlihat berarti pengguna minta versi baru.
+            const regenerate = !hasil.classList.contains('hidden');
+
+            kotakError.classList.add('hidden');
             btn.disabled = true;
-            btn.innerHTML = '<svg class="animate-spin h-4 w-4 mr-1.5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Memproses...';
-            loadingIndicator.classList.remove('hidden');
-            
-            // Get CSRF Token (assuming it's in meta tag, otherwise Laravel handles it if using standard setup)
-            const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-            
-            fetch('{{ route("analysis.generate-topic-interpretation", $analysis->id) }}', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': token || '{{ csrf_token() }}',
-                    'Accept': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Update UI with interpretations
-                    for (const [topicId, interpretation] of Object.entries(data.data)) {
+            hasil.setAttribute('aria-busy', 'true');
+            label.textContent = regenerate ? 'Membangkitkan ulang...' : 'Memproses...';
+
+            mintaInterpretasi(btn.dataset.aiUrl, regenerate)
+                .then((data) => {
+                    const narasi = data.data || {};
+
+                    blok.querySelector('[data-ai-narrative]').textContent = narasi.narrative || '';
+
+                    const daftar = blok.querySelector('[data-ai-highlights]');
+                    daftar.innerHTML = '';
+
+                    (narasi.highlights || []).forEach((poin) => {
+                        const li = document.createElement('li');
+                        li.className = 'text-sm text-gray-700 flex gap-2';
+
+                        const bullet = document.createElement('span');
+                        bullet.className = 'text-indigo-400 mt-0.5';
+                        bullet.setAttribute('aria-hidden', 'true');
+                        bullet.textContent = '\u2022';
+
+                        const teks = document.createElement('span');
+                        // textContent, bukan innerHTML: keluaran model tidak
+                        // pernah disisipkan sebagai HTML.
+                        teks.textContent = poin;
+
+                        li.append(bullet, teks);
+                        daftar.appendChild(li);
+                    });
+
+                    daftar.classList.toggle('hidden', (narasi.highlights || []).length === 0);
+
+                    const jejak = blok.querySelector('[data-ai-provenance]');
+
+                    if (jejak) {
+                        jejak.textContent = 'Ditulis oleh AI (' + (narasi.model || '-') + ') baru saja'
+                            + ' \u2014 angka tetap berasal dari hasil analisis, bukan dari AI.';
+                    }
+
+                    hasil.classList.remove('hidden');
+                    label.textContent = 'Bangkitkan Ulang';
+                })
+                .catch((error) => {
+                    kotakError.textContent = error.message;
+                    kotakError.classList.remove('hidden');
+                    label.textContent = teksAwal;
+                })
+                .finally(() => {
+                    btn.disabled = false;
+                    hasil.setAttribute('aria-busy', 'false');
+                });
+        });
+    });
+
+    // --- Label topik
+    const btnGenerateAI = document.getElementById('btnGenerateAI');
+
+    if (btnGenerateAI) {
+        btnGenerateAI.addEventListener('click', function () {
+            const label = document.getElementById('labelBtnGenerateAI');
+            const kotakError = document.getElementById('aiTopikError');
+            const memuat = document.getElementById('aiLoadingIndicator');
+            const regenerate = btnGenerateAI.dataset.sudah === '1';
+            const teksAwal = label.textContent;
+
+            kotakError.classList.add('hidden');
+            btnGenerateAI.disabled = true;
+            label.textContent = 'Memproses...';
+            memuat.classList.remove('hidden');
+
+            mintaInterpretasi(btnGenerateAI.dataset.aiUrl, regenerate)
+                .then((data) => {
+                    const topik = (data.data && data.data.topics) || {};
+
+                    Object.entries(topik).forEach(([topicId, interpretasi]) => {
                         const labelEl = document.getElementById('topic-label-' + topicId);
                         const descEl = document.getElementById('topic-desc-' + topicId);
-                        
-                        if (labelEl) labelEl.textContent = interpretation.label;
+
+                        if (labelEl) labelEl.textContent = interpretasi.label;
+
                         if (descEl) {
-                            descEl.textContent = interpretation.description;
+                            descEl.textContent = interpretasi.description;
                             descEl.classList.remove('hidden');
                         }
+                    });
+
+                    btnGenerateAI.dataset.sudah = '1';
+                    label.textContent = 'Bangkitkan Ulang Label';
+
+                    if (!document.getElementById('badgeTopikAI')) {
+                        const badge = document.createElement('span');
+                        badge.id = 'badgeTopikAI';
+                        badge.className = 'inline-flex items-center px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200';
+                        badge.textContent = 'Diinterpretasikan oleh AI';
+                        btnGenerateAI.parentNode.insertBefore(badge, btnGenerateAI);
                     }
-                    
-                    // Change button to success state
-                    btn.outerHTML = `<span class="inline-flex items-center px-2.5 py-1 bg-purple-100 text-purple-800 text-xs font-semibold rounded-full border border-purple-200">
-                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
-                        Diinterpretasikan oleh AI
-                    </span>`;
-                } else {
-                    alert(data.message || 'Gagal menghasilkan interpretasi.');
-                    // Reset button
-                    btn.disabled = false;
-                    btn.innerHTML = '<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Generate Interpretasi AI';
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Terjadi kesalahan koneksi ke server.');
-                // Reset button
-                btn.disabled = false;
-                btn.innerHTML = '<svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> Generate Interpretasi AI';
-            })
-            .finally(() => {
-                loadingIndicator.classList.add('hidden');
-            });
+                })
+                .catch((error) => {
+                    kotakError.textContent = error.message;
+                    kotakError.classList.remove('hidden');
+                    label.textContent = teksAwal;
+                })
+                .finally(() => {
+                    btnGenerateAI.disabled = false;
+                    memuat.classList.add('hidden');
+                });
         });
     }
 });

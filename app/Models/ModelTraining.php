@@ -41,7 +41,7 @@ class ModelTraining extends Model
 
     public function getDurationAttribute(): ?string
     {
-        if (!$this->started_at || !$this->completed_at) {
+        if (! $this->started_at || ! $this->completed_at) {
             return null;
         }
 

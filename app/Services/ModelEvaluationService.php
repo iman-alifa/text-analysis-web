@@ -61,7 +61,7 @@ class ModelEvaluationService
 
     public function buildSentimentEvaluation(string $analysisType, Collection $correctedItems): ?array
     {
-        if (!in_array($analysisType, ['sentiment', 'combined'])) {
+        if (! in_array($analysisType, ['sentiment', 'combined'])) {
             return null;
         }
 
@@ -80,7 +80,7 @@ class ModelEvaluationService
             $predicted = strtolower((string) ($item->predicted_sentiment ?? ''));
             $actual = strtolower((string) ($item->corrected_sentiment ?? ''));
 
-            if (!in_array($predicted, $labels) || !in_array($actual, $labels)) {
+            if (! in_array($predicted, $labels) || ! in_array($actual, $labels)) {
                 continue;
             }
 
@@ -149,7 +149,7 @@ class ModelEvaluationService
 
     public function buildAspectEvaluation(string $analysisType, Collection $correctedItems): ?array
     {
-        if (!in_array($analysisType, ['aspect', 'combined'])) {
+        if (! in_array($analysisType, ['aspect', 'combined'])) {
             return null;
         }
 
@@ -258,7 +258,7 @@ class ModelEvaluationService
 
     public function buildTopicEvaluation(TextAnalysis $analysis, ?Collection $allItems = null): ?array
     {
-        if (!in_array($analysis->analysis_type, ['topic', 'combined'])) {
+        if (! in_array($analysis->analysis_type, ['topic', 'combined'])) {
             return null;
         }
 
@@ -267,23 +267,62 @@ class ModelEvaluationService
             $topicResults = json_decode($topicResults, true) ?? [];
         }
 
-        $topics         = $topicResults['topics'] ?? [];
+        $topics = $topicResults['topics'] ?? [];
         $wordFrequencies = $topicResults['word_frequencies'] ?? [];
 
         if (empty($topics)) {
             return [
                 'available' => false,
-                'message'   => 'Data topik belum tersedia untuk evaluasi.',
+                'message' => 'Data topik belum tersedia untuk evaluasi.',
             ];
         }
 
+        $uniqueTopicWords = collect($topics)
+            ->pluck('words')
+            ->flatten()
+            ->filter()
+            ->unique()
+            ->count();
+
+        $avgWordsPerTopic = collect($topics)
+            ->map(fn ($t) => count($t['words'] ?? []))
+            ->average();
+
+        $dasar = [
+            'available' => true,
+            'topic_count' => count($topics),
+            'unique_topic_words' => $uniqueTopicWords,
+            'avg_words_per_topic' => round($avgWordsPerTopic, 1),
+            'word_frequency_terms' => is_array($wordFrequencies) ? count($wordFrequencies) : 0,
+        ];
+
+        // Angka dari NLP API didahulukan. Service menghitung c_v dengan pustaka
+        // topic modeling yang sama seperti saat topik dibentuk, sementara
+        // perhitungan PHP di bawah adalah implementasi terpisah - kalau keduanya
+        // ditampilkan, satu analisis punya dua angka koherensi yang berbeda dan
+        // tidak jelas mana yang layak dikutip.
+        $quality = $topicResults['quality'] ?? null;
+
+        if (is_array($quality) && isset($quality['c_v'])) {
+            return $dasar + [
+                'source' => 'nlp-api',
+                'coherence_score' => round((float) $quality['c_v'], 4),
+                'coherence_label' => $this->labelKoherensi((float) $quality['c_v']),
+                'coherence_pairs' => null,
+                'c_npmi' => isset($quality['c_npmi']) ? round((float) $quality['c_npmi'], 4) : null,
+                'diversity' => isset($quality['diversity']) ? round((float) $quality['diversity'], 4) : null,
+                'outlier_rate' => isset($quality['outlier_rate']) ? round((float) $quality['outlier_rate'], 4) : null,
+            ];
+        }
+
+        // Analisis lama tidak menyimpan blok quality, jadi tetap dihitung di sini.
         $corpusTexts = $this->resolveCorpusTexts($analysis, $allItems);
-        $coherence   = $this->calculateTopicCoherence($topics, $corpusTexts);
+        $coherence = $this->calculateTopicCoherence($topics, $corpusTexts);
 
         if (empty($coherence['pairs'])) {
             return [
                 'available' => false,
-                'message'   => 'Tidak cukup pasangan kata untuk menghitung koherensi topik.',
+                'message' => 'Tidak cukup pasangan kata untuk menghitung koherensi topik.',
             ];
         }
 
@@ -294,30 +333,31 @@ class ModelEvaluationService
             $score >= 0.7 => 'Sangat Baik',  // topik sangat koheren dan terdefinisi jelas
             $score >= 0.5 => 'Baik',          // topik koheren, hasil dapat diandalkan
             $score >= 0.3 => 'Sedang',        // topik cukup koheren, perlu review
-            default       => 'Rendah',        // topik tidak koheren, perlu tuning jumlah topik
+            default => 'Rendah',        // topik tidak koheren, perlu tuning jumlah topik
         };
 
-        $uniqueTopicWords = collect($topics)
-            ->pluck('words')
-            ->flatten()
-            ->filter()
-            ->unique()
-            ->count();
-
-        $avgWordsPerTopic = collect($topics)
-            ->map(fn($t) => count($t['words'] ?? []))
-            ->average();
-
-        return [
-            'available'            => true,
-            'topic_count'          => count($topics),
-            'coherence_score'      => round($score, 4),
-            'coherence_pairs'      => $coherence['pairs'],
-            'coherence_label'      => $coherenceLabel,
-            'unique_topic_words'   => $uniqueTopicWords,
-            'avg_words_per_topic'  => round($avgWordsPerTopic, 1),
-            'word_frequency_terms' => is_array($wordFrequencies) ? count($wordFrequencies) : 0,
+        return $dasar + [
+            'source' => 'php-fallback',
+            'coherence_score' => round($score, 4),
+            'coherence_pairs' => $coherence['pairs'],
+            'coherence_label' => $coherenceLabel,
         ];
+    }
+
+    /**
+     * Rambu penafsiran c_v untuk teks pendek/tidak baku seperti komentar.
+     * Sama dengan yang dipakai halaman hasil, supaya satu angka tidak
+     * dilabeli berbeda di dua halaman.
+     */
+    private function labelKoherensi(float $score): string
+    {
+        return match (true) {
+            $score < 0.30 => 'Tidak koheren',
+            $score < 0.40 => 'Lemah',
+            $score < 0.55 => 'Baik untuk teks pendek',
+            $score < 0.70 => 'Sangat baik',
+            default => 'Patut dicurigai',
+        };
     }
 
     private function resolveCorpusTexts(TextAnalysis $analysis, ?Collection $allItems = null): array
@@ -443,7 +483,7 @@ class ModelEvaluationService
 
         // Langkah 2: Hitung co-occurrence dalam sliding window
         $coOccurrence = [];  // ['word_a|word_b' => count]
-        $wordCount    = [];  // ['word' => count]
+        $wordCount = [];  // ['word' => count]
         $totalWindows = 0;
 
         foreach ($tokenizedDocs as $tokens) {
@@ -504,8 +544,8 @@ class ModelEvaluationService
 
             // Langkah 4: Hitung cosine similarity antar semua pasangan word vector
             $similarities = [];
-            $wordList     = array_keys($vectors);
-            $wCount       = count($wordList);
+            $wordList = array_keys($vectors);
+            $wCount = count($wordList);
 
             for ($i = 0; $i < $wCount; $i++) {
                 for ($j = $i + 1; $j < $wCount; $j++) {
@@ -517,7 +557,7 @@ class ModelEvaluationService
                 }
             }
 
-            if (!empty($similarities)) {
+            if (! empty($similarities)) {
                 $topicScores[] = array_sum($similarities) / count($similarities);
             }
         }
@@ -527,9 +567,10 @@ class ModelEvaluationService
         }
 
         // Langkah 5: Rata-rata CV score semua topik
-        $avgScore  = array_sum($topicScores) / count($topicScores);
+        $avgScore = array_sum($topicScores) / count($topicScores);
         $totalPairs = array_sum(array_map(function ($topic) {
             $n = count(array_filter($topic['words'] ?? []));
+
             return $n >= 2 ? ($n * ($n - 1)) / 2 : 0;
         }, $topics));
 
@@ -551,8 +592,8 @@ class ModelEvaluationService
         array $wordCount,
         int $totalWindows
     ): float {
-        $pA  = ($wordCount[$wordA] ?? 0) / $totalWindows;
-        $pB  = ($wordCount[$wordB] ?? 0) / $totalWindows;
+        $pA = ($wordCount[$wordA] ?? 0) / $totalWindows;
+        $pB = ($wordCount[$wordB] ?? 0) / $totalWindows;
         $key = $this->makePairKey($wordA, $wordB);
         $pAB = ($coOccurrence[$key] ?? 0) / $totalWindows;
 
@@ -560,7 +601,7 @@ class ModelEvaluationService
             return -1.0; // tidak pernah muncul bersama = NPMI minimum
         }
 
-        $pmi  = log($pAB / ($pA * $pB));
+        $pmi = log($pAB / ($pA * $pB));
         $npmi = $pmi / (-log($pAB));
 
         return max(-1.0, min(1.0, $npmi));
@@ -571,14 +612,14 @@ class ModelEvaluationService
      */
     private function cosineSimilarity(array $vecA, array $vecB, array $dimensions): float
     {
-        $dot  = 0.0;
+        $dot = 0.0;
         $magA = 0.0;
         $magB = 0.0;
 
         foreach ($dimensions as $dim) {
-            $a    = $vecA[$dim] ?? 0.0;
-            $b    = $vecB[$dim] ?? 0.0;
-            $dot  += $a * $b;
+            $a = $vecA[$dim] ?? 0.0;
+            $b = $vecB[$dim] ?? 0.0;
+            $dot += $a * $b;
             $magA += $a * $a;
             $magB += $b * $b;
         }
@@ -603,7 +644,7 @@ class ModelEvaluationService
             $aspects = is_array($decoded) ? $decoded : explode(',', $aspects);
         }
 
-        if (!is_array($aspects)) {
+        if (! is_array($aspects)) {
             return [];
         }
 

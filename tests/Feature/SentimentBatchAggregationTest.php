@@ -54,7 +54,7 @@ class SentimentBatchAggregationTest extends TestCase
                 ->push($this->batchResponse(['negative', 'neutral']), 200),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd']);
         $distribution = $result['results']['distribution'];
 
         $this->assertEqualsWithDelta(100.0, array_sum($distribution), 0.05);
@@ -72,7 +72,7 @@ class SentimentBatchAggregationTest extends TestCase
                 ->push($this->batchResponse(['negative', 'neutral']), 200),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd']);
 
         $this->assertSame(
             [0, 1, 2, 3],
@@ -90,7 +90,7 @@ class SentimentBatchAggregationTest extends TestCase
                 ->push(['detail' => 'boom'], 500),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd']);
 
         $this->assertCount(2, $result['results']['predictions']);
         $this->assertEqualsWithDelta(100.0, $result['results']['distribution']['positive'], 0.05);
@@ -105,7 +105,7 @@ class SentimentBatchAggregationTest extends TestCase
         $this->expectException(\Exception::class);
         $this->expectExceptionMessage('seluruh 2 batch tidak berhasil diproses');
 
-        (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
+        (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd']);
     }
 
     /**
@@ -154,7 +154,7 @@ class SentimentBatchAggregationTest extends TestCase
                 ]), 200),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', '', 'c', '']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', '', 'c', '']);
         $results = $result['results'];
 
         // Dua baris yang benar-benar dinilai: satu positif, satu negatif.
@@ -183,7 +183,7 @@ class SentimentBatchAggregationTest extends TestCase
                 ]), 200),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', '', 'c', '']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', '', 'c', '']);
 
         $this->assertEqualsWithDelta(0.9, $result['results']['metrics']['avg_confidence'], 0.001);
     }
@@ -232,7 +232,7 @@ class SentimentBatchAggregationTest extends TestCase
                 ]), 200),
         ]);
 
-        $metrics = (new NLPApiService())
+        $metrics = (new NLPApiService)
             ->analyzeSentiment(['a', 'b', 'c', 'd'])['results']['metrics'];
 
         $this->assertSame(1, $metrics['total_truncated']);

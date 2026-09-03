@@ -21,10 +21,11 @@ class AnalysisResult extends Model
         'document_aspects',
         'metrics',
         'summary',
+        'ai_interpretations',
         'visualizations',
-        'corrected_sentiment', 
-        'corrected_aspects', 
-        'verified_at', 
+        'corrected_sentiment',
+        'corrected_aspects',
+        'verified_at',
         'verified_by',
     ];
 
@@ -38,8 +39,9 @@ class AnalysisResult extends Model
         'document_aspects' => 'array',
         'metrics' => 'array',
         'visualizations' => 'array',
-        'result' => 'array', 
-        'corrected_aspects' => 'array'
+        'ai_interpretations' => 'array',
+        'result' => 'array',
+        'corrected_aspects' => 'array',
     ];
 
     /**
@@ -82,26 +84,26 @@ class AnalysisResult extends Model
     {
         $rows = $this->aspect_results;
 
-        if (!is_array($rows)) {
+        if (! is_array($rows)) {
             return [];
         }
 
         $normalized = [];
 
         foreach ($rows as $key => $row) {
-            if (!is_array($row)) {
+            if (! is_array($row)) {
                 continue;
             }
 
             $name = $row['aspect'] ?? (is_string($key) ? $key : null);
 
-            if (!$name) {
+            if (! $name) {
                 continue;
             }
 
             $sentiments = $row['sentiments'] ?? null;
 
-            if (!is_array($sentiments)) {
+            if (! is_array($sentiments)) {
                 // Bentuk lama menyimpan jumlah dokumen per label, bukan persentase
                 $counts = [
                     'positive' => (int) ($row['positive'] ?? 0),
@@ -138,7 +140,7 @@ class AnalysisResult extends Model
     // Helper methods
     public function getSentimentSummary(): array
     {
-        if (!$this->sentiment_distribution) {
+        if (! $this->sentiment_distribution) {
             return [];
         }
 
@@ -151,22 +153,26 @@ class AnalysisResult extends Model
 
     public function getTopTopics(int $limit = 5): array
     {
-        if (!$this->topic_results || !isset($this->topic_results['topics'])) {
+        if (! $this->topic_results || ! isset($this->topic_results['topics'])) {
             return [];
         }
 
         return array_slice($this->topic_results['topics'], 0, $limit);
     }
 
-    public function getIsAccurateAttribute() {
-        if (is_null($this->verified_at)) return null;
+    public function getIsAccurateAttribute()
+    {
+        if (is_null($this->verified_at)) {
+            return null;
+        }
 
         $aiSent = $this->result['sentiment']['label'] ?? null;
         $admSent = $this->corrected_sentiment;
 
         $aiAsp = $this->result['aspects'] ?? [];
         $admAsp = $this->corrected_aspects ?? [];
-        sort($aiAsp); sort($admAsp);
+        sort($aiAsp);
+        sort($admAsp);
 
         return ($aiSent === $admSent) && ($aiAsp == $admAsp);
     }

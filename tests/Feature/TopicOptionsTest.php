@@ -5,8 +5,8 @@ namespace Tests\Feature;
 use App\Jobs\ProcessTextAnalysis;
 use App\Models\TextAnalysis;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Services\NLPApiService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
@@ -96,7 +96,7 @@ class TopicOptionsTest extends TestCase
             'metadata' => ['num_topics' => 12],
         ]);
 
-        (new ProcessTextAnalysis($analysis))->handle(new NLPApiService());
+        (new ProcessTextAnalysis($analysis))->handle(new NLPApiService);
 
         Http::assertSent(function ($request) {
             return str_contains($request->url(), '/api/analyze/combined')
@@ -131,7 +131,7 @@ class TopicOptionsTest extends TestCase
             'metadata' => ['num_topics' => 0],
         ]);
 
-        (new ProcessTextAnalysis($analysis))->handle(new NLPApiService());
+        (new ProcessTextAnalysis($analysis))->handle(new NLPApiService);
 
         // 0 bernilai falsy - gampang hilang kalau dicek dengan ?: alih-alih ??
         Http::assertSent(fn ($request) => str_contains($request->url(), '/api/analyze/combined')
@@ -141,9 +141,9 @@ class TopicOptionsTest extends TestCase
     public function test_formulir_menawarkan_mode_otomatis_dan_tidak_pernah_mengirim_satu(): void
     {
         $html = $this->actingAs(User::factory()->create())
-                     ->get(route('analysis.create'))
-                     ->assertOk()
-                     ->getContent();
+            ->get(route('analysis.create'))
+            ->assertOk()
+            ->getContent();
 
         $this->assertStringContainsString('value="0"', $html);
         $this->assertStringContainsString('Otomatis', $html);

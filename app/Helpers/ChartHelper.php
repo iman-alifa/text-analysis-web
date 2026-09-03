@@ -29,8 +29,8 @@ class ChartHelper
                         'rgb(239, 68, 68)',
                     ],
                     'borderWidth' => 2,
-                ]
-            ]
+                ],
+            ],
         ];
     }
 
@@ -69,7 +69,7 @@ class ChartHelper
                     'data' => $negative,
                     'backgroundColor' => 'rgba(239, 68, 68, 0.8)',
                 ],
-            ]
+            ],
         ];
     }
 
@@ -115,7 +115,7 @@ class ChartHelper
             $topicIds[] = $topicId;
             $labels[] = $interpretation[$topicId]['label']
                 ?? $topic['topic_label']
-                ?? ('Topik #' . ($topicId + 1));
+                ?? ('Topik #'.($topicId + 1));
             $descriptions[] = implode(', ', array_slice($topic['words'] ?? $topic['keywords'] ?? [], 0, 3));
         }
 
@@ -141,7 +141,7 @@ class ChartHelper
         foreach ($documentAspects as $documentIndex => $documentAspectList) {
             $topicId = $documentTopics[$documentIndex] ?? -1;
 
-            if (!in_array($topicId, $topicIds, true)) {
+            if (! in_array($topicId, $topicIds, true)) {
                 continue;
             }
 
@@ -220,7 +220,7 @@ class ChartHelper
         $backgrounds = [];
 
         foreach ($topics as $index => $topic) {
-            $labels[] = 'Topik #' . (($topic['topic_id'] ?? $index) + 1);
+            $labels[] = 'Topik #'.(($topic['topic_id'] ?? $index) + 1);
             $proportions[] = round(($topic['proportion'] ?? 0) * 100, 1);
             // Warna diputar, bukan dipotong: mode otomatis bisa menghasilkan
             // sampai 20 topik sementara paletnya hanya lima, sehingga topik
@@ -235,8 +235,8 @@ class ChartHelper
                     'label' => 'Proporsi',
                     'data' => $proportions,
                     'backgroundColor' => $backgrounds,
-                ]
-            ]
+                ],
+            ],
         ];
     }
 
@@ -246,7 +246,7 @@ class ChartHelper
     public static function prepareWordCloudData(array $wordFrequencies, int $limit = 30): array
     {
         $words = array_slice($wordFrequencies, 0, $limit);
-        
+
         // max() melempar galat pada array kosong, dan pembagian dengan 0
         // menghasilkan INF - keduanya membuat halaman hasil gagal dirender
         // untuk korpus kecil yang tidak menghasilkan frekuensi kata.
@@ -255,12 +255,12 @@ class ChartHelper
         }
 
         $maxFrequency = max(array_column($words, 'frequency')) ?: 1;
-        
-        return array_map(function($item) use ($maxFrequency) {
+
+        return array_map(function ($item) use ($maxFrequency) {
             return [
                 'word' => $item['word'],
                 'size' => 12 + (($item['frequency'] / $maxFrequency) * 20),
-                'frequency' => $item['frequency']
+                'frequency' => $item['frequency'],
             ];
         }, $words);
     }

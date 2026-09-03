@@ -113,10 +113,10 @@ class AssociationDisplayTest extends TestCase
         $analysis = $this->makeCombinedAnalysis($this->association, $this->documentAspects);
 
         $this->actingAs($analysis->user)
-             ->get(route('analysis.show', $analysis->id))
-             ->assertOk()
-             ->assertSee('Interpretasi Hasil')
-             ->assertDontSee('Data asosiasi aspek&ndash;topik belum tersedia', false);
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->assertSee('Interpretasi Hasil')
+            ->assertDontSee('Data asosiasi aspek&ndash;topik belum tersedia', false);
     }
 
     public function test_halaman_hasil_tidak_menampilkan_angka_contoh_saat_data_kosong(): void
@@ -124,9 +124,9 @@ class AssociationDisplayTest extends TestCase
         $analysis = $this->makeCombinedAnalysis(null, []);
 
         $response = $this->actingAs($analysis->user)
-                         ->get(route('analysis.show', $analysis->id))
-                         ->assertOk()
-                         ->assertSee('Data asosiasi aspek', false);
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->assertSee('Data asosiasi aspek', false);
 
         // Angka mock yang dulu tampil seolah-olah hasil analisis
         $response->assertDontSee('Koruptor');

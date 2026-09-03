@@ -3,17 +3,16 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\RetrainModel;
+use App\Models\CustomStopword;
+use App\Models\EvaluationSnapshot;
+use App\Models\ModelTraining;
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
-use App\Models\CustomStopword;
-use App\Models\ModelTraining;
-use App\Models\EvaluationSnapshot;
-use App\Jobs\RetrainModel;
-use App\Services\NLPApiService;
 use App\Services\ModelEvaluationService;
+use App\Services\NLPApiService;
 use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class TrainingController extends Controller
 {
@@ -21,18 +20,27 @@ class TrainingController extends Controller
         private TrainingItemService $trainingItemService,
         private ModelEvaluationService $modelEvaluationService
     ) {}
+
     /**
      * HALAMAN 1: INDEX (DASHBOARD)
      */
     public function index()
     {
         // 1. Hitung Statistik Global dari TrainingItem
-        $totalItems = TrainingItem::count();
-        $verifiedItems = TrainingItem::where('is_corrected', true)->count();
-        
+        // Hanya baris yang analisisnya masih ada. TextAnalysis memakai soft
+        // delete sehingga cascade delete tidak pernah berjalan, dan baris milik
+        // analisis yang sudah dihapus tetap tertinggal - dulu ikut terhitung di
+        // sini padahal tidak muncul di daftar file mana pun dan tidak bisa
+        // dikoreksi siapa pun.
+        $itemsAktif = TrainingItem::whereHas('textAnalysis');
+
+        $totalItems = (clone $itemsAktif)->count();
+        $verifiedItems = (clone $itemsAktif)->where('is_corrected', true)->count();
+
         // Hitung akurasi (Bandingkan prediksi AI vs Koreksi Admin)
-        $accurateItems = TrainingItem::where('is_corrected', true)
-            ->whereColumn('predicted_sentiment', 'corrected_sentiment') 
+        $accurateItems = (clone $itemsAktif)
+            ->where('is_corrected', true)
+            ->whereColumn('predicted_sentiment', 'corrected_sentiment')
             ->count();
 
         $stats = [
@@ -43,9 +51,9 @@ class TrainingController extends Controller
         ];
 
         // 2. Ambil Daftar File (Batch)
-        $batches = TextAnalysis::withCount(['trainingItems as verified_count' => function($q){
-                $q->where('is_corrected', true);
-            }])
+        $batches = TextAnalysis::withCount(['trainingItems as verified_count' => function ($q) {
+            $q->where('is_corrected', true);
+        }])
             ->latest()
             ->paginate(10);
 
@@ -67,13 +75,13 @@ class TrainingController extends Controller
     public function show($id)
     {
         $analysis = TextAnalysis::with('result')->findOrFail($id);
-        
+
         // LOGIC "LAZY LOAD":
         // Jika tabel training_items kosong untuk file ini, ekstrak dari JSON sekarang.
         if ($analysis->trainingItems()->count() === 0) {
-             $this->trainingItemService->extractJsonToTable($analysis);
+            $this->trainingItemService->extractJsonToTable($analysis);
         }
-        
+
         // Hitung statistik file + evaluasi model per dokumen
         $allItems = $analysis->trainingItems()->get();
         $correctedItems = $allItems->where('is_corrected', true)->values();
@@ -89,39 +97,47 @@ class TrainingController extends Controller
     /**
      * API: LOAD DATA TABLE (AJAX)
      */
-    public function getData(Request $request, $id) 
+    public function getData(Request $request, $id)
     {
         // Pastikan ID valid
         $exists = TextAnalysis::where('id', $id)->exists();
-        if (!$exists) {
+        if (! $exists) {
             return response()->json(['error' => 'Analysis not found'], 404);
         }
 
         $query = TrainingItem::where('text_analysis_id', $id);
 
         // Filter
-        if ($request->status === 'pending') $query->where('is_corrected', false);
-        if ($request->status === 'corrected') $query->where('is_corrected', true);
-        if ($request->search) $query->where('text_content', 'like', '%'.$request->search.'%');
-        if ($request->sentiment) $query->where('predicted_sentiment', $request->sentiment);
+        if ($request->status === 'pending') {
+            $query->where('is_corrected', false);
+        }
+        if ($request->status === 'corrected') {
+            $query->where('is_corrected', true);
+        }
+        if ($request->search) {
+            $query->where('text_content', 'like', '%'.$request->search.'%');
+        }
+        if ($request->sentiment) {
+            $query->where('predicted_sentiment', $request->sentiment);
+        }
 
         $data = $query->latest()->paginate(20);
 
         // Mapping Data
-        $formatted = $data->getCollection()->map(function($item) {
+        $formatted = $data->getCollection()->map(function ($item) {
             return [
                 'id' => $item->id,
                 // Gunakan utf8_encode jika perlu, atau pastikan string aman
-                'text_content' => mb_convert_encoding($item->text_content, 'UTF-8', 'UTF-8'), 
+                'text_content' => mb_convert_encoding($item->text_content, 'UTF-8', 'UTF-8'),
                 'predicted_sentiment' => $item->predicted_sentiment ?? 'neutral',
                 'confidence_score' => (float) $item->confidence_score,
-                
+
                 'corrected_sentiment' => $item->corrected_sentiment,
                 'corrected_aspects' => $item->corrected_aspects,
                 'correction_notes' => $item->correction_notes,
-                
+
                 'detected_aspects' => $item->detected_aspects ?? [],
-                
+
                 'is_corrected' => (bool) $item->is_corrected,
                 'verified_at' => $item->verified_at ? $item->verified_at->format('d M Y, H:i') : null,
             ];
@@ -141,7 +157,7 @@ class TrainingController extends Controller
     public function update(Request $request, $id)
     {
         $item = TrainingItem::findOrFail($id);
-        
+
         $item->update([
             'corrected_sentiment' => $request->corrected_sentiment,
             'corrected_aspects' => $request->corrected_aspects,
@@ -176,21 +192,24 @@ class TrainingController extends Controller
      */
     public function export()
     {
+        // whereHas juga di sini: tanpa itu baris milik analisis yang sudah
+        // dihapus ikut terekspor dengan source_file 'Unknown'.
         $data = TrainingItem::with('textAnalysis:id,title')
+            ->whereHas('textAnalysis')
             ->where('is_corrected', true)
             ->get();
 
-        $filename = 'training_dataset_' . date('Y-m-d') . '.csv';
-        
+        $filename = 'training_dataset_'.date('Y-m-d').'.csv';
+
         $headers = [
-            "Content-type" => "text/csv",
-            "Content-Disposition" => "attachment; filename=$filename",
-            "Pragma" => "no-cache",
-            "Cache-Control" => "must-revalidate, post-check=0, pre-check=0",
-            "Expires" => "0"
+            'Content-type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=$filename",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
         ];
 
-        $callback = function() use ($data) {
+        $callback = function () use ($data) {
             $file = fopen('php://output', 'w');
             fputcsv($file, ['text', 'label', 'aspects', 'source_file']);
 
@@ -199,7 +218,7 @@ class TrainingController extends Controller
                     $row->text_content,
                     $row->corrected_sentiment,
                     json_encode($row->corrected_aspects ?? []),
-                    $row->textAnalysis->title ?? 'Unknown'
+                    $row->textAnalysis->title ?? 'Unknown',
                 ]);
             }
             fclose($file);
@@ -207,18 +226,22 @@ class TrainingController extends Controller
 
         return response()->stream($callback, 200, $headers);
     }
-    
+
     // --- TOPIC STOPWORDS ---
-    public function storeStopword(Request $request) {
+    public function storeStopword(Request $request)
+    {
         CustomStopword::create(['word' => $request->word, 'added_by' => auth()->id()]);
+
         return back()->with('success', 'Stopword ditambahkan');
     }
 
-    public function destroyStopword($id) {
+    public function destroyStopword($id)
+    {
         CustomStopword::destroy($id);
+
         return back()->with('success', 'Stopword dihapus');
     }
-    
+
     /**
      * Kirim seluruh data yang sudah dikoreksi ke endpoint retraining NLP API.
      *
@@ -239,7 +262,9 @@ class TrainingController extends Controller
             return back()->with('error', 'Masih ada proses training yang berjalan. Tunggu sampai selesai.');
         }
 
-        $items = TrainingItem::where('is_corrected', true)->get();
+        // whereHas: koreksi milik analisis yang sudah dihapus tidak ikut dilatih,
+        // supaya data yang dilatih sama persis dengan yang dilaporkan dashboard.
+        $items = TrainingItem::whereHas('textAnalysis')->where('is_corrected', true)->get();
 
         if ($items->isEmpty()) {
             return back()->with('error', 'Belum ada data terkoreksi untuk dilatih.');
@@ -266,6 +291,7 @@ class TrainingController extends Controller
                     count($data),
                     NLPApiService::MIN_RETRAIN_SAMPLES
                 );
+
                 continue;
             }
 
@@ -284,21 +310,21 @@ class TrainingController extends Controller
         }
 
         if (empty($dispatched)) {
-            return back()->with('error', 'Data belum cukup untuk training: ' . implode(', ', $skipped));
+            return back()->with('error', 'Data belum cukup untuk training: '.implode(', ', $skipped));
         }
 
         // Potret metrik sebelum model dilatih ulang. Snapshot berikutnya (saat
         // retraining dipicu lagi) menjadi pembanding untuk melihat perbaikan.
         $this->modelEvaluationService->captureSnapshot(
             $trainings[0] ?? null,
-            'Sebelum retraining: ' . implode(', ', $dispatched)
+            'Sebelum retraining: '.implode(', ', $dispatched)
         );
 
-        $message = 'Training dikirim ke NLP API: ' . implode(', ', $dispatched)
-                 . '. Pantau statusnya di tabel Riwayat Training.';
+        $message = 'Training dikirim ke NLP API: '.implode(', ', $dispatched)
+                 .'. Pantau statusnya di tabel Riwayat Training.';
 
-        if (!empty($skipped)) {
-            $message .= ' Dilewati: ' . implode(', ', $skipped) . '.';
+        if (! empty($skipped)) {
+            $message .= ' Dilewati: '.implode(', ', $skipped).'.';
         }
 
         return back()->with('success', $message);
@@ -313,7 +339,9 @@ class TrainingController extends Controller
      */
     public function previewTraining(NLPApiService $nlpService)
     {
-        $items = TrainingItem::where('is_corrected', true)->get();
+        // whereHas: koreksi milik analisis yang sudah dihapus tidak ikut dilatih,
+        // supaya data yang dilatih sama persis dengan yang dilaporkan dashboard.
+        $items = TrainingItem::whereHas('textAnalysis')->where('is_corrected', true)->get();
 
         if ($items->isEmpty()) {
             return response()->json([
@@ -333,19 +361,20 @@ class TrainingController extends Controller
             if (empty($data)) {
                 $reports[$type] = [
                     'available' => false,
-                    'message' => 'Belum ada koreksi untuk model ' . $type . '.',
+                    'message' => 'Belum ada koreksi untuk model '.$type.'.',
                 ];
+
                 continue;
             }
 
             try {
                 $reports[$type] = ['available' => true] + $nlpService->retrainPreview($type, $data);
             } catch (\Exception $e) {
-                \Log::warning("Pemeriksaan data {$type} gagal: " . $e->getMessage());
+                \Log::warning("Pemeriksaan data {$type} gagal: ".$e->getMessage());
 
                 $reports[$type] = [
                     'available' => false,
-                    'message' => 'Tidak bisa memeriksa data ' . $type . '. Pastikan NLP API berjalan.',
+                    'message' => 'Tidak bisa memeriksa data '.$type.'. Pastikan NLP API berjalan.',
                 ];
             }
         }
@@ -381,7 +410,7 @@ class TrainingController extends Controller
     private function buildAspectTrainingData($items): array
     {
         return $items
-            ->filter(fn ($item) => !empty($item->corrected_aspects) && filled($item->text_content))
+            ->filter(fn ($item) => ! empty($item->corrected_aspects) && filled($item->text_content))
             ->map(fn ($item) => [
                 'text' => $item->text_content,
                 'aspects' => array_values(array_filter(array_map(
@@ -389,7 +418,7 @@ class TrainingController extends Controller
                     (array) $item->corrected_aspects
                 ))),
             ])
-            ->filter(fn ($row) => !empty($row['aspects']))
+            ->filter(fn ($row) => ! empty($row['aspects']))
             ->values()
             ->all();
     }
@@ -402,11 +431,13 @@ class TrainingController extends Controller
         $analyses = TextAnalysis::with('result')
             ->where('status', 'completed')
             ->get();
-            
+
         $count = 0;
         foreach ($analyses as $analysis) {
-            if ($analysis->trainingItems()->exists()) continue;
-            
+            if ($analysis->trainingItems()->exists()) {
+                continue;
+            }
+
             $this->trainingItemService->extractJsonToTable($analysis);
             $count++;
         }

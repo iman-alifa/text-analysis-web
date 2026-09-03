@@ -15,7 +15,7 @@ class TrainingItem extends Model
         'predicted_sentiment',
         'detected_aspects',     // JSON array dari AI
         'confidence_score',
-        
+
         // Bagian Koreksi Admin
         'corrected_sentiment',
         'corrected_aspects',    // JSON array koreksi

@@ -2,18 +2,21 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\TextAnalysis;
+use App\Exceptions\LlmException;
 use App\Models\AnalysisLog;
 use App\Models\PreprocessingConfig;
+use App\Models\TextAnalysis;
+use App\Services\AnalysisInterpretationService;
 use App\Services\FileProcessingService;
 use App\Services\NLPApiService;
+use App\Services\PredictionQueryService;
 use App\Services\PreprocessingConfigResolver;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Barryvdh\DomPDF\Facade\Pdf;
 
 class AnalysisController extends Controller
 {
@@ -27,18 +30,55 @@ class AnalysisController extends Controller
     public function index()
     {
         $analyses = TextAnalysis::where('user_id', Auth::id())
-                                ->with('result')
-                                ->orderBy('created_at', 'desc')
-                                ->paginate(15);
-        
+            ->with('result')
+            ->orderBy('created_at', 'desc')
+            ->paginate(15);
+
         return view('analysis.index', compact('analyses'));
     }
-    
+
     public function create()
     {
         $preprocessingConfigs = PreprocessingConfig::all();
-        
+
         return view('analysis.create', compact('preprocessingConfigs'));
+    }
+
+    /**
+     * Satu halaman daftar prediksi (AJAX).
+     *
+     * Penyaringan, pencarian, dan paginasi dikerjakan di server. Sebelumnya
+     * seluruh prediksi dirender sekaligus lalu disaring di browser, sehingga
+     * halaman hasil untuk 289 baris berukuran 2,7 MB.
+     */
+    public function predictions(Request $request, PredictionQueryService $query, $id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+            ->with('result')
+            ->findOrFail($id);
+
+        if (! $analysis->result) {
+            return response()->json(['success' => false, 'message' => 'Hasil analisis belum tersedia.'], 404);
+        }
+
+        $validated = $request->validate([
+            'filter' => 'nullable|string|in:'.implode(',', PredictionQueryService::FILTERS),
+            'q' => 'nullable|string|max:200',
+            'page' => 'nullable|integer|min:1',
+        ]);
+
+        $hasil = $query->paginate(
+            $analysis->result,
+            $validated['filter'] ?? 'all',
+            $validated['q'] ?? '',
+            (int) ($validated['page'] ?? 1)
+        );
+
+        return response()->json([
+            'success' => true,
+            'html' => view('analysis.partials.prediction-list', $hasil)->render(),
+            'meta' => $hasil['meta'],
+        ]);
     }
 
     /**
@@ -55,7 +95,7 @@ class AnalysisController extends Controller
         if ($health === null) {
             return response()->json([
                 'success' => false,
-                'message' => 'Layanan analisis tidak merespons. Pastikan NLP API berjalan di ' . config('services.nlp_api.url') . '.',
+                'message' => 'Layanan analisis tidak merespons. Pastikan NLP API berjalan di '.config('services.nlp_api.url').'.',
             ], 503);
         }
 
@@ -64,7 +104,7 @@ class AnalysisController extends Controller
         return response()->json([
             'success' => true,
             'weights_loaded' => $weights,
-            'all_ready' => !empty($weights) && collect($weights)->every(fn ($loaded) => $loaded === true),
+            'all_ready' => ! empty($weights) && collect($weights)->every(fn ($loaded) => $loaded === true),
             'model' => [
                 'sentiment_source' => $health['sentiment_source'] ?? null,
                 'sentiment_base' => $health['sentiment_base'] ?? null,
@@ -141,7 +181,7 @@ class AnalysisController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            \Log::warning('Pratinjau preprocessing gagal: ' . $e->getMessage());
+            \Log::warning('Pratinjau preprocessing gagal: '.$e->getMessage());
 
             return response()->json([
                 'success' => false,
@@ -175,24 +215,24 @@ class AnalysisController extends Controller
         if ($validator->fails()) {
             return response()->json([
                 'success' => false,
-                'message' => $validator->errors()->first()
+                'message' => $validator->errors()->first(),
             ], 422);
         }
 
         try {
             $file = $request->file('file');
             $processedData = $this->fileProcessingService->processFile($file);
-            
+
             return response()->json([
                 'success' => true,
                 'data' => $processedData,
-                'message' => 'File berhasil diproses'
+                'message' => 'File berhasil diproses',
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal memproses file: ' . $e->getMessage()
+                'message' => 'Gagal memproses file: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -208,29 +248,29 @@ class AnalysisController extends Controller
             'input_type' => 'required|in:manual,file',
             'analysis_type' => 'required|in:sentiment,aspect,topic,combined',
             'preprocessing_config_id' => 'nullable|exists:preprocessing_configs,id',
-            
+
             // Manual input
             'manual_text' => 'required_if:input_type,manual|nullable|string',
-            
+
             // File upload
             'file' => 'required_if:input_type,file|nullable|file|mimes:csv,txt,xlsx,xls|max:10240',
-            
+
             // File configuration - Excel/CSV
             'file_has_header' => 'nullable|string',
             'text_column_name' => 'nullable|string',
             'text_column_index' => 'nullable|integer|min:1',
             'csv_delimiter' => 'nullable|string',
             'excel_sheet' => 'nullable|integer|min:0',
-            
+
             // File configuration - TXT
             'txt_separator' => 'nullable|in:newline,period,double_newline,custom',
             'txt_custom_separator' => 'nullable|string',
             'txt_encoding' => 'nullable|string',
-            
+
             // Aspect analysis
             'aspect_mode' => 'nullable|in:automatic,rule-based',
             'predefined_aspects' => 'nullable|string',
-            
+
             // Topic analysis
             // 0 berarti otomatis (API mencari sendiri jumlah topik terbaik).
             // 1 ditolak API, jadi ditolak lebih dulu di sini agar pesannya ramah.
@@ -239,8 +279,8 @@ class AnalysisController extends Controller
 
         if ($validator->fails()) {
             return redirect()->back()
-                        ->withErrors($validator)
-                        ->withInput();
+                ->withErrors($validator)
+                ->withInput();
         }
 
         try {
@@ -264,11 +304,11 @@ class AnalysisController extends Controller
             if ($request->filled('num_topics')) {
                 $metadata['num_topics'] = (int) $request->input('num_topics');
             }
-            
+
             if ($request->aspect_mode) {
                 $metadata['aspect_mode'] = $request->aspect_mode;
             }
-            
+
             if ($request->predefined_aspects) {
                 $aspects = array_map('trim', explode(',', $request->predefined_aspects));
                 $metadata['predefined_aspects'] = $aspects;
@@ -281,24 +321,24 @@ class AnalysisController extends Controller
                 $data['input_type'] = 'manual';
                 $data['raw_data'] = $texts;
                 $data['total_records'] = count($texts);
-                
+
             } else {
                 // File upload
                 $file = $request->file('file');
                 $fileExtension = strtolower($file->getClientOriginalExtension());
-                
+
                 // Save file
                 $fileData = $this->fileProcessingService->saveFile($file, 'uploads');
-                
+
                 // Prepare file configuration
                 $fileConfig = $this->prepareFileConfig($request, $fileExtension);
-                
+
                 // Process file with configuration
                 $processedData = $this->fileProcessingService->processFileWithConfig($file, $fileConfig);
-                
+
                 // Store file configuration in metadata
                 $metadata['file_config'] = $fileConfig;
-                
+
                 // Set input_type sesuai extension file
                 $data['input_type'] = $fileExtension;
                 $data['file_path'] = $fileData['path'];
@@ -311,15 +351,15 @@ class AnalysisController extends Controller
             // tidak terlanjur dibuat lalu gagal di worker dengan HTTP 422.
             if ($pesanBatas = $this->cekBatasApi($data['raw_data'])) {
                 return redirect()->back()
-                            ->withErrors(['manual_text' => $pesanBatas])
-                            ->withInput();
+                    ->withErrors(['manual_text' => $pesanBatas])
+                    ->withInput();
             }
 
             // Add metadata if not empty
             // PENTING: jangan json_encode di sini. Kolom metadata sudah di-cast
             // 'array' di model, jadi encoding manual membuat data ter-encode dua kali
             // dan seluruh isinya (num_topics, predefined_aspects) jadi tidak terbaca.
-            if (!empty($metadata)) {
+            if (! empty($metadata)) {
                 $data['metadata'] = $metadata;
             }
 
@@ -344,15 +384,15 @@ class AnalysisController extends Controller
             \App\Jobs\ProcessTextAnalysis::dispatch($analysis);
 
             return redirect()->route('analysis.show', $analysis->id)
-                        ->with('success', 'Analisis berhasil dibuat dan sedang diproses!');
+                ->with('success', 'Analisis berhasil dibuat dan sedang diproses!');
 
         } catch (\Exception $e) {
-            \Log::error('Analysis Store Error: ' . $e->getMessage());
-            \Log::error('Stack trace: ' . $e->getTraceAsString());
-            
+            \Log::error('Analysis Store Error: '.$e->getMessage());
+            \Log::error('Stack trace: '.$e->getTraceAsString());
+
             return redirect()->back()
-                        ->with('error', 'Terjadi kesalahan: ' . $e->getMessage())
-                        ->withInput();
+                ->with('error', 'Terjadi kesalahan: '.$e->getMessage())
+                ->withInput();
         }
     }
 
@@ -397,39 +437,39 @@ class AnalysisController extends Controller
     private function prepareFileConfig(Request $request, $fileExtension)
     {
         $config = [];
-        
+
         // Excel/CSV configuration
         if (in_array($fileExtension, ['xlsx', 'xls', 'csv'])) {
             $config['file_has_header'] = $request->input('file_has_header', 'on');
-            
+
             if ($config['file_has_header'] == 'on') {
                 $config['text_column_name'] = $request->input('text_column_name');
             } else {
                 $config['text_column_index'] = $request->input('text_column_index', 1);
             }
-            
+
             // CSV specific
             if ($fileExtension === 'csv') {
                 $config['csv_delimiter'] = $request->input('csv_delimiter', ',');
             }
-            
+
             // Excel specific
             if (in_array($fileExtension, ['xlsx', 'xls'])) {
                 $config['excel_sheet'] = $request->input('excel_sheet', 0);
             }
         }
-        
+
         // TXT configuration
         if ($fileExtension === 'txt') {
             $config['txt_separator'] = $request->input('txt_separator', 'newline');
-            
+
             if ($config['txt_separator'] === 'custom') {
                 $config['txt_custom_separator'] = $request->input('txt_custom_separator', "\n");
             }
-            
+
             $config['txt_encoding'] = $request->input('txt_encoding', 'utf-8');
         }
-        
+
         return $config;
     }
 
@@ -440,12 +480,12 @@ class AnalysisController extends Controller
     {
         // Split by new lines
         $lines = explode("\n", $text);
-        
+
         // Clean and filter
-        $texts = array_filter(array_map(function($line) {
+        $texts = array_filter(array_map(function ($line) {
             return trim($line);
-        }, $lines), function($line) {
-            return !empty($line);
+        }, $lines), function ($line) {
+            return ! empty($line);
         });
 
         return array_values($texts);
@@ -457,16 +497,26 @@ class AnalysisController extends Controller
     public function show($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->with('result')
-                                ->findOrFail($id);
-        
+            ->with('result')
+            ->findOrFail($id);
+
         // Prepare chart data if analysis is completed
         $chartData = null;
+        $predictionPage = null;
+        $aiSections = [];
+
         if ($analysis->status === 'completed' && $analysis->result) {
             $chartData = $this->prepareChartData($analysis);
+
+            // Halaman pertama dirender di server supaya daftarnya tetap tampil
+            // tanpa JavaScript, dan halaman berikutnya diambil lewat AJAX.
+            $predictionPage = app(PredictionQueryService::class)->paginate($analysis->result);
+
+            // Narasi AI yang sudah pernah dibangkitkan, dipetakan per bagian.
+            $aiSections = $analysis->result->ai_interpretations ?? [];
         }
-        
-        return view('analysis.show', compact('analysis', 'chartData'));
+
+        return view('analysis.show', compact('analysis', 'chartData', 'predictionPage', 'aiSections'));
     }
 
     /**
@@ -487,7 +537,7 @@ class AnalysisController extends Controller
         // Aspect chart data
         $aspects = $result->normalizedAspectResults();
 
-        if (!empty($aspects)) {
+        if (! empty($aspects)) {
             $data['aspect'] = \App\Helpers\ChartHelper::prepareAspectChartData($aspects);
         }
 
@@ -506,7 +556,7 @@ class AnalysisController extends Controller
             $data['topic'] = \App\Helpers\ChartHelper::prepareTopicChartData(
                 $result->topic_results['topics']
             );
-            
+
             // Word cloud data
             if (isset($result->topic_results['word_frequencies'])) {
                 $data['wordCloud'] = \App\Helpers\ChartHelper::prepareWordCloudData(
@@ -517,19 +567,19 @@ class AnalysisController extends Controller
 
         return $data;
     }
-    
+
     /**
      * Export ringkasan hasil analisis ke PDF.
      */
     public function exportPdf($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->with('result')
-                                ->findOrFail($id);
+            ->with('result')
+            ->findOrFail($id);
 
-        if ($analysis->status !== 'completed' || !$analysis->result) {
+        if ($analysis->status !== 'completed' || ! $analysis->result) {
             return redirect()->route('analysis.show', $analysis->id)
-                             ->with('error', 'Analisis belum selesai, hasil belum bisa diekspor.');
+                ->with('error', 'Analisis belum selesai, hasil belum bisa diekspor.');
         }
 
         $pdf = Pdf::loadView('analysis.export-pdf', [
@@ -546,12 +596,12 @@ class AnalysisController extends Controller
     public function exportCsv($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->with('result')
-                                ->findOrFail($id);
+            ->with('result')
+            ->findOrFail($id);
 
-        if ($analysis->status !== 'completed' || !$analysis->result) {
+        if ($analysis->status !== 'completed' || ! $analysis->result) {
             return redirect()->route('analysis.show', $analysis->id)
-                             ->with('error', 'Analisis belum selesai, hasil belum bisa diekspor.');
+                ->with('error', 'Analisis belum selesai, hasil belum bisa diekspor.');
         }
 
         $filename = $this->exportFilename($analysis, 'csv');
@@ -569,7 +619,7 @@ class AnalysisController extends Controller
             $handle = fopen('php://output', 'w');
 
             // BOM supaya Excel membaca karakter Indonesia dengan benar
-            fwrite($handle, chr(0xEF) . chr(0xBB) . chr(0xBF));
+            fwrite($handle, chr(0xEF).chr(0xBB).chr(0xBF));
             fputcsv($handle, ['no', 'teks', 'teks_preprocessed', 'sentimen', 'confidence', 'aspek']);
 
             foreach ($predictions as $index => $prediction) {
@@ -599,7 +649,7 @@ class AnalysisController extends Controller
     {
         $slug = Str::slug($analysis->title) ?: 'analisis';
 
-        return "{$slug}-{$analysis->id}-" . now()->format('Ymd-His') . ".{$extension}";
+        return "{$slug}-{$analysis->id}-".now()->format('Ymd-His').".{$extension}";
     }
 
     /**
@@ -608,25 +658,25 @@ class AnalysisController extends Controller
     public function destroy($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())->findOrFail($id);
-        
+
         // Delete file if exists
         // Disk 'public' mengikuti FileProcessingService::saveFile(), yang
         // menyimpan upload lewat storeAs(..., 'public').
         if ($analysis->file_path && Storage::disk('public')->exists($analysis->file_path)) {
             Storage::disk('public')->delete($analysis->file_path);
         }
-        
+
         $analysis->delete();
-        
+
         AnalysisLog::createLog(
             'deleted',
             Auth::id(),
             null,
-            'Analysis deleted: ' . $analysis->title
+            'Analysis deleted: '.$analysis->title
         );
-        
+
         return redirect()->route('analysis.index')
-                        ->with('success', 'Analysis deleted successfully');
+            ->with('success', 'Analysis deleted successfully');
     }
 
     /**
@@ -635,14 +685,14 @@ class AnalysisController extends Controller
     public function checkStatus($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->findOrFail($id);
-        
+            ->findOrFail($id);
+
         return response()->json([
             'status' => $analysis->status,
             'started_at' => $analysis->started_at?->toISOString(),
             'completed_at' => $analysis->completed_at?->toISOString(),
             'error_message' => $analysis->error_message,
-            'duration' => $analysis->duration
+            'duration' => $analysis->duration,
         ]);
     }
 
@@ -652,11 +702,11 @@ class AnalysisController extends Controller
     public function pollStatus($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->findOrFail($id);
-        
+            ->findOrFail($id);
+
         // Update last polled timestamp
         $analysis->update(['last_polled_at' => now()]);
-        
+
         return response()->json($analysis->getStatusForPolling());
     }
 
@@ -666,70 +716,58 @@ class AnalysisController extends Controller
     public function canPoll($id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->findOrFail($id);
-        
+            ->findOrFail($id);
+
         // Only allow polling if still processing
-        if (!$analysis->isProcessing()) {
+        if (! $analysis->isProcessing()) {
             return response()->json([
                 'can_poll' => false,
                 'reason' => 'Analysis is not in processing state',
-                'current_status' => $analysis->status
+                'current_status' => $analysis->status,
             ]);
         }
-        
+
         return response()->json([
             'can_poll' => true,
-            'status' => $analysis->getStatusForPolling()
+            'status' => $analysis->getStatusForPolling(),
         ]);
     }
 
     /**
-     * Generate topic interpretation via LLM
+     * Bangkitkan narasi AI untuk satu bagian halaman hasil.
+     *
+     * Dipanggil dari tombol per bagian, bukan otomatis saat analisis berjalan:
+     * job antrean tidak boleh bergantung pada layanan luar yang bisa gagal,
+     * dan tiap pemanggilan memakan kuota API.
      */
-    public function generateTopicInterpretation($id)
+    public function interpret(Request $request, AnalysisInterpretationService $interpreter, $id, string $section)
     {
-        $analysis = TextAnalysis::where('user_id', Auth::id())
-                                ->findOrFail($id);
-        
-        $result = $analysis->result;
-        
-        if (!$result || empty($result->topic_results['topics'])) {
+        $analysis = TextAnalysis::where('user_id', Auth::id())->findOrFail($id);
+
+        if (! in_array($section, AnalysisInterpretationService::SECTIONS, true)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Hasil topic modeling tidak ditemukan'
+                'message' => 'Bagian analisis tidak dikenal.',
             ], 404);
         }
 
-        // Jika interpretasi sudah ada, langsung kembalikan
-        if (isset($result->topic_results['interpretation']) && !empty($result->topic_results['interpretation'])) {
-            return response()->json([
-                'success' => true,
-                'data' => $result->topic_results['interpretation'],
-                'message' => 'Interpretasi sudah ada'
-            ]);
-        }
-
-        $llmService = new \App\Services\LlmService();
-        $interpretations = $llmService->generateTopicInterpretations($result->topic_results['topics']);
-
-        if (empty($interpretations)) {
+        try {
+            $narasi = $interpreter->generate(
+                $analysis,
+                $section,
+                $request->boolean('regenerate')
+            );
+        } catch (LlmException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal menghasilkan interpretasi dari AI. Cek konfigurasi API Key atau coba lagi nanti.'
-            ], 500);
+                'message' => $e->getMessage(),
+            ], 422);
         }
-
-        // Simpan interpretasi ke dalam JSON topic_results
-        $topicResults = $result->topic_results;
-        $topicResults['interpretation'] = $interpretations;
-        
-        $result->topic_results = $topicResults;
-        $result->save();
 
         return response()->json([
             'success' => true,
-            'data' => $interpretations,
-            'message' => 'Interpretasi berhasil dibuat'
+            'section' => $section,
+            'data' => $narasi,
         ]);
     }
 }

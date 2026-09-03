@@ -22,7 +22,7 @@ return new class extends Migration
             $table->boolean('is_processed')->default(false);
             $table->timestamps();
             $table->softDeletes();
-            
+
             $table->index(['user_id', 'is_processed']);
         });
     }

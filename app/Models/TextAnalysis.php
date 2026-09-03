@@ -4,10 +4,10 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class TextAnalysis extends Model
 {
@@ -98,7 +98,7 @@ class TextAnalysis extends Model
 
     public function getStatusBadgeAttribute(): string
     {
-        return match($this->status) {
+        return match ($this->status) {
             'pending' => '<span class="badge bg-warning">Pending</span>',
             'processing' => '<span class="badge bg-info">Processing</span>',
             'completed' => '<span class="badge bg-success">Completed</span>',
@@ -109,11 +109,12 @@ class TextAnalysis extends Model
 
     public function getDurationAttribute(): ?string
     {
-        if (!$this->started_at || !$this->completed_at) {
+        if (! $this->started_at || ! $this->completed_at) {
             return null;
         }
 
         $seconds = $this->started_at->diffInSeconds($this->completed_at);
+
         return gmdate('H:i:s', $seconds);
     }
 
@@ -156,13 +157,15 @@ class TextAnalysis extends Model
     public function getRealtimeAccuracyAttribute()
     {
         $verified = $this->trainingItems()->where('is_corrected', true)->get();
-        if ($verified->isEmpty()) return 0;
-        
+        if ($verified->isEmpty()) {
+            return 0;
+        }
+
         // Hitung berapa yang AI-nya benar (AI == Koreksi)
-        $correct = $verified->filter(function($item) {
+        $correct = $verified->filter(function ($item) {
             return $item->predicted_sentiment === $item->corrected_sentiment;
         })->count();
-        
+
         return round(($correct / $verified->count()) * 100, 1);
     }
 }

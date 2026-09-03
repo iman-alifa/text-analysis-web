@@ -162,7 +162,7 @@ class AnalysisPipelineTest extends TestCase
         $this->assertSame([['harga'], ['pelayanan']], $result->document_aspects);
 
         // Baris prediksi inilah yang membuat halaman feedback terisi
-        (new TrainingItemService())->extractJsonToTable($analysis->fresh());
+        (new TrainingItemService)->extractJsonToTable($analysis->fresh());
         $this->assertSame(2, TrainingItem::where('text_analysis_id', $analysis->id)->count());
     }
 
@@ -218,7 +218,7 @@ class AnalysisPipelineTest extends TestCase
             ],
         ]);
 
-        $service = new TrainingItemService();
+        $service = new TrainingItemService;
         $service->extractJsonToTable($analysis->fresh());
         $service->extractJsonToTable($analysis->fresh());
 
@@ -240,7 +240,7 @@ class AnalysisPipelineTest extends TestCase
             ],
         ]);
 
-        (new TrainingItemService())->extractJsonToTable($analysis->fresh());
+        (new TrainingItemService)->extractJsonToTable($analysis->fresh());
 
         $this->assertNull(TrainingItem::first()->predicted_sentiment);
     }

@@ -20,7 +20,7 @@ return new class extends Migration
             $table->text('summary')->nullable(); // Auto-generated summary
             $table->json('visualizations')->nullable(); // Path ke chart images
             $table->timestamps();
-            
+
             $table->index('text_analysis_id');
         });
     }

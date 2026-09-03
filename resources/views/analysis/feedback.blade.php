@@ -248,7 +248,12 @@
                             <p class="font-bold text-indigo-700">{{ $evaluation['topic']['topic_count'] }}</p>
                         </div>
                         <div class="bg-white border border-indigo-100 rounded-lg p-2">
-                            <p class="text-gray-500">Coherence Score</p>
+                            <p class="text-gray-500">
+                                Coherence Score
+                                @if(($evaluation['topic']['source'] ?? null) === 'nlp-api')
+                                    <span class="text-[10px] text-gray-400">(c<sub>v</sub>)</span>
+                                @endif
+                            </p>
                             <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_score'] }}</p>
                         </div>
                         <div class="bg-white border border-indigo-100 rounded-lg p-2">
@@ -257,7 +262,9 @@
                         </div>
                         <div class="bg-white border border-indigo-100 rounded-lg p-2">
                             <p class="text-gray-500">Pasangan Kata</p>
-                            <p class="font-bold text-indigo-700">{{ $evaluation['topic']['coherence_pairs'] }}</p>
+                            <p class="font-bold text-indigo-700">
+                                {{ $evaluation['topic']['coherence_pairs'] ?? '—' }}
+                            </p>
                         </div>
                     </div>
                     <p class="text-[11px] text-indigo-800 mt-2">
@@ -288,6 +295,17 @@
 
     <form method="POST" action="{{ route('analysis.feedback.store', $analysis->id) }}" id="feedbackForm">
         @csrf
+        <input type="hidden" name="page" value="{{ $items->currentPage() }}">
+
+        <div class="mb-4 flex items-center justify-between gap-4 flex-wrap">
+            <p class="text-sm text-gray-600">
+                Menampilkan {{ $items->firstItem() }}&ndash;{{ $items->lastItem() }}
+                dari {{ $items->total() }} baris, diurutkan dari yang paling tidak yakin.
+            </p>
+            <p class="text-sm text-gray-500">
+                Halaman {{ $items->currentPage() }} dari {{ $items->lastPage() }}
+            </p>
+        </div>
 
         <div class="space-y-4">
             @foreach($items as $index => $item)
@@ -446,6 +464,16 @@
             </div>
         </div>
     </form>
+
+    @if($items->hasPages())
+    <div class="mt-6">
+        <p class="mb-2 text-xs text-gray-500">
+            Simpan koreksi pada halaman ini sebelum berpindah &mdash; perubahan yang belum
+            disimpan tidak ikut terbawa ke halaman berikutnya.
+        </p>
+        {{ $items->links() }}
+    </div>
+    @endif
 
     @endif
 
