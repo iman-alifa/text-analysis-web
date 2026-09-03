@@ -62,9 +62,17 @@ class RetrainModel implements ShouldQueue
                     (float) $this->training->learning_rate
                 );
 
+            // NLP API menolak checkpoint yang menurunkan metrik validasi dan
+            // mengembalikan bobot lama. Itu hasil yang sah, bukan kegagalan,
+            // tapi juga bukan keberhasilan - mencatatnya "completed" membuat
+            // admin mengira model membaik padahal tidak.
+            $ditolak = ($result['rejected_for_regression'] ?? false) === true
+                    || ($result['saved'] ?? true) === false;
+
             $this->training->update([
-                'status' => 'completed',
+                'status' => $ditolak ? 'rejected' : 'completed',
                 'result' => $result,
+                'error_message' => $ditolak ? $this->regressionMessage($result) : null,
                 'completed_at' => now(),
             ]);
 
@@ -72,15 +80,21 @@ class RetrainModel implements ShouldQueue
                 'retrained',
                 $this->training->triggered_by,
                 null,
-                "Retraining model {$type} selesai",
+                $ditolak
+                    ? "Retraining model {$type} ditolak: metrik validasi menurun"
+                    : "Retraining model {$type} selesai",
                 [
                     'training_id' => $this->training->id,
                     'samples' => $this->training->total_samples,
+                    'saved' => !$ditolak,
                     'result' => $result,
                 ]
             );
 
-            Log::info("Retraining {$type} selesai", ['result' => $result]);
+            Log::info("Retraining {$type} selesai", [
+                'saved' => !$ditolak,
+                'result' => $result,
+            ]);
 
         } catch (Exception $e) {
             $this->markFailed($e->getMessage());
@@ -91,6 +105,30 @@ class RetrainModel implements ShouldQueue
     public function failed(\Throwable $exception): void
     {
         $this->markFailed($exception->getMessage());
+    }
+
+    /**
+     * Ringkas alasan penolakan supaya terbaca langsung di tabel riwayat.
+     */
+    private function regressionMessage(array $result): string
+    {
+        $delta = $result['weighted_f1_delta'] ?? null;
+        $sebelum = $result['metrics_before']['weighted_f1'] ?? null;
+        $sesudah = $result['metrics_after']['weighted_f1'] ?? null;
+
+        $pesan = 'Checkpoint ditolak: metrik validasi menurun, bobot lama dipertahankan.';
+
+        if ($sebelum !== null && $sesudah !== null) {
+            $pesan .= sprintf(' Weighted F1 %s -> %s', $sebelum, $sesudah);
+
+            if ($delta !== null) {
+                $pesan .= sprintf(' (%+.4f)', $delta);
+            }
+
+            $pesan .= '.';
+        }
+
+        return $pesan;
     }
 
     private function markFailed(string $message): void

@@ -23,6 +23,15 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/create', [AnalysisController::class, 'create'])->name('create');
         Route::post('/store', [AnalysisController::class, 'store'])->name('store');
         Route::post('/upload-file', [AnalysisController::class, 'uploadFile'])->name('upload-file');
+        Route::post('/preprocess-preview', [AnalysisController::class, 'previewPreprocessing'])
+             ->name('preprocess-preview')
+             ->middleware('throttle:20,1');
+        Route::get('/nlp-status', [AnalysisController::class, 'nlpStatus'])
+             ->name('nlp-status')
+             ->middleware('throttle:30,1');
+        Route::post('/warm-up', [AnalysisController::class, 'warmUpModels'])
+             ->name('warm-up')
+             ->middleware('throttle:5,1');
         Route::get('/{id}', [AnalysisController::class, 'show'])->name('show');
         
         Route::get('/{id}/poll-status', [AnalysisController::class, 'pollStatus'])
@@ -72,10 +81,13 @@ Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.'
     Route::get('/training', [TrainingController::class, 'index'])->name('training.index');
     
     // 2. Workspace Koreksi (Show per File)
-    Route::get('/training/{id}', [TrainingController::class, 'show'])->name('training.show');
+    // whereNumber wajib: tanpa itu {id} juga menangkap '/training/export-csv'
+    // dan '/training/preview-retrain' karena keduanya terdaftar setelah ini,
+    // sehingga tombol Export CSV selalu berakhir 404.
+    Route::get('/training/{id}', [TrainingController::class, 'show'])->whereNumber('id')->name('training.show');
     
     // 3. API Data Load (AJAX untuk DataTable di Show)
-    Route::get('/training/{id}/data', [TrainingController::class, 'getData'])->name('training.data');
+    Route::get('/training/{id}/data', [TrainingController::class, 'getData'])->whereNumber('id')->name('training.data');
     
     // 4. Action: Update Single Item
     Route::post('/training/update/{itemId}', [TrainingController::class, 'update'])->name('training.update');
@@ -89,6 +101,8 @@ Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.'
     
     // 7. Action: Export & Trigger
     Route::get('/training/export-csv', [TrainingController::class, 'export'])->name('training.export');
+    // Periksa komposisi data latih sebelum melatih apa pun
+    Route::get('/training/preview-retrain', [TrainingController::class, 'previewTraining'])->name('training.preview');
     Route::post('/training/trigger-retrain', [TrainingController::class, 'triggerTraining'])->name('training.trigger'); // Pastikan ini POST
 
     Route::post('/training/sync-all', [TrainingController::class, 'syncAll'])->name('training.sync');

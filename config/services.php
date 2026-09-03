@@ -50,9 +50,30 @@ return [
 
     'nlp_api' => [
         'url' => env('NLP_API_URL', 'http://localhost:8001'),
-        'timeout' => env('NLP_API_TIMEOUT', 7200),
+        // Timeout satu permintaan HTTP ke service NLP.
+        //
+        // HARUS LEBIH KECIL dari ProcessTextAnalysis::$timeout (1800 detik),
+        // supaya yang menghentikan pekerjaan macet adalah job-nya - yang bisa
+        // mencatat kegagalan dan mencoba ulang dengan rapi - bukan permintaan
+        // HTTP yang menggantung. Nilai lama 7200 detik (2 jam) empat kali lebih
+        // besar dari timeout job, sehingga job selalu mati lebih dulu tanpa
+        // sempat mencatat sebab yang berguna.
+        //
+        // Diukur pada jalur produksi: 885 teks memakan 50 detik (sentimen),
+        // 54 detik (aspek), 52 detik (topik), dan 235 detik untuk analisis
+        // gabungan. 600 detik memberi ruang lebih dari 10x, termasuk untuk
+        // permintaan pertama yang masih memuat bobot model.
+        'timeout' => env('NLP_API_TIMEOUT', 600),
         'batch_size' => env('NLP_API_BATCH_SIZE', 50),
-        'max_texts_single_request' => env('NLP_API_MAX_TEXTS', 100),
+
+        // Batas yang ditegakkan service NLP (app/config.py: max_batch_size dan
+        // max_text_length). Divalidasi lebih dulu di sisi Laravel supaya
+        // pengguna mendapat pesan yang jelas, bukan HTTP 422 mentah dari API.
+        //
+        // Menggantikan 'max_texts_single_request' yang bernilai 100 padahal
+        // batas sebenarnya 10.000, dan tidak pernah dibaca kode mana pun.
+        'max_texts' => env('NLP_API_MAX_TEXTS', 10000),
+        'max_text_length' => env('NLP_API_MAX_TEXT_LENGTH', 10000),
     ],
 
 ];

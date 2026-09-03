@@ -268,9 +268,15 @@
         @endif
 
         <!-- Metrics Cards -->
-        @if($result->metrics)
+        @php
+            // Hanya nilai tunggal yang layak jadi kartu. metrics juga memuat
+            // nilai bersarang seperti review_queue dan failed_batches, dan
+            // mencetak array lewat {{ }} membuat seluruh halaman gagal render.
+            $metricCards = collect($result->metrics ?? [])->filter(fn ($value) => is_scalar($value));
+        @endphp
+        @if($metricCards->isNotEmpty())
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            @foreach($result->metrics as $key => $value)
+            @foreach($metricCards as $key => $value)
             <div class="metric-card bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                 <div class="flex items-center justify-between mb-2">
                     <p class="text-sm font-medium text-gray-600">{{ ucfirst(str_replace('_', ' ', $key)) }}</p>
@@ -331,9 +337,20 @@
 
             <!-- Predictions List -->
             @if($result->predictions)
+            @php
+                $reviewQueue = $result->metrics['review_queue'] ?? null;
+                // Indeks antrean mengacu ke posisi teks masukan, bukan urutan baris
+                // tersimpan - keduanya bisa berbeda bila ada batch yang gagal.
+                $reviewRanks = $reviewQueue ? array_flip($reviewQueue['indices']) : [];
+                $qualityCounters = collect([
+                    'total_empty' => ['label' => 'baris kosong', 'note' => 'tidak ikut dihitung dalam persentase'],
+                    'total_truncated' => ['label' => 'teks terpotong', 'note' => 'melebihi 512 token, ekornya tidak dinilai'],
+                    'total_failed' => ['label' => 'baris gagal dinilai', 'note' => 'model tidak berhasil menilai'],
+                ])->filter(fn ($meta, $key) => ($result->metrics[$key] ?? 0) > 0);
+            @endphp
             <div class="bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="px-6 py-4 border-b border-gray-200">
-                    <div class="flex items-center justify-between">
+                    <div class="flex items-center justify-between flex-wrap gap-3">
                         <div>
                             <h3 class="text-lg font-semibold text-gray-900">Detail Prediksi</h3>
                             <p class="text-sm text-gray-500 mt-1">Menampilkan {{ count($result->predictions) }} teks yang dianalisis</p>
@@ -344,6 +361,11 @@
                             <button onclick="filterPredictions('all')" class="filter-btn active px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white" data-filter="all">
                                 Semua
                             </button>
+                            @if($reviewQueue && $reviewQueue['count'] > 0)
+                            <button onclick="filterPredictions('review')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" data-filter="review">
+                                Perlu Ditinjau ({{ $reviewQueue['count'] }})
+                            </button>
+                            @endif
                             <button onclick="filterPredictions('positive')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="positive">
                                 Positif
                             </button>
@@ -357,10 +379,36 @@
                     </div>
                 </div>
                 
+                @if($reviewQueue && $reviewQueue['count'] > 0)
+                <div class="px-6 py-4 border-b border-gray-200 bg-amber-50">
+                    <p class="text-sm text-amber-900">
+                        <strong>{{ $reviewQueue['count'] }} baris</strong>
+                        ({{ round($reviewQueue['share'] * 100, 1) }}% dari yang dinilai)
+                        punya keyakinan di bawah {{ round($reviewQueue['threshold'] * 100, 1) }}%.
+                        Mengoreksi baris ini lebih dulu adalah cara termurah mengumpulkan data latih.
+                    </p>
+                    <p class="mt-1 text-xs text-amber-800">
+                        Catatan: antrean ini sengaja berisi baris yang model paling ragu, jadi
+                        <strong>jangan memakainya untuk mengukur akurasi</strong> &mdash; untuk pengukuran, ambil sampel acak.
+                    </p>
+                </div>
+                @endif
+
+                @if($qualityCounters->isNotEmpty())
+                <div class="px-6 py-4 border-b border-gray-200 bg-blue-50">
+                    <p class="text-sm font-medium text-blue-900 mb-1">Catatan mutu data</p>
+                    <ul class="text-xs text-blue-800 space-y-0.5">
+                        @foreach($qualityCounters as $key => $meta)
+                        <li>&bull; {{ $result->metrics[$key] }} {{ $meta['label'] }} &mdash; {{ $meta['note'] }}</li>
+                        @endforeach
+                    </ul>
+                </div>
+                @endif
+
                 <!-- Search Box -->
                 <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                    <input type="text" 
-                        id="searchPredictions" 
+                    <input type="text"
+                        id="searchPredictions"
                         placeholder="Cari teks..." 
                         class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                 </div>
@@ -369,7 +417,16 @@
                     <!-- Predictions Container -->
                     <div id="predictions-container" class="space-y-3 max-h-[600px] overflow-y-auto">
                         @foreach($result->predictions as $index => $pred)
-                        <div class="prediction-card {{ $pred['sentiment'] }} p-4 rounded-lg" data-sentiment="{{ $pred['sentiment'] }}" data-text="{{ strtolower($pred['text']) }}">
+                        @php
+                            $originalIndex = $pred['original_index'] ?? $index;
+                            $reviewRank = $reviewRanks[$originalIndex] ?? -1;
+                            $method = $pred['method'] ?? null;
+                        @endphp
+                        <div class="prediction-card {{ $pred['sentiment'] }} p-4 rounded-lg{{ $reviewRank >= 0 ? ' ring-1 ring-amber-300' : '' }}"
+                            data-sentiment="{{ $pred['sentiment'] }}"
+                            data-review-rank="{{ $reviewRank }}"
+                            data-original-order="{{ $index }}"
+                            data-text="{{ strtolower($pred['text']) }}">
                             <div class="flex items-start justify-between gap-4">
                                 <!-- Text Content -->
                                 <div class="flex-1 min-w-0">
@@ -413,6 +470,19 @@
                                         </span>
                                         @endif
                                         
+                                        <!-- Asal prediksi: model sungguhan atau jalur cadangan -->
+                                        @if($method && $method !== 'indobert')
+                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium
+                                            @if($method === 'rule-based') bg-orange-100 text-orange-800
+                                            @elseif($method === 'error') bg-red-100 text-red-800
+                                            @else bg-gray-100 text-gray-600
+                                            @endif">
+                                            @if($method === 'rule-based') Tanpa model
+                                            @elseif($method === 'empty') Tidak dinilai
+                                            @else Gagal dinilai @endif
+                                        </span>
+                                        @endif
+
                                         <!-- Show Processed Text Toggle (Optional) -->
                                         @if(isset($pred['processed_text']) && $pred['processed_text'] != $pred['text'])
                                         <button 
@@ -477,7 +547,11 @@
 
             @push('scripts')
             <script>
-                const allPredictions = @json($result->predictions);
+                // Hanya jumlahnya yang dipakai. Menanam seluruh array prediksi
+                // di sini menggandakan berat halaman - datanya sudah dirender
+                // sebagai kartu HTML - dan pada 885 teks halaman ini mencapai
+                // 7,8 MB hanya karena salinan JSON tersebut.
+                const totalPredictions = {{ count($result->predictions) }};
                 let currentFilter = 'all';
                 
                 // Toggle processed text visibility
@@ -515,20 +589,41 @@
                 // Apply filters
                 function applyFilters() {
                     const searchTerm = document.getElementById('searchPredictions')?.value.toLowerCase() || '';
+                    const container = document.getElementById('predictions-container');
                     const cards = document.querySelectorAll('.prediction-card');
                     let visibleCount = 0;
-                    
+
+                    // Mode tinjauan: urutkan dari yang paling tidak yakin, sesuai
+                    // urutan indices dari API. Mode lain kembali ke urutan asli.
+                    if (container) {
+                        const ordered = Array.from(cards).sort((a, b) => {
+                            const rankA = parseInt(a.dataset.reviewRank ?? -1, 10);
+                            const rankB = parseInt(b.dataset.reviewRank ?? -1, 10);
+
+                            if (currentFilter === 'review') {
+                                return rankA - rankB;
+                            }
+
+                            return parseInt(a.dataset.originalOrder ?? 0, 10) - parseInt(b.dataset.originalOrder ?? 0, 10);
+                        });
+
+                        ordered.forEach(card => container.appendChild(card));
+                    }
+
                     cards.forEach(card => {
                         const sentiment = card.dataset.sentiment;
                         const text = card.dataset.text;
-                        
+                        const reviewRank = parseInt(card.dataset.reviewRank ?? -1, 10);
+
                         let shouldShow = true;
-                        
-                        // Filter by sentiment
-                        if (currentFilter !== 'all' && sentiment !== currentFilter) {
+
+                        // Filter antrean tinjauan
+                        if (currentFilter === 'review') {
+                            shouldShow = reviewRank >= 0;
+                        } else if (currentFilter !== 'all' && sentiment !== currentFilter) {
                             shouldShow = false;
                         }
-                        
+
                         // Filter by search term
                         if (searchTerm && !text.includes(searchTerm)) {
                             shouldShow = false;
@@ -546,7 +641,7 @@
                     // Update count
                     const countEl = document.getElementById('predictions-count');
                     if (countEl) {
-                        countEl.textContent = `Menampilkan ${visibleCount} dari ${allPredictions.length} prediksi`;
+                        countEl.textContent = `Menampilkan ${visibleCount} dari ${totalPredictions} prediksi`;
                     }
                 }
             </script>
@@ -554,105 +649,12 @@
             @endif
 
             <!-- Interactive Predictions Filter -->
-            @if($result->predictions && count($result->predictions) > 10)
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-semibold text-gray-900">Filter Hasil</h3>
-                    <div class="flex gap-2">
-                        <button onclick="filterPredictions('all')" class="filter-btn active px-4 py-2 rounded-lg text-sm font-medium" data-filter="all">
-                            Semua
-                        </button>
-                        <button onclick="filterPredictions('positive')" class="filter-btn px-4 py-2 rounded-lg text-sm font-medium" data-filter="positive">
-                            Positif
-                        </button>
-                        <button onclick="filterPredictions('neutral')" class="filter-btn px-4 py-2 rounded-lg text-sm font-medium" data-filter="neutral">
-                            Netral
-                        </button>
-                        <button onclick="filterPredictions('negative')" class="filter-btn px-4 py-2 rounded-lg text-sm font-medium" data-filter="negative">
-                            Negatif
-                        </button>
-                    </div>
-                </div>
-                
-                <input type="text" 
-                    id="searchPredictions" 
-                    placeholder="Cari teks..." 
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            </div>
-
-            @push('scripts')
-            <script>
-                const allPredictions = @json($result->predictions);
-                let currentFilter = 'all';
-                
-                function filterPredictions(sentiment) {
-                    currentFilter = sentiment;
-                    
-                    // Update button states
-                    document.querySelectorAll('.filter-btn').forEach(btn => {
-                        btn.classList.remove('active', 'bg-blue-600', 'text-white');
-                        btn.classList.add('bg-gray-100', 'text-gray-700');
-                    });
-                    
-                    const activeBtn = document.querySelector(`[data-filter="${sentiment}"]`);
-                    activeBtn.classList.add('active', 'bg-blue-600', 'text-white');
-                    activeBtn.classList.remove('bg-gray-100', 'text-gray-700');
-                    
-                    renderPredictions();
-                }
-                
-                function renderPredictions() {
-                    const searchTerm = document.getElementById('searchPredictions').value.toLowerCase();
-                    
-                    let filtered = allPredictions;
-                    
-                    // Filter by sentiment
-                    if (currentFilter !== 'all') {
-                        filtered = filtered.filter(p => p.sentiment === currentFilter);
-                    }
-                    
-                    // Filter by search term
-                    if (searchTerm) {
-                        filtered = filtered.filter(p => p.text.toLowerCase().includes(searchTerm));
-                    }
-                    
-                    // Render results
-                    const container = document.getElementById('predictions-container');
-                    if (!container) return;
-                    
-                    container.innerHTML = filtered.map(pred => `
-                        <div class="prediction-card ${pred.sentiment} p-4 rounded-lg">
-                            <div class="flex items-start justify-between">
-                                <div class="flex-1">
-                                    <p class="text-gray-800">${pred.text}</p>
-                                    <div class="mt-2 flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                                            ${pred.sentiment === 'positive' ? 'bg-green-100 text-green-800' : 
-                                            pred.sentiment === 'negative' ? 'bg-red-100 text-red-800' : 
-                                            'bg-gray-100 text-gray-800'}">
-                                            ${pred.sentiment.charAt(0).toUpperCase() + pred.sentiment.slice(1)}
-                                        </span>
-                                        ${pred.confidence ? `
-                                        <span class="text-xs text-gray-500">
-                                            Confidence: ${Math.round(pred.confidence * 100)}%
-                                        </span>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('');
-                    
-                    // Show count
-                    document.getElementById('predictions-count').textContent = 
-                        `Menampilkan ${filtered.length} dari ${allPredictions.length} prediksi`;
-                }
-                
-                // Search functionality
-                document.getElementById('searchPredictions')?.addEventListener('input', renderPredictions);
-            </script>
-            @endpush
-            @endif
+            {{-- Panel "Filter Hasil" duplikat dihapus di sini.
+                 Skrip di dalamnya mendeklarasikan ulang const allPredictions dan
+                 currentFilter pada lingkup global yang sama dengan blok Detail
+                 Prediksi di atas, sehingga seluruh skrip itu gagal di-parse
+                 (SyntaxError) dan tombolnya mati. Kotak carinya juga memakai id
+                 searchPredictions yang sudah dipakai, jadi tidak pernah terbaca. --}}
             @endif
         @endif
 
@@ -706,6 +708,69 @@
         <!-- Topic Modeling Results -->
         @if(($analysis->analysis_type == 'topic' || $analysis->analysis_type == 'combined') && $result->topic_results)
         <div class="space-y-6">
+            @php
+                $topicQuality = $result->topic_results['quality'] ?? null;
+                // Rambu penafsiran c_v untuk teks pendek/tidak baku seperti komentar.
+                $cv = $topicQuality['c_v'] ?? null;
+                $cvBand = match(true) {
+                    $cv === null => null,
+                    $cv < 0.30 => ['label' => 'Tidak koheren', 'class' => 'text-red-700 bg-red-50 border-red-200'],
+                    $cv < 0.40 => ['label' => 'Lemah', 'class' => 'text-orange-700 bg-orange-50 border-orange-200'],
+                    $cv < 0.55 => ['label' => 'Baik untuk teks pendek', 'class' => 'text-green-700 bg-green-50 border-green-200'],
+                    $cv < 0.70 => ['label' => 'Sangat baik', 'class' => 'text-green-800 bg-green-100 border-green-300'],
+                    default => ['label' => 'Patut dicurigai', 'class' => 'text-amber-800 bg-amber-50 border-amber-200'],
+                };
+            @endphp
+
+            @if($topicQuality)
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-1">Mutu Pemodelan Topik</h3>
+                <p class="text-sm text-gray-500 mb-4">
+                    Ukuran seberapa koheren topik yang terbentuk pada korpus ini.
+                </p>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    @if($cv !== null)
+                    <div class="rounded-lg border p-4 {{ $cvBand['class'] }}">
+                        <p class="text-xs font-medium uppercase tracking-wide opacity-80">Koherensi (c<sub>v</sub>)</p>
+                        <p class="mt-1 text-2xl font-bold">{{ number_format($cv, 4) }}</p>
+                        <p class="text-xs mt-1">{{ $cvBand['label'] }}</p>
+                    </div>
+                    @endif
+
+                    @isset($topicQuality['diversity'])
+                    <div class="rounded-lg border border-gray-200 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Keberagaman</p>
+                        <p class="mt-1 text-2xl font-bold text-gray-900">{{ number_format($topicQuality['diversity'], 4) }}</p>
+                        <p class="text-xs mt-1 text-gray-500">Porsi kata kunci yang tidak berulang antar topik</p>
+                    </div>
+                    @endisset
+
+                    @isset($topicQuality['outlier_rate'])
+                    <div class="rounded-lg border border-gray-200 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Dokumen di luar topik</p>
+                        <p class="mt-1 text-2xl font-bold text-gray-900">{{ round($topicQuality['outlier_rate'] * 100, 1) }}%</p>
+                        <p class="text-xs mt-1 text-gray-500">Wajar pada kisaran 5&ndash;20%</p>
+                    </div>
+                    @endisset
+
+                    @isset($topicQuality['c_npmi'])
+                    <div class="rounded-lg border border-gray-200 p-4">
+                        <p class="text-xs font-medium uppercase tracking-wide text-gray-500">c<sub>NPMI</sub></p>
+                        <p class="mt-1 text-2xl font-bold text-gray-900">{{ number_format($topicQuality['c_npmi'], 4) }}</p>
+                        <p class="text-xs mt-1 text-gray-500">Ukuran pembanding, rentang &minus;1 sampai 1</p>
+                    </div>
+                    @endisset
+                </div>
+
+                <p class="mt-4 text-xs text-gray-500">
+                    Nilai c<sub>v</sub> <strong>tidak sebanding antar korpus</strong>, jadi jangan dibandingkan
+                    langsung dengan angka dari penelitian lain &mdash; gunakan untuk membandingkan
+                    konfigurasi pada data yang sama.
+                </p>
+            </div>
+            @endif
+
             <!-- Topics Overview -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <!-- Topic Distribution -->

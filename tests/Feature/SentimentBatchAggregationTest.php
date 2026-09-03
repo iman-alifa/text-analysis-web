@@ -107,4 +107,136 @@ class SentimentBatchAggregationTest extends TestCase
 
         (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
     }
+
+    /**
+     * Bangun respons batch yang memuat baris kosong bertanda `method: empty`,
+     * seperti yang dikembalikan service Python untuk baris tanpa isi.
+     */
+    private function batchResponseWithEmpty(array $rows): array
+    {
+        $predictions = [];
+        foreach ($rows as $index => [$sentiment, $method]) {
+            $predictions[] = [
+                'text' => "teks {$index}",
+                'sentiment' => $sentiment,
+                'confidence' => $method === 'empty' ? 0.0 : 0.9,
+                'method' => $method,
+            ];
+        }
+
+        return [
+            'status' => 'success',
+            'results' => [
+                'predictions' => $predictions,
+                'distribution' => ['positive' => 0, 'neutral' => 0, 'negative' => 0],
+                'metrics' => ['total_analyzed' => count($rows)],
+                'summary' => 'ringkasan batch',
+            ],
+        ];
+    }
+
+    /**
+     * Baris kosong tidak boleh ikut menjadi penyebut persentase.
+     *
+     * Service Python sudah mengeluarkannya; jalur batch di Laravel harus sama,
+     * atau dataset besar melaporkan angka berbeda dari dataset kecil pada data
+     * yang sama - baris kosong akan menggelembungkan kategori netral.
+     */
+    public function test_baris_kosong_tidak_ikut_dihitung_dalam_distribusi(): void
+    {
+        Http::fake([
+            '*/api/analyze/sentiment' => Http::sequence()
+                ->push($this->batchResponseWithEmpty([
+                    ['positive', 'indobert'], ['neutral', 'empty'],
+                ]), 200)
+                ->push($this->batchResponseWithEmpty([
+                    ['negative', 'indobert'], ['neutral', 'empty'],
+                ]), 200),
+        ]);
+
+        $result = (new NLPApiService())->analyzeSentiment(['a', '', 'c', '']);
+        $results = $result['results'];
+
+        // Dua baris yang benar-benar dinilai: satu positif, satu negatif.
+        $this->assertEqualsWithDelta(50.0, $results['distribution']['positive'], 0.05);
+        $this->assertEqualsWithDelta(50.0, $results['distribution']['negative'], 0.05);
+        $this->assertEqualsWithDelta(0.0, $results['distribution']['neutral'], 0.05);
+
+        $this->assertSame(4, $results['metrics']['total_texts']);
+        $this->assertSame(2, $results['metrics']['total_analyzed']);
+        $this->assertSame(2, $results['metrics']['total_empty']);
+    }
+
+    /**
+     * Baris kosong berkeyakinan 0,0 tidak boleh menyeret rata-rata confidence
+     * ke bawah; angka itu dipakai sebagai indikator mutu di halaman hasil.
+     */
+    public function test_confidence_rata_rata_mengabaikan_baris_kosong(): void
+    {
+        Http::fake([
+            '*/api/analyze/sentiment' => Http::sequence()
+                ->push($this->batchResponseWithEmpty([
+                    ['positive', 'indobert'], ['neutral', 'empty'],
+                ]), 200)
+                ->push($this->batchResponseWithEmpty([
+                    ['negative', 'indobert'], ['neutral', 'empty'],
+                ]), 200),
+        ]);
+
+        $result = (new NLPApiService())->analyzeSentiment(['a', '', 'c', '']);
+
+        $this->assertEqualsWithDelta(0.9, $result['results']['metrics']['avg_confidence'], 0.001);
+    }
+
+    /**
+     * Pemotongan dan kegagalan harus terlihat di metrics, bukan senyap.
+     *
+     * Keduanya menurunkan mutu hasil tanpa memunculkan galat apa pun: teks yang
+     * melebihi 512 token kehilangan ekornya, dan teks yang gagal dinilai model
+     * dikembalikan sebagai netral berkeyakinan 0. Tanpa penghitung ini,
+     * pengguna tidak punya cara tahu.
+     */
+    public function test_pemotongan_dan_kegagalan_dilaporkan_di_metrics(): void
+    {
+        $buat = function (array $rows): array {
+            $predictions = [];
+            foreach ($rows as $index => $row) {
+                $predictions[] = array_merge([
+                    'text' => "teks {$index}",
+                    'confidence' => 0.9,
+                    'method' => 'indobert',
+                ], $row);
+            }
+
+            return [
+                'status' => 'success',
+                'results' => [
+                    'predictions' => $predictions,
+                    'distribution' => ['positive' => 0, 'neutral' => 0, 'negative' => 0],
+                    'metrics' => ['total_analyzed' => count($rows)],
+                    'summary' => 'ringkasan batch',
+                ],
+            ];
+        };
+
+        // batch_size = 2 (dari setUp), jadi 4 teks menempuh jalur batch.
+        Http::fake([
+            '*/api/analyze/sentiment' => Http::sequence()
+                ->push($buat([
+                    ['sentiment' => 'positive'],
+                    ['sentiment' => 'negative', 'truncated' => true],
+                ]), 200)
+                ->push($buat([
+                    ['sentiment' => 'neutral', 'confidence' => 0.0, 'method' => 'error'],
+                    ['sentiment' => 'positive'],
+                ]), 200),
+        ]);
+
+        $metrics = (new NLPApiService())
+            ->analyzeSentiment(['a', 'b', 'c', 'd'])['results']['metrics'];
+
+        $this->assertSame(1, $metrics['total_truncated']);
+        $this->assertSame(1, $metrics['total_failed']);
+        $this->assertSame(4, $metrics['total_texts']);
+    }
 }

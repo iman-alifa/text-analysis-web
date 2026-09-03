@@ -217,9 +217,15 @@ class ChartHelper
             'rgba(236, 72, 153, 0.8)',
         ];
 
+        $backgrounds = [];
+
         foreach ($topics as $index => $topic) {
-            $labels[] = 'Topik #' . ($topic['topic_id'] + 1);
-            $proportions[] = round($topic['proportion'] * 100, 1);
+            $labels[] = 'Topik #' . (($topic['topic_id'] ?? $index) + 1);
+            $proportions[] = round(($topic['proportion'] ?? 0) * 100, 1);
+            // Warna diputar, bukan dipotong: mode otomatis bisa menghasilkan
+            // sampai 20 topik sementara paletnya hanya lima, sehingga topik
+            // keenam dan seterusnya dulu tidak mendapat warna sama sekali.
+            $backgrounds[] = $colors[$index % count($colors)];
         }
 
         return [
@@ -228,7 +234,7 @@ class ChartHelper
                 [
                     'label' => 'Proporsi',
                     'data' => $proportions,
-                    'backgroundColor' => array_slice($colors, 0, count($topics)),
+                    'backgroundColor' => $backgrounds,
                 ]
             ]
         ];
@@ -241,7 +247,14 @@ class ChartHelper
     {
         $words = array_slice($wordFrequencies, 0, $limit);
         
-        $maxFrequency = max(array_column($words, 'frequency'));
+        // max() melempar galat pada array kosong, dan pembagian dengan 0
+        // menghasilkan INF - keduanya membuat halaman hasil gagal dirender
+        // untuk korpus kecil yang tidak menghasilkan frekuensi kata.
+        if (empty($words)) {
+            return [];
+        }
+
+        $maxFrequency = max(array_column($words, 'frequency')) ?: 1;
         
         return array_map(function($item) use ($maxFrequency) {
             return [

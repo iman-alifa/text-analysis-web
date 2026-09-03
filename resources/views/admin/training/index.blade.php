@@ -24,6 +24,13 @@
                 </button>
             </form>
 
+            <button type="button"
+                    id="btn-preview-retrain"
+                    class="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 shadow-sm transition text-sm font-medium">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                Periksa Data Latih
+            </button>
+
             <form action="{{ route('admin.training.trigger') }}" method="POST" class="flex gap-2">
                 @csrf
                 <select name="model_type"
@@ -183,6 +190,18 @@
         </div>
     </div>
 
+    {{-- Laporan kesiapan data latih, sebelum melatih apa pun --}}
+    <div id="retrain-preview-panel" class="bg-white rounded-xl shadow-sm border border-gray-100 hidden">
+        <div class="p-6 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-900">Kesiapan Data Latih</h2>
+            <p class="mt-1 text-sm text-gray-600">
+                Komposisi data koreksi yang akan dikirim ke NLP API. Data yang timpang bisa
+                menghasilkan model yang hanya menebak kelas mayoritas.
+            </p>
+        </div>
+        <div id="retrain-preview-body" class="p-6 space-y-6"></div>
+    </div>
+
     {{-- Riwayat retraining: bukti loop active learning benar-benar berjalan --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
         <div class="p-6 border-b border-gray-100">
@@ -222,17 +241,44 @@
                                 $badge = match($training->status) {
                                     'completed' => 'bg-green-100 text-green-800',
                                     'failed' => 'bg-red-100 text-red-800',
+                                    // Ditolak bukan gagal: training berjalan, tapi
+                                    // hasilnya lebih buruk sehingga tidak disimpan.
+                                    'rejected' => 'bg-amber-100 text-amber-800',
                                     'running' => 'bg-blue-100 text-blue-800',
                                     default => 'bg-gray-100 text-gray-700',
                                 };
+                                $labelStatus = $training->status === 'rejected' ? 'Ditolak' : ucfirst($training->status);
                             @endphp
                             <span class="px-2 py-1 rounded-full text-xs font-medium {{ $badge }}">
-                                {{ ucfirst($training->status) }}
+                                {{ $labelStatus }}
                             </span>
                         </td>
                         <td class="px-6 py-3 text-gray-600">
+                            @php
+                                $hasil = $training->result ?? [];
+                                $f1Sebelum = $hasil['metrics_before']['weighted_f1'] ?? null;
+                                $f1Sesudah = $hasil['metrics_after']['weighted_f1'] ?? null;
+                            @endphp
+
                             @if($training->status === 'failed')
                                 <span class="text-red-600">{{ Str::limit($training->error_message, 80) }}</span>
+                            @elseif($training->status === 'rejected')
+                                <span class="text-amber-700">{{ Str::limit($training->error_message, 110) }}</span>
+                            @elseif($f1Sebelum !== null && $f1Sesudah !== null)
+                                <span class="text-xs">
+                                    Weighted F1
+                                    <span class="font-mono">{{ $f1Sebelum }}</span>
+                                    &rarr;
+                                    <span class="font-mono font-semibold text-green-700">{{ $f1Sesudah }}</span>
+                                    @isset($hasil['weighted_f1_delta'])
+                                        <span class="text-green-700">({{ sprintf('%+.4f', $hasil['weighted_f1_delta']) }})</span>
+                                    @endisset
+                                </span>
+                                @isset($hasil['samples_skipped'])
+                                    @if($hasil['samples_skipped'] > 0)
+                                    <span class="block text-xs text-gray-400">{{ $hasil['samples_skipped'] }} sampel dilewati</span>
+                                    @endif
+                                @endisset
                             @elseif($training->result)
                                 <span class="font-mono text-xs">{{ Str::limit(json_encode($training->result), 90) }}</span>
                             @else
@@ -366,4 +412,102 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 @endif
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const button = document.getElementById('btn-preview-retrain');
+    if (!button) return;
+
+    const panel = document.getElementById('retrain-preview-panel');
+    const body = document.getElementById('retrain-preview-body');
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value;
+        return div.innerHTML;
+    }
+
+    function renderSentiment(report) {
+        if (!report.available) {
+            return '<p class="text-sm text-gray-500">' + escapeHtml(report.message) + '</p>';
+        }
+
+        const dist = report.label_distribution || {};
+        const counts = dist.counts || {};
+        const rows = Object.entries(counts).map(([label, count]) =>
+            '<li class="flex justify-between"><span class="capitalize">' + escapeHtml(label)
+            + '</span><span class="font-medium">' + count + '</span></li>'
+        ).join('');
+
+        const warnings = (report.warnings || []).map(w =>
+            '<li class="text-amber-800">&bull; ' + escapeHtml(w) + '</li>'
+        ).join('');
+
+        return '<div>'
+            + '<h3 class="font-semibold text-gray-900 mb-2">Sentimen</h3>'
+            + '<div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">'
+            + '<div><p class="text-xs uppercase tracking-wide text-gray-500 mb-1">Distribusi label</p><ul class="space-y-0.5">' + rows + '</ul>'
+            + '<p class="mt-1 text-xs text-gray-500">Rasio ketimpangan ' + (dist.imbalance_ratio ?? '-') + ':1</p></div>'
+            + '<div><p class="text-xs uppercase tracking-wide text-gray-500 mb-1">Pembagian data</p>'
+            + '<p>Latih: <strong>' + (report.split?.train_size ?? '-') + '</strong></p>'
+            + '<p>Validasi: <strong>' + (report.split?.val_size ?? '-') + '</strong></p>'
+            + '<p class="text-xs text-gray-500 mt-1">Seed ' + (report.split?.seed ?? '-') + '</p></div>'
+            + '<div><p class="text-xs uppercase tracking-wide text-gray-500 mb-1">Ambang pembanding</p>'
+            + '<p>Tebak kelas mayoritas: <strong>' + Math.round((report.majority_baseline_accuracy ?? 0) * 1000) / 10 + '%</strong></p>'
+            + '<p class="text-xs text-gray-500 mt-1">Model hasil latih harus mengalahkan angka ini agar berarti.</p></div>'
+            + '</div>'
+            + (warnings ? '<ul class="mt-3 text-sm space-y-1">' + warnings + '</ul>' : '')
+            + '</div>';
+    }
+
+    function renderAspect(report) {
+        if (!report.available) {
+            return '<p class="text-sm text-gray-500">' + escapeHtml(report.message) + '</p>';
+        }
+
+        const bio = report.bio_report || {};
+        const warnings = (report.warnings || []).map(w =>
+            '<li class="text-amber-800">&bull; ' + escapeHtml(w) + '</li>'
+        ).join('');
+
+        const rows = Object.entries(bio).filter(([, value]) => typeof value !== 'object').map(([key, value]) =>
+            '<li class="flex justify-between gap-4"><span>' + escapeHtml(key.replace(/_/g, ' ')) + '</span>'
+            + '<span class="font-medium">' + escapeHtml(String(value)) + '</span></li>'
+        ).join('');
+
+        return '<div class="pt-6 border-t border-gray-100">'
+            + '<h3 class="font-semibold text-gray-900 mb-2">Aspek</h3>'
+            + '<ul class="text-sm space-y-0.5 max-w-md">' + rows + '</ul>'
+            + (warnings ? '<ul class="mt-3 text-sm space-y-1">' + warnings + '</ul>' : '')
+            + '</div>';
+    }
+
+    button.addEventListener('click', function () {
+        button.disabled = true;
+        button.textContent = 'Memeriksa...';
+
+        fetch('{{ route('admin.training.preview') }}', { headers: { 'Accept': 'application/json' } })
+            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                panel.classList.remove('hidden');
+
+                if (!ok || !data.success) {
+                    body.innerHTML = '<p class="text-sm text-red-700">' + escapeHtml(data.message || 'Pemeriksaan gagal.') + '</p>';
+                    return;
+                }
+
+                body.innerHTML = renderSentiment(data.reports.sentiment || {})
+                               + renderAspect(data.reports.aspect || {});
+            })
+            .catch(() => {
+                panel.classList.remove('hidden');
+                body.innerHTML = '<p class="text-sm text-red-700">Tidak bisa menghubungi server.</p>';
+            })
+            .finally(() => {
+                button.disabled = false;
+                button.textContent = 'Periksa Data Latih';
+            });
+    });
+});
+</script>
 @endpush

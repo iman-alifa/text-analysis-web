@@ -18,6 +18,7 @@ php artisan test --filter=ProfileTest      # single test class/method
 php artisan queue:work  # required for analyses to process (QUEUE_CONNECTION=database)
 php artisan nlp:test    # ping the NLP API /health endpoint
 php artisan analysis:repair-distribution [--apply]   # recompute sentiment_distribution on results saved before the batching fix
+php artisan analysis:reprocess-aspect [--apply] [--id=N]  # re-queue aspect/combined analyses saved by an older pipeline version
 ./vendor/bin/pint       # formatter (Laravel Pint)
 npm run dev / build     # Vite (Tailwind 3 + Alpine)
 ```
@@ -47,6 +48,15 @@ Two correction surfaces exist over the same `training_items` table:
 - **Admin** (`Admin\TrainingController`, `/admin/training`, behind the `admin` middleware alias → `IsAdmin` → `User::isAdmin()` on the `role` column) — DataTable workspace, bulk correct, custom stopword management, CSV export of the corrected dataset (`text,label,aspects,source_file`).
 
 `ModelEvaluationService` computes accuracy/precision/recall/F1 for sentiment and aspects from corrected vs. predicted items, plus topic coherence (NPMI over a sliding window) in PHP.
+
+`AnalysisResult.metrics.pipeline_version` records which version of the analysis pipeline produced a
+row (`ProcessTextAnalysis::PIPELINE_VERSION`, currently 2). Bump it whenever the *meaning* of a stored
+figure changes, and `analysis:reprocess-aspect` will pick up the stale rows. Do not try to detect
+staleness from the data itself — the first attempt flagged correct analyses as old because their
+sentences were unambiguous enough to produce no neutral class at all.
+
+Note: `queue:work` caches code in memory. After changing the job, run `php artisan queue:restart` **and
+start a fresh worker** — the restart signal only makes the current worker exit.
 
 `TrainingController::triggerTraining` is currently a **stub** — it flashes a success message and retrains nothing. The retraining handoff is the exported CSV.
 
@@ -124,3 +134,107 @@ Not addressed: `AnalysisController` still scopes ownership with `where('user_id'
 - `tests/Feature/AspectResultNormalizationTest.php` — the three historical `aspect_results` shapes.
 
 Tests hit in-memory sqlite; `Http::fake` stands in for the NLP service, so none of them need Python running.
+
+## Integrasi UI dengan kontrak API terbaru (3 Sep 2026)
+
+Dikerjakan mengikuti `../nlp-api-service/docs/PANDUAN_INTEGRASI_UI.md`, diverifikasi
+ulang terhadap kode Python (dokumen itu mengklaim sebagian pekerjaan Laravel yang
+memang sudah ada: `warmUp()`, `scorablePredictions()`, `retry_after`).
+
+- **`review_queue` ditampilkan** sebagai tab "Perlu Ditinjau (N)" pada halaman hasil,
+  diurutkan dari yang paling tidak yakin. Jalur batch **menyusun ulang antreannya
+  sendiri** (`NLPApiService::buildReviewQueue`) karena tiap batch mengirim indeks
+  lokalnya sendiri — menggabungkannya mentah-mentah akan menunjuk kalimat yang salah.
+  Ambangnya diambil dari respons API, tidak pernah dikarang di sisi Laravel.
+  Disimpan di dalam `metrics.review_queue` (tanpa kolom baru).
+- **`method` per prediksi** tampil sebagai penanda: `rule-based` → "Tanpa model"
+  (mutu turun ~25 poin), `empty` → "Tidak dinilai", `error` → "Gagal dinilai".
+- **Penghitung mutu** (`total_empty`/`total_truncated`/`total_failed`) hanya muncul
+  bila tidak nol.
+- **Formulir topik**: `num_topics` kini select dengan opsi **Otomatis (0)** dan 2–20;
+  1 ditolak validasi karena API menolaknya (422). Petunjuk lama "Rekomendasi 3-7 topik"
+  dihapus — terukur keliru (k=14–20 memberi c_v lebih baik). `$request->num_topics`
+  dulu dicek truthy sehingga mode otomatis (0) dibuang diam-diam; kini `filled()`.
+- **Pratinjau preprocessing** (fitur baru, sebelumnya tidak ada di UI): mengirim
+  `task` sesuai jenis analisis (`transformer`/`bag_of_words`/`span`) supaya pratinjau
+  tidak berbohong. `PreprocessingConfigResolver` dipakai bersama job dan pratinjau —
+  kalau keduanya menghitung sendiri, pratinjau bisa berbeda dari yang dijalankan.
+- **Kesiapan model**: `GET /analysis/nlp-status` dan `POST /analysis/warm-up`, dengan
+  panel status per model di formulir analisis.
+- **Mutu topik** (`quality`: c_v, c_npmi, diversity, outlier_rate) tampil dengan rambu
+  penafsiran, disertai catatan bahwa c_v tidak sebanding antar korpus.
+- **`/api/retrain/preview`** disambungkan sebagai tombol "Periksa Data Latih" di
+  `/admin/training` — menampilkan distribusi label, rasio ketimpangan, komposisi split,
+  dan **akurasi tebak-kelas-mayoritas** sebagai pembanding, sebelum melatih apa pun.
+
+### Bug lama yang ikut ketemu dan diperbaiki
+
+1. **Kartu metrics mencetak array.** `@foreach($result->metrics ...)` mencetak nilai
+   apa adanya, sehingga nilai bersarang (`review_queue`, dan `failed_batches` yang
+   sudah ada sebelumnya) memicu `htmlspecialchars(): Argument #1 must be of type
+   string, array given` — halaman hasil 500 untuk setiap analisis yang punya batch gagal.
+   Kini disaring ke nilai skalar saja.
+2. **Panel "Filter Hasil" duplikat.** Blok kedua di `show.blade.php` mendeklarasikan
+   ulang `const allPredictions` dan `currentFilter` pada lingkup global yang sama,
+   memicu `SyntaxError` di browser untuk setiap analisis >10 baris, dan kotak carinya
+   memakai id `searchPredictions` yang sudah dipakai. Blok itu dihapus (99 baris).
+3. **Tombol Export CSV admin selalu 404.** `GET /training/{id}` terdaftar sebelum
+   `GET /training/export-csv`, sehingga `{id}` menelannya. Kedua rute `{id}` kini
+   dibatasi `->whereNumber('id')`.
+4. `$topic['proportion']` dibaca defensif (dulu 500 bila datanya parsial).
+
+Tes bertambah jadi **110**; yang baru: `ReviewQueueTest`, `ReviewQueueDisplayTest`,
+`TopicOptionsTest`, `PreprocessingPreviewTest`, `NlpStatusTest`, `RetrainPreviewTest`.
+
+## Audit kesesuaian dengan nlp-api-service (3 Sep 2026)
+
+Seluruh 12 endpoint API sudah terpakai dari Laravel. Nama kunci respons
+(`sentiment`, `confidence`, `method`, `processed_text`, `aspect_sentiments`,
+`document_aspects`, `word_frequencies` sebagai list `{word, frequency}`) cocok
+dengan yang dibaca `NLPApiService` dan `ChartHelper`.
+
+Ketidaksesuaian yang ditemukan dan diperbaiki:
+
+1. **`num_topics` tidak pernah dikirim untuk analisis gabungan.** Formulir
+   menawarkan pilihan jumlah topik untuk `combined`, tetapi baik
+   `executeCombinedAnalysis` maupun jalur batch tidak meneruskannya sehingga API
+   selalu memakai bawaannya (5). Kini diteruskan lewat `getNumTopics()`, termasuk
+   nilai 0 (mode otomatis) yang bernilai falsy dan mudah hilang.
+2. **Checkpoint yang ditolak dicatat sebagai berhasil.** API menolak menyimpan
+   hasil retraining yang menurunkan metrik validasi (`rejected_for_regression`,
+   dan bobot lama dipertahankan). `RetrainModel` dulu menandai semua respons HTTP
+   sukses sebagai `completed`. Kini ada status `rejected` beserta ringkasan
+   `weighted_f1 sebelum -> sesudah`, dan riwayat training menampilkannya.
+   Kolom `status` diubah dari enum menjadi string agar menambah status tidak
+   perlu migrasi skema dan perilakunya sama di MySQL maupun SQLite.
+3. **`max_texts_single_request` (100) tidak pernah dibaca dan nilainya keliru** —
+   batas API sebenarnya 10.000 teks dan 10.000 karakter per teks. Diganti
+   `max_texts` + `max_text_length`, dan divalidasi di `AnalysisController::store`
+   supaya pengguna mendapat pesan yang menyebut baris keberapa yang bermasalah.
+4. **Palet warna topik hanya cukup untuk lima topik.** `array_slice($colors, 0,
+   count($topics))` membuat topik keenam dan seterusnya tanpa warna — masalah
+   yang baru terasa setelah mode otomatis bisa menghasilkan sampai 20 topik.
+   Warna kini diputar.
+5. **`prepareWordCloudData` memanggil `max()` pada array kosong** dan bisa membagi
+   dengan nol; keduanya menggagalkan render halaman hasil untuk korpus kecil.
+
+`force` pada endpoint retraining (menyimpan checkpoint walau metrik menurun)
+sengaja **tidak** diekspos di UI: perilaku bawaan yang menolak regresi adalah
+yang benar untuk loop active learning.
+
+### Catatan performa yang belum diselesaikan
+
+Halaman hasil merender setiap prediksi sebagai kartu HTML penuh. Terukur pada
+analisis 72 (289 prediksi): **2,7 MB**. Menghapus salinan JSON prediksi yang
+ditanam ke JavaScript — dipakai hanya untuk membaca `.length` — memangkas
+169 KB; sisanya adalah markup per kartu (~9 KB/kartu, didominasi SVG inline yang
+berulang). Perbaikan yang benar adalah paginasi daftar prediksi, tetapi itu
+mengharuskan filter/pencarian/antrean tinjauan pindah ke sisi server.
+
+### Format kode
+
+Repo belum pernah diformat Pint (`./vendor/bin/pint --test` melaporkan 66 isu di
+112 file, sebagian besar kode lama). Menjalankan Pint sebaiknya dilakukan
+sekaligus dalam commit tersendiri agar tidak bercampur dengan perubahan fungsional.
+
+Tes: **126**.

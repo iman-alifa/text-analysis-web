@@ -6,6 +6,8 @@ use App\Models\TextAnalysis;
 use App\Models\AnalysisLog;
 use App\Models\PreprocessingConfig;
 use App\Services\FileProcessingService;
+use App\Services\NLPApiService;
+use App\Services\PreprocessingConfigResolver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -37,6 +39,128 @@ class AnalysisController extends Controller
         $preprocessingConfigs = PreprocessingConfig::all();
         
         return view('analysis.create', compact('preprocessingConfigs'));
+    }
+
+    /**
+     * Kesiapan model NLP (AJAX).
+     *
+     * Bobot model dimuat malas, jadi permintaan pertama tiap jenis membayar
+     * biaya muat model. Dari sisi UI itu tak bisa dibedakan dari analisis yang
+     * menggantung, sehingga kesiapannya perlu terlihat sebelum memulai.
+     */
+    public function nlpStatus(NLPApiService $nlpService)
+    {
+        $health = $nlpService->health();
+
+        if ($health === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Layanan analisis tidak merespons. Pastikan NLP API berjalan di ' . config('services.nlp_api.url') . '.',
+            ], 503);
+        }
+
+        $weights = $health['weights_loaded'] ?? [];
+
+        return response()->json([
+            'success' => true,
+            'weights_loaded' => $weights,
+            'all_ready' => !empty($weights) && collect($weights)->every(fn ($loaded) => $loaded === true),
+            'model' => [
+                'sentiment_source' => $health['sentiment_source'] ?? null,
+                'sentiment_base' => $health['sentiment_base'] ?? null,
+                'sentiment_temperature' => $health['sentiment_temperature'] ?? null,
+                'sentiment_review_threshold' => $health['sentiment_review_threshold'] ?? null,
+            ],
+        ]);
+    }
+
+    /**
+     * Muat bobot model lebih dulu supaya analisis pertama tidak terasa macet.
+     */
+    public function warmUpModels(NLPApiService $nlpService)
+    {
+        $ready = $nlpService->warmUp();
+
+        return response()->json([
+            'success' => true,
+            'all_ready' => $ready,
+            'message' => $ready
+                ? 'Semua model siap.'
+                : 'Sebagian model belum siap. Analisis tetap bisa dijalankan, hanya lebih lambat di awal.',
+        ]);
+    }
+
+    /**
+     * Pratinjau preprocessing (AJAX).
+     *
+     * Mengirim `task` sesuai jenis analisis yang sedang dipilih, karena tiap
+     * modul di NLP API memaksakan kebijakannya sendiri di atas konfigurasi
+     * pengguna. Tanpa itu pratinjau menampilkan teks ter-stem padahal analisis
+     * sentimen justru mematikan stemming.
+     */
+    public function previewPreprocessing(
+        Request $request,
+        NLPApiService $nlpService,
+        PreprocessingConfigResolver $resolver
+    ) {
+        $validator = Validator::make($request->all(), [
+            'texts' => 'required|array|min:1|max:5',
+            'texts.*' => 'required|string|max:10000',
+            'analysis_type' => 'required|in:sentiment,aspect,topic,combined',
+            'preprocessing_config_id' => 'nullable|exists:preprocessing_configs,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => $validator->errors()->first(),
+            ], 422);
+        }
+
+        $configId = $request->filled('preprocessing_config_id')
+            ? (int) $request->input('preprocessing_config_id')
+            : null;
+
+        $task = $resolver->taskForAnalysisType($request->input('analysis_type'));
+
+        try {
+            $response = $nlpService->preprocessText(
+                $request->input('texts'),
+                $resolver->resolve($configId),
+                $task
+            );
+
+            return response()->json([
+                'success' => true,
+                'task' => $task,
+                'config_name' => $resolver->resolveName($configId),
+                'original' => $request->input('texts'),
+                'preprocessed' => $response['preprocessed'] ?? [],
+                'applied_policy' => $response['applied_policy'] ?? null,
+                'notice' => $this->preprocessingNotice($task),
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::warning('Pratinjau preprocessing gagal: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Tidak bisa menghubungi layanan analisis. Pastikan NLP API berjalan.',
+            ], 503);
+        }
+    }
+
+    /**
+     * Penjelasan mengapa hasil pratinjau bisa berbeda dari pilihan pengguna.
+     */
+    private function preprocessingNotice(?string $task): ?string
+    {
+        return match ($task) {
+            'transformer' => 'Stemming dan penghapusan stopword dinonaktifkan untuk analisis sentimen karena merusak deteksi negasi.',
+            'bag_of_words' => 'Stemming dan penghapusan stopword diaktifkan untuk pemodelan topik karena model bag-of-words diuntungkan pembersihan agresif.',
+            'span' => 'Teks dibiarkan utuh untuk ekstraksi aspek karena aspek ditemukan berdasarkan posisi karakter pada teks asli.',
+            default => 'Analisis gabungan menjalankan tiga modul, masing-masing dengan kebijakan preprocessing sendiri. Pratinjau ini memakai konfigurasi apa adanya.',
+        };
     }
 
     /**
@@ -108,7 +232,9 @@ class AnalysisController extends Controller
             'predefined_aspects' => 'nullable|string',
             
             // Topic analysis
-            'num_topics' => 'nullable|integer|min:2|max:20',
+            // 0 berarti otomatis (API mencari sendiri jumlah topik terbaik).
+            // 1 ditolak API, jadi ditolak lebih dulu di sini agar pesannya ramah.
+            'num_topics' => 'nullable|integer|in:0,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20',
         ]);
 
         if ($validator->fails()) {
@@ -133,8 +259,10 @@ class AnalysisController extends Controller
                 $metadata['preprocessing_config_id'] = (int) $request->preprocessing_config_id;
             }
 
-            if ($request->num_topics) {
-                $metadata['num_topics'] = $request->num_topics;
+            // filled(), bukan truthy: num_topics = 0 (mode otomatis) itu sah
+            // tetapi bernilai falsy, sehingga pengecekan lama membuangnya.
+            if ($request->filled('num_topics')) {
+                $metadata['num_topics'] = (int) $request->input('num_topics');
             }
             
             if ($request->aspect_mode) {
@@ -179,6 +307,14 @@ class AnalysisController extends Controller
                 $data['total_records'] = $processedData['total'];
             }
 
+            // Batas API diperiksa di sini supaya pesannya jelas dan analisis
+            // tidak terlanjur dibuat lalu gagal di worker dengan HTTP 422.
+            if ($pesanBatas = $this->cekBatasApi($data['raw_data'])) {
+                return redirect()->back()
+                            ->withErrors(['manual_text' => $pesanBatas])
+                            ->withInput();
+            }
+
             // Add metadata if not empty
             // PENTING: jangan json_encode di sini. Kolom metadata sudah di-cast
             // 'array' di model, jadi encoding manual membuat data ter-encode dua kali
@@ -218,6 +354,41 @@ class AnalysisController extends Controller
                         ->with('error', 'Terjadi kesalahan: ' . $e->getMessage())
                         ->withInput();
         }
+    }
+
+    /**
+     * Periksa batas yang ditegakkan service NLP sebelum analisis dibuat.
+     *
+     * API menolak dengan HTTP 422 bila dilanggar; memeriksanya di sini membuat
+     * pesannya bisa dimengerti dan menyebut baris keberapa yang bermasalah.
+     *
+     * @return string|null Pesan galat, atau null bila lolos.
+     */
+    private function cekBatasApi(array $texts): ?string
+    {
+        $maxTexts = (int) config('services.nlp_api.max_texts', 10000);
+        $maxLength = (int) config('services.nlp_api.max_text_length', 10000);
+
+        if (count($texts) > $maxTexts) {
+            return sprintf(
+                'Jumlah teks (%s) melebihi batas layanan analisis (%s). Pecah datanya menjadi beberapa analisis.',
+                number_format(count($texts)),
+                number_format($maxTexts)
+            );
+        }
+
+        foreach ($texts as $index => $text) {
+            if (mb_strlen((string) $text) > $maxLength) {
+                return sprintf(
+                    'Teks baris ke-%d terlalu panjang (%s karakter, batas %s).',
+                    $index + 1,
+                    number_format(mb_strlen((string) $text)),
+                    number_format($maxLength)
+                );
+            }
+        }
+
+        return null;
     }
 
     /**
