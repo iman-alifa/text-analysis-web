@@ -22,6 +22,66 @@ class NLPApiService
         $this->batchSize = config('services.nlp_api.batch_size', 50);
     }
 
+    /**
+     * Panaskan bobot model sebelum analisis dimulai.
+     *
+     * Service NLP memuat bobot secara MALAS agar RAM saat start tetap rendah
+     * (syarat kuota Railway), sehingga permintaan pertama tiap jenis membayar
+     * biaya unduh dan muat model - di kontainer baru bisa memakan menit.
+     * Dari sisi job, itu tidak bisa dibedakan dari analisis yang menggantung,
+     * dan dulu berakhir sebagai timeout yang tampak acak.
+     *
+     * Kegagalan pemanasan sengaja TIDAK dilempar: analisis tetap bisa berjalan
+     * (service punya rantai cadangan), hanya saja lebih lambat. Memanaskan
+     * adalah optimasi, bukan prasyarat.
+     *
+     * @return bool True bila seluruh bobot siap.
+     */
+    /**
+     * Status layanan apa adanya dari GET /health.
+     *
+     * Membawa `weights_loaded` per model dan provenance model sentimen.
+     * Mengembalikan null bila layanan tidak bisa dihubungi, supaya pemanggil
+     * bisa membedakan "tidak siap" dari "tidak tahu".
+     */
+    public function health(): ?array
+    {
+        try {
+            $response = Http::timeout(10)->get("{$this->apiUrl}/health");
+
+            return $response->successful() ? $response->json() : null;
+
+        } catch (Exception $e) {
+            Log::warning('Health check NLP API gagal: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    public function warmUp(): bool
+    {
+        try {
+            $response = Http::timeout($this->timeout)->post("{$this->apiUrl}/api/warmup");
+
+            if (!$response->successful()) {
+                Log::warning('Pemanasan model NLP gagal: ' . $response->status());
+                return false;
+            }
+
+            $models = $response->json('models', []);
+            $siap = collect($models)->every(fn ($m) => ($m['loaded'] ?? false) === true);
+
+            Log::info('Pemanasan model NLP selesai', [
+                'total_seconds' => $response->json('total_seconds'),
+                'semua_siap' => $siap,
+            ]);
+
+            return $siap;
+        } catch (Exception $e) {
+            Log::warning('Pemanasan model NLP dilewati: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     public function testConnection(): array
     {
         try {
@@ -52,14 +112,26 @@ class NLPApiService
         }
     }
 
-    public function preprocessText(array $texts, array $config = []): array
+    /**
+     * @param  string|null  $task  Profil modul (transformer|bag_of_words|span).
+     *                             Tanpa ini pratinjau menampilkan hasil yang berbeda
+     *                             dari yang dijalankan modul, karena tiap modul
+     *                             memaksakan kebijakannya sendiri di atas config.
+     */
+    public function preprocessText(array $texts, array $config = [], ?string $task = null): array
     {
         try {
+            $payload = [
+                'texts' => $texts,
+                'config' => $config,
+            ];
+
+            if ($task !== null) {
+                $payload['task'] = $task;
+            }
+
             $response = Http::timeout($this->timeout)
-                ->post("{$this->apiUrl}/api/preprocess", [
-                    'texts' => $texts,
-                    'config' => $config
-                ]);
+                ->post("{$this->apiUrl}/api/preprocess", $payload);
 
             if ($response->successful()) {
                 return $response->json();
@@ -122,6 +194,7 @@ class NLPApiService
 
         $allPredictions = [];
         $failedBatches = [];
+        $reviewThreshold = null;
 
         Log::info("Processing {$totalBatches} batches for sentiment analysis");
 
@@ -140,6 +213,10 @@ class NLPApiService
                 $result = $this->executeSentimentAnalysis(array_values($batch), $config);
 
                 $predictions = $result['results']['predictions'] ?? [];
+
+                // Ambang review sama untuk semua batch; simpan yang pertama ada
+                // supaya antrean bisa disusun ulang dengan aturan yang sama.
+                $reviewThreshold ??= $result['results']['review_queue']['threshold'] ?? null;
 
                 foreach ($predictions as $position => $prediction) {
                     if (isset($originalIndexes[$position])) {
@@ -172,14 +249,76 @@ class NLPApiService
         $metrics = $this->calculateSentimentMetrics($allPredictions, $distribution, $totalBatches, $failedBatches);
         $summary = $this->generateSentimentSummary($metrics, $distribution);
 
+        $results = [
+            'predictions' => $allPredictions,
+            'distribution' => $distribution,
+            'metrics' => $metrics,
+            'summary' => $summary,
+        ];
+
+        // review_queue tiap batch memakai indeks lokal batch itu, jadi tidak
+        // bisa digabung begitu saja - harus disusun ulang memakai indeks teks asli.
+        $reviewQueue = $this->buildReviewQueue($allPredictions, $reviewThreshold);
+
+        if ($reviewQueue !== null) {
+            $results['review_queue'] = $reviewQueue;
+        }
+
         return [
             'status' => 'success',
-            'results' => [
-                'predictions' => $allPredictions,
-                'distribution' => $distribution,
-                'metrics' => $metrics,
-                'summary' => $summary
-            ]
+            'results' => $results,
+        ];
+    }
+
+    /**
+     * Susun ulang antrean tinjauan untuk hasil gabungan antar-batch.
+     *
+     * Mengikuti aturan _build_review_queue() di sisi Python: hanya baris yang
+     * bisa dinilai, keyakinan di bawah ambang, diurutkan dari yang paling tidak
+     * yakin, dan dibatasi 200 indeks. Indeks mengacu ke posisi teks masukan.
+     *
+     * Mengembalikan null bila API tidak menyertakan ambang - lebih baik tidak
+     * menampilkan antrean daripada mengarang ambang sendiri.
+     */
+    private function buildReviewQueue(array $predictions, ?float $threshold): ?array
+    {
+        if ($threshold === null) {
+            Log::info('review_queue dilewati: API tidak mengirim threshold');
+            return null;
+        }
+
+        $scorable = $this->scorablePredictions($predictions);
+
+        if (empty($scorable)) {
+            return null;
+        }
+
+        $flagged = [];
+
+        // Ditelusuri dari $predictions (bukan $scorable) supaya posisi cadangan
+        // tetap benar - scorablePredictions() mengindeks ulang hasilnya.
+        foreach ($predictions as $position => $prediction) {
+            if (($prediction['method'] ?? null) === 'empty') {
+                continue;
+            }
+
+            $confidence = (float) ($prediction['confidence'] ?? 0.0);
+
+            if ($confidence < $threshold) {
+                $flagged[] = [
+                    'index' => $prediction['original_index'] ?? $position,
+                    'confidence' => $confidence,
+                ];
+            }
+        }
+
+        usort($flagged, fn ($a, $b) => $a['confidence'] <=> $b['confidence']);
+
+        return [
+            'threshold' => $threshold,
+            'count' => count($flagged),
+            'share' => round(count($flagged) / count($scorable), 4),
+            'indices' => array_map(fn ($row) => $row['index'], array_slice($flagged, 0, 200)),
         ];
     }
 
@@ -190,11 +329,28 @@ class NLPApiService
      * Sebelumnya kode ini menjumlahkan persentase antar-batch seolah-olah count,
      * sehingga dataset >batch_size menghasilkan total ratusan persen.
      */
+    /**
+     * Saring baris yang tidak punya isi untuk dinilai.
+     *
+     * Service Python menandainya `method: 'empty'` dan sudah mengeluarkannya
+     * dari distribusi. Jalur batch di sini harus melakukan hal yang sama, atau
+     * dataset besar (>batchSize) melaporkan persentase yang berbeda dari
+     * dataset kecil pada data yang sama - baris kosong akan menggelembungkan
+     * kategori netral.
+     */
+    private function scorablePredictions(array $predictions): array
+    {
+        return array_values(array_filter(
+            $predictions,
+            fn ($prediction) => ($prediction['method'] ?? null) !== 'empty'
+        ));
+    }
+
     private function calculateSentimentDistribution(array $predictions): array
     {
         $counts = ['positive' => 0, 'neutral' => 0, 'negative' => 0];
 
-        foreach ($predictions as $prediction) {
+        foreach ($this->scorablePredictions($predictions) as $prediction) {
             $label = strtolower((string) ($prediction['sentiment'] ?? 'neutral'));
 
             if (array_key_exists($label, $counts)) {
@@ -217,14 +373,30 @@ class NLPApiService
         int $totalBatches = 0,
         array $failedBatches = []
     ): array {
+        $scorable = $this->scorablePredictions($predictions);
+
         $confidences = array_filter(
-            array_map(fn ($prediction) => $prediction['confidence'] ?? null, $predictions),
+            array_map(fn ($prediction) => $prediction['confidence'] ?? null, $scorable),
             fn ($confidence) => $confidence !== null
         );
 
+        // Pemotongan dan kegagalan dilaporkan, bukan dibiarkan senyap: keduanya
+        // menurunkan mutu hasil tanpa memunculkan galat apa pun ke pengguna.
+        $truncated = count(array_filter(
+            $predictions,
+            fn ($prediction) => !empty($prediction['truncated'])
+        ));
+        $failed = count(array_filter(
+            $predictions,
+            fn ($prediction) => ($prediction['method'] ?? null) === 'error'
+        ));
+
         $metrics = [
             'total_texts' => count($predictions),
-            'total_analyzed' => count($predictions),
+            'total_analyzed' => count($scorable),
+            'total_empty' => count($predictions) - count($scorable),
+            'total_truncated' => $truncated,
+            'total_failed' => $failed,
             'positive_percentage' => $distribution['positive'],
             'neutral_percentage' => $distribution['neutral'],
             'negative_percentage' => $distribution['negative'],
@@ -521,13 +693,27 @@ class NLPApiService
         }
     }
 
-    public function analyzeCombined(array $texts, array $config = [], $progressCallback = null): array
-    {
+    /**
+     * Analisis gabungan (sentimen + aspek + topik + asosiasi).
+     *
+     * $predefinedAspects/$mode dulu tidak ada di sini, dan KEDUA jalur memaksa
+     * mode 'automatic'. Akibatnya daftar aspek yang dideklarasikan pengguna
+     * dibuang diam-diam pada tipe analisis 'combined' - padahal formulir
+     * menampilkan pilihan mode aspek untuk tipe itu juga.
+     */
+    public function analyzeCombined(
+        array $texts,
+        array $config = [],
+        $progressCallback = null,
+        ?array $predefinedAspects = null,
+        string $mode = 'automatic',
+        int $numTopics = 5
+    ): array {
         try {
             Log::info("Starting combined analysis for " . count($texts) . " texts");
-            
+
             if (count($texts) <= $this->batchSize) {
-                return $this->executeCombinedAnalysis($texts, $config);
+                return $this->executeCombinedAnalysis($texts, $config, $predefinedAspects, $mode, $numTopics);
             }
 
             $sentimentResult = $this->analyzeSentiment($texts, $config, function($progress, $message) use ($progressCallback) {
@@ -536,7 +722,7 @@ class NLPApiService
                 }
             });
 
-            $aspectResult = $this->analyzeAspect($texts, $config, null, 'automatic', function($progress, $message) use ($progressCallback) {
+            $aspectResult = $this->analyzeAspect($texts, $config, $predefinedAspects, $mode, function($progress, $message) use ($progressCallback) {
                 if ($progressCallback) {
                     call_user_func($progressCallback, 50 + ($progress - 40) * 0.33, $message);
                 }
@@ -546,7 +732,7 @@ class NLPApiService
                 call_user_func($progressCallback, 60, "Mengidentifikasi topik...");
             }
             
-            $topicResult = $this->analyzeTopic($texts, $config);
+            $topicResult = $this->analyzeTopic($texts, $config, $numTopics);
 
             $sentiment = $sentimentResult['results'] ?? $sentimentResult;
             $aspect = $aspectResult['results'] ?? $aspectResult;
@@ -597,6 +783,31 @@ class NLPApiService
     public function retrainAspect(array $trainingData, int $epochs = 3, float $learningRate = 0.00002): array
     {
         return $this->executeRetrain('aspect', $trainingData, $epochs, $learningRate);
+    }
+
+    /**
+     * Laporan kesiapan data latih TANPA melatih apa pun.
+     *
+     * Fine-tuning pada data yang sangat timpang bisa menghasilkan model yang
+     * hanya menebak kelas mayoritas - dengan akurasi yang justru terlihat naik.
+     * Karena itu komposisi datanya perlu terlihat sebelum tombol latih ditekan.
+     *
+     * Tidak ada batas minimal sampel di sini: justru data yang belum cukup pun
+     * perlu bisa dilihat.
+     */
+    public function retrainPreview(string $modelType, array $trainingData): array
+    {
+        $response = Http::timeout($this->timeout)
+            ->post("{$this->apiUrl}/api/retrain/preview", [
+                'model_type' => $modelType,
+                'training_data' => array_values($trainingData),
+            ]);
+
+        if ($response->successful()) {
+            return $response->json();
+        }
+
+        throw new Exception("Pemeriksaan data {$modelType} gagal: " . $response->body());
     }
 
     private function executeRetrain(
@@ -686,14 +897,31 @@ class NLPApiService
         }
     }
 
-    private function executeCombinedAnalysis(array $texts, array $config): array
-    {
+    private function executeCombinedAnalysis(
+        array $texts,
+        array $config,
+        ?array $predefinedAspects = null,
+        string $mode = 'automatic',
+        int $numTopics = 5
+    ): array {
+        // num_topics wajib ikut: tanpa ini endpoint combined memakai nilai
+        // bawaannya (5) sehingga pilihan pengguna - termasuk mode otomatis (0) -
+        // diabaikan diam-diam pada analisis gabungan.
+        $payload = [
+            'texts' => $texts,
+            'preprocessing_config' => $config,
+            'mode' => $mode,
+            'num_topics' => $numTopics,
+        ];
+
+        // Mode rule-based tanpa daftar aspek tidak ada artinya bagi Python.
+        if ($mode === 'rule-based' && $predefinedAspects) {
+            $payload['predefined_aspects'] = $predefinedAspects;
+        }
+
         $response = Http::timeout($this->timeout * 2)
             ->retry(2, 2000)
-            ->post("{$this->apiUrl}/api/analyze/combined", [
-                'texts' => $texts,
-                'preprocessing_config' => $config
-            ]);
+            ->post("{$this->apiUrl}/api/analyze/combined", $payload);
 
         if ($response->successful()) {
             $result = $response->json();

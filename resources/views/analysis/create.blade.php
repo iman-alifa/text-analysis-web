@@ -559,6 +559,30 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                             </option>
                         @endforeach
                     </select>
+
+                    {{-- Pratinjau memakai profil (task) sesuai jenis analisis, karena
+                         tiap modul di NLP API menimpa sebagian pilihan di atas. --}}
+                    <div class="mt-3">
+                        <button type="button"
+                                id="btn-preview-preprocessing"
+                                class="inline-flex items-center px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50">
+                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                            </svg>
+                            Pratinjau hasil preprocessing
+                        </button>
+                        <p class="mt-1 text-xs text-gray-500">
+                            Mengambil beberapa baris pertama dari teks yang Anda masukkan.
+                        </p>
+                    </div>
+
+                    <div id="preprocessing-preview" class="mt-4 hidden">
+                        <div id="preprocessing-preview-notice" class="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800"></div>
+                        <div id="preprocessing-preview-rows" class="space-y-2"></div>
+                    </div>
+
+                    <div id="preprocessing-preview-error" class="mt-4 hidden rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"></div>
                 </div>
 
                 <!-- Aspect Analysis Options (Only show when aspect or combined is selected) -->
@@ -616,18 +640,42 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                         <label for="num_topics" class="block text-sm font-medium text-gray-700 mb-2">
                             Jumlah Topik yang Diidentifikasi
                         </label>
-                        <input type="number" 
-                               name="num_topics" 
-                               id="num_topics" 
-                               min="2" 
-                               max="10" 
-                               value="5"
-                               class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                        {{-- Select, bukan input angka: API menolak num_topics = 1,
+                             dan 0 punya arti khusus (cari jumlah topik otomatis). --}}
+                        <select name="num_topics"
+                                id="num_topics"
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="0" selected>Otomatis &mdash; cari jumlah topik terbaik</option>
+                            @for($i = 2; $i <= 20; $i++)
+                            <option value="{{ $i }}">{{ $i }} topik</option>
+                            @endfor
+                        </select>
                         <p class="mt-2 text-sm text-gray-500">
-                            Rekomendasi: 3-7 topik untuk hasil optimal
+                            Mode <strong>Otomatis</strong> memilih jumlah topik yang memaksimalkan koherensi (c<sub>v</sub>).
+                            Untuk laporan yang perlu dibandingkan antar waktu, tetapkan angka tertentu &mdash;
+                            mode otomatis bisa menghasilkan jumlah topik berbeda tiap kali dijalankan
+                            (terukur 6&ndash;19 topik) meski mutunya stabil.
                         </p>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        {{-- Bobot model dimuat malas di sisi API, jadi analisis pertama setelah
+             layanan menyala terasa menggantung. Kesiapannya ditampilkan di sini
+             supaya bisa dipanaskan lebih dulu. --}}
+        <div id="nlp-status-panel" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hidden">
+            <div class="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-900">Kesiapan Model</h3>
+                    <p class="mt-1 text-xs text-gray-500" id="nlp-status-message">Memeriksa...</p>
+                    <div class="mt-2 flex flex-wrap gap-2" id="nlp-status-badges"></div>
+                </div>
+                <button type="button"
+                        id="btn-warm-up"
+                        class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 hidden">
+                    Panaskan Model
+                </button>
             </div>
         </div>
 
@@ -1400,6 +1448,197 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
             });
         }
     });
+
+    // ------------------------------------------------------------------
+    // Pratinjau preprocessing
+    //
+    // Mengirim `task` sesuai jenis analisis supaya hasil yang ditampilkan sama
+    // dengan yang benar-benar dijalankan modul. Tanpa itu pengguna melihat teks
+    // ter-stem padahal analisis sentimen mematikan stemming.
+    // ------------------------------------------------------------------
+    (function () {
+        const button = document.getElementById('btn-preview-preprocessing');
+        if (!button) return;
+
+        const panel = document.getElementById('preprocessing-preview');
+        const rowsEl = document.getElementById('preprocessing-preview-rows');
+        const noticeEl = document.getElementById('preprocessing-preview-notice');
+        const errorEl = document.getElementById('preprocessing-preview-error');
+
+        function sampleTexts() {
+            const inputType = document.getElementById('input_type').value;
+
+            if (inputType === 'manual') {
+                return document.getElementById('manual_text').value
+                    .split('\n')
+                    .map(line => line.trim())
+                    .filter(Boolean)
+                    .slice(0, 3);
+            }
+
+            // Jalur file: ambil dari pratinjau kolom teks yang sudah dimuat
+            const cells = document.querySelectorAll('#preview-table tbody tr td:last-child');
+            return Array.from(cells)
+                .map(cell => cell.textContent.trim())
+                .filter(Boolean)
+                .slice(0, 3);
+        }
+
+        function showError(message) {
+            panel.classList.add('hidden');
+            errorEl.textContent = message;
+            errorEl.classList.remove('hidden');
+        }
+
+        button.addEventListener('click', function () {
+            errorEl.classList.add('hidden');
+
+            const analysisType = document.querySelector('input[name="analysis_type"]:checked');
+            if (!analysisType) {
+                showError('Pilih tipe analisis terlebih dahulu.');
+                return;
+            }
+
+            const texts = sampleTexts();
+            if (!texts.length) {
+                showError('Belum ada teks yang bisa dipratinjau. Masukkan teks atau unggah file lebih dulu.');
+                return;
+            }
+
+            button.disabled = true;
+            button.textContent = 'Memproses...';
+
+            fetch('{{ route('analysis.preprocess-preview') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({
+                    texts: texts,
+                    analysis_type: analysisType.value,
+                    preprocessing_config_id: document.getElementById('preprocessing_config_id').value || null,
+                }),
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok || !data.success) {
+                    showError(data.message || 'Pratinjau gagal.');
+                    return;
+                }
+
+                noticeEl.innerHTML = '<strong>Konfigurasi: ' + data.config_name + '</strong><br>' + data.notice;
+
+                rowsEl.innerHTML = data.original.map((original, index) => {
+                    const processed = data.preprocessed[index] ?? '';
+                    const unchanged = processed === original;
+
+                    return '<div class="rounded-lg border border-gray-200 p-3 text-sm">'
+                        + '<p class="text-xs font-medium uppercase tracking-wide text-gray-400">Asli</p>'
+                        + '<p class="text-gray-800">' + escapeHtml(original) + '</p>'
+                        + '<p class="mt-2 text-xs font-medium uppercase tracking-wide text-gray-400">Setelah preprocessing</p>'
+                        + '<p class="' + (unchanged ? 'text-gray-500 italic' : 'text-gray-800') + '">'
+                        + (processed ? escapeHtml(processed) : '<span class="italic text-gray-400">(kosong)</span>')
+                        + (unchanged ? ' &mdash; tidak berubah' : '')
+                        + '</p></div>';
+                }).join('');
+
+                panel.classList.remove('hidden');
+            })
+            .catch(() => showError('Tidak bisa menghubungi server.'))
+            .finally(() => {
+                button.disabled = false;
+                button.textContent = 'Pratinjau hasil preprocessing';
+            });
+        });
+
+        function escapeHtml(value) {
+            const div = document.createElement('div');
+            div.textContent = value;
+            return div.innerHTML;
+        }
+    })();
+
+    // ------------------------------------------------------------------
+    // Kesiapan model NLP
+    // ------------------------------------------------------------------
+    (function () {
+        const panel = document.getElementById('nlp-status-panel');
+        if (!panel) return;
+
+        const messageEl = document.getElementById('nlp-status-message');
+        const badgesEl = document.getElementById('nlp-status-badges');
+        const warmButton = document.getElementById('btn-warm-up');
+
+        const LABELS = { sentiment: 'Sentimen', aspect: 'Aspek', topic: 'Topik' };
+
+        function renderBadges(weights) {
+            badgesEl.innerHTML = Object.entries(weights).map(([name, loaded]) => {
+                const classes = loaded
+                    ? 'bg-green-100 text-green-800'
+                    : 'bg-gray-100 text-gray-600';
+                const label = LABELS[name] || name;
+                return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium '
+                    + classes + '">' + label + (loaded ? ' siap' : ' belum dimuat') + '</span>';
+            }).join('');
+        }
+
+        function loadStatus() {
+            fetch('{{ route('analysis.nlp-status') }}', {
+                headers: { 'Accept': 'application/json' },
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                panel.classList.remove('hidden');
+
+                if (!ok || !data.success) {
+                    messageEl.textContent = data.message || 'Layanan analisis tidak merespons.';
+                    badgesEl.innerHTML = '';
+                    warmButton.classList.add('hidden');
+                    return;
+                }
+
+                renderBadges(data.weights_loaded || {});
+
+                if (data.all_ready) {
+                    messageEl.textContent = 'Semua model siap. Analisis akan langsung berjalan.';
+                    warmButton.classList.add('hidden');
+                } else {
+                    messageEl.textContent = 'Sebagian model belum dimuat. Analisis pertama akan lebih lambat karena menunggu model dimuat.';
+                    warmButton.classList.remove('hidden');
+                }
+            })
+            .catch(() => {
+                panel.classList.remove('hidden');
+                messageEl.textContent = 'Tidak bisa memeriksa status layanan analisis.';
+            });
+        }
+
+        warmButton.addEventListener('click', function () {
+            warmButton.disabled = true;
+            warmButton.textContent = 'Memanaskan...';
+            messageEl.textContent = 'Memuat bobot model, mohon tunggu...';
+
+            fetch('{{ route('analysis.warm-up') }}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
+                    'Accept': 'application/json',
+                },
+            })
+            .then(response => response.json())
+            .then(data => { messageEl.textContent = data.message || 'Selesai.'; })
+            .catch(() => { messageEl.textContent = 'Pemanasan gagal.'; })
+            .finally(() => {
+                warmButton.disabled = false;
+                warmButton.textContent = 'Panaskan Model';
+                loadStatus();
+            });
+        });
+
+        loadStatus();
+    })();
 </script>
 @endpush
 @endsection

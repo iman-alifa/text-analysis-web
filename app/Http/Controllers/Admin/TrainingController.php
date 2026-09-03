@@ -305,6 +305,59 @@ class TrainingController extends Controller
     }
 
     /**
+     * Periksa kesiapan data latih sebelum retraining dijalankan (AJAX).
+     *
+     * Melatih pada data yang timpang bisa menghasilkan model yang hanya menebak
+     * kelas mayoritas, dan akurasinya justru terlihat naik. Laporan ini membuat
+     * kondisi itu terlihat sebelum tombol Latih Ulang ditekan.
+     */
+    public function previewTraining(NLPApiService $nlpService)
+    {
+        $items = TrainingItem::where('is_corrected', true)->get();
+
+        if ($items->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Belum ada data terkoreksi untuk diperiksa.',
+            ], 422);
+        }
+
+        $payloads = [
+            'sentiment' => $this->buildSentimentTrainingData($items),
+            'aspect' => $this->buildAspectTrainingData($items),
+        ];
+
+        $reports = [];
+
+        foreach ($payloads as $type => $data) {
+            if (empty($data)) {
+                $reports[$type] = [
+                    'available' => false,
+                    'message' => 'Belum ada koreksi untuk model ' . $type . '.',
+                ];
+                continue;
+            }
+
+            try {
+                $reports[$type] = ['available' => true] + $nlpService->retrainPreview($type, $data);
+            } catch (\Exception $e) {
+                \Log::warning("Pemeriksaan data {$type} gagal: " . $e->getMessage());
+
+                $reports[$type] = [
+                    'available' => false,
+                    'message' => 'Tidak bisa memeriksa data ' . $type . '. Pastikan NLP API berjalan.',
+                ];
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'minimum_samples' => NLPApiService::MIN_RETRAIN_SAMPLES,
+            'reports' => $reports,
+        ]);
+    }
+
+    /**
      * Format sesuai SentimentRetrainRequest di NLP API: [{text, label}].
      */
     private function buildSentimentTrainingData($items): array

@@ -5,10 +5,10 @@ namespace App\Jobs;
 use App\Models\TextAnalysis;
 use App\Models\AnalysisResult;
 use App\Models\AnalysisLog;
-use App\Models\CustomStopword;
-use App\Models\PreprocessingConfig;
 use App\Services\NLPApiService;
+use App\Services\PreprocessingConfigResolver;
 use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
@@ -16,19 +16,54 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Exception;
 
-class ProcessTextAnalysis implements ShouldQueue
+class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 1800; // 30 minutes untuk data besar
+    /**
+     * Versi pipeline analisis. Dinaikkan setiap kali perhitungan yang tersimpan
+     * berubah maknanya, sehingga analisis lama bisa dikenali dan diproses ulang
+     * lewat `analysis:reprocess-aspect`.
+     *
+     * 2 = sentimen per-aspek dihitung dari klausa (bukan kalimat penuh) dan
+     *     penjajaran indeks dipertahankan untuk baris kosong.
+     */
+    public const PIPELINE_VERSION = 2;
+
+    public $timeout = 1800; // 30 menit untuk data besar
     public $tries = 3;
-    public $backoff = [120, 300, 600]; // 2min, 5min, 10min
+    public $backoff = [120, 300, 600]; // 2 menit, 5 menit, 10 menit
+
+    /**
+     * Kunci unik agar satu analisis tidak pernah diproses dua kali serentak.
+     *
+     * Pertahanan berlapis di atas `retry_after` pada config/queue.php. Nilai
+     * lama retry_after (90 detik) lebih kecil daripada $timeout, sehingga
+     * worker melepaskan job yang MASIH BERJALAN kembali ke antrean dan worker
+     * kedua mengambilnya - analisis yang sama berjalan berkali-kali sekaligus.
+     * Terukur, analisis nyata memakan 95-235 detik, jadi praktis semuanya
+     * terduplikasi.
+     *
+     * retry_after sudah diperbaiki, tetapi kunci ini membuat kelas kesalahan
+     * itu tidak bisa terulang lewat jalan lain: dispatch ganda dari controller,
+     * pengguna menekan tombol dua kali, atau worker tambahan yang dijalankan
+     * bersamaan.
+     */
+    public $uniqueFor = 2100;
 
     protected $analysis;
 
     public function __construct(TextAnalysis $analysis)
     {
         $this->analysis = $analysis;
+    }
+
+    /**
+     * Satu kunci per analisis; analisis berbeda tetap boleh berjalan paralel.
+     */
+    public function uniqueId(): string
+    {
+        return 'analysis-' . $this->analysis->id;
     }
 
     public function handle(NLPApiService $nlpService): void
@@ -38,6 +73,15 @@ class ProcessTextAnalysis implements ShouldQueue
 
             // ✅ Update status to processing (10%)
             $this->updateProgress(10, 'Memulai analisis...');
+
+            // Panaskan bobot model sebelum analisis. Service NLP memuat bobot
+            // secara malas demi RAM, sehingga permintaan pertama tiap jenis
+            // membayar biaya unduh dan muat model - di kontainer baru bisa
+            // memakan menit, dan dari sini tak bisa dibedakan dari analisis
+            // yang menggantung. Kegagalannya tidak fatal: analisis tetap jalan,
+            // hanya lebih lambat.
+            $this->updateProgress(12, 'Menyiapkan model...');
+            $nlpService->warmUp();
             $this->analysis->update([
                 'status' => 'processing',
                 'started_at' => now()
@@ -88,7 +132,7 @@ class ProcessTextAnalysis implements ShouldQueue
 
                 case 'topic':
                     $this->updateProgress(40, 'Memulai identifikasi topik...');
-                    $numTopics = $this->analysis->metadata['num_topics'] ?? 5;
+                    $numTopics = $this->getNumTopics();
                     
                     // Topic modeling untuk data besar bisa lama
                     if ($textCount > 500) {
@@ -106,7 +150,21 @@ class ProcessTextAnalysis implements ShouldQueue
                         $this->updateProgress(42, "Memproses {$textCount} teks dengan batch processing...");
                     }
                     
-                    $result = $nlpService->analyzeCombined($texts, $preprocessingConfig, $progressCallback);
+                    // Formulir menampilkan pilihan mode aspek untuk tipe
+                    // 'combined' juga, jadi keduanya harus ikut diteruskan -
+                    // sebelumnya dibuang di sini dan analisis gabungan selalu
+                    // memakai mode automatic.
+                    $predefinedAspects = $this->getPredefinedAspects();
+                    $mode = $this->getAspectMode($predefinedAspects);
+
+                    $result = $nlpService->analyzeCombined(
+                        $texts,
+                        $preprocessingConfig,
+                        $progressCallback,
+                        $predefinedAspects,
+                        $mode,
+                        $this->getNumTopics()
+                    );
                     $this->updateProgress(70, 'Analisis gabungan selesai');
                     break;
 
@@ -232,63 +290,28 @@ class ProcessTextAnalysis implements ShouldQueue
      */
     protected function getPreprocessingConfig(): array
     {
-        $fallback = [
-            'case_folding' => true,
-            'remove_punctuation' => true,
-            'remove_numbers' => false,
-            'remove_stopwords' => true,
-            'stemming' => true,
-            'lemmatization' => false,
-            'custom_stopwords' => [],
-        ];
-
-        $config = null;
         $configId = $this->analysis->metadata['preprocessing_config_id'] ?? null;
-
-        try {
-            if ($configId) {
-                $config = PreprocessingConfig::find($configId);
-            }
-
-            if (!$config) {
-                $config = PreprocessingConfig::where('is_default', true)->first();
-            }
-        } catch (Exception $e) {
-            Log::warning('Gagal memuat preprocessing config: ' . $e->getMessage());
-        }
-
-        $resolved = $config ? $config->toApiFormat() : $fallback;
-
-        $resolved['custom_stopwords'] = array_values(array_unique(array_merge(
-            $resolved['custom_stopwords'] ?? [],
-            $this->getCustomStopwords()
-        )));
+        $resolver = app(PreprocessingConfigResolver::class);
+        $resolved = $resolver->resolve($configId ? (int) $configId : null);
 
         Log::info("Preprocessing config untuk analisis {$this->analysis->id}", [
-            'config_id' => $config->id ?? null,
-            'config_name' => $config->name ?? 'fallback',
-            'custom_stopwords' => count($resolved['custom_stopwords']),
+            'config_id' => $configId,
+            'config_name' => $resolver->resolveName($configId ? (int) $configId : null),
+            'custom_stopwords' => count($resolved['custom_stopwords'] ?? []),
         ]);
 
         return $resolved;
     }
 
     /**
-     * Stopword tambahan yang dikelola admin lewat halaman training.
+     * Jumlah topik pilihan pengguna. 0 berarti otomatis (API mencari sendiri),
+     * dan itu nilai yang sah - jangan diperlakukan sebagai "kosong".
      */
-    protected function getCustomStopwords(): array
+    protected function getNumTopics(): int
     {
-        try {
-            return CustomStopword::pluck('word')
-                ->map(fn ($word) => strtolower(trim((string) $word)))
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-        } catch (Exception $e) {
-            Log::warning('Gagal memuat custom stopwords: ' . $e->getMessage());
-            return [];
-        }
+        $numTopics = $this->analysis->metadata['num_topics'] ?? 5;
+
+        return is_numeric($numTopics) ? (int) $numTopics : 5;
     }
 
     /**
@@ -346,7 +369,10 @@ class ProcessTextAnalysis implements ShouldQueue
                     $originalTexts
                 );
                 $data['sentiment_distribution'] = $analysisResults['distribution'] ?? null;
-                $data['metrics'] = $analysisResults['metrics'] ?? null;
+                $data['metrics'] = $this->withReviewQueue(
+                    $analysisResults['metrics'] ?? null,
+                    $analysisResults['review_queue'] ?? null
+                );
                 $data['summary'] = $analysisResults['summary'] ?? null;
                 break;
 
@@ -379,10 +405,23 @@ class ProcessTextAnalysis implements ShouldQueue
                 $data['topic_results'] = $analysisResults['topic'] ?? null;
                 $data['association_results'] = $analysisResults['association'] ?? null;
                 $data['document_aspects'] = $documentAspects ?: null;
-                $data['metrics'] = $analysisResults['sentiment']['metrics'] ?? null;
+                $data['metrics'] = $this->withReviewQueue(
+                    $analysisResults['sentiment']['metrics'] ?? null,
+                    $analysisResults['sentiment']['review_queue'] ?? null
+                );
                 $data['summary'] = $this->generateCombinedSummary($analysisResults);
                 break;
         }
+
+        // Penanda versi dipakai analysis:reprocess-aspect untuk membedakan
+        // hasil lama dari hasil terbaru. Menebaknya dari isi data tidak andal:
+        // analisis yang benar pun bisa tidak punya kelas netral sama sekali.
+        $metrics = $data['metrics'] ?? [];
+        if (! is_array($metrics)) {
+            $metrics = [];
+        }
+        $metrics['pipeline_version'] = self::PIPELINE_VERSION;
+        $data['metrics'] = $metrics;
 
         AnalysisResult::updateOrCreate(
             ['text_analysis_id' => $this->analysis->id],
@@ -391,10 +430,35 @@ class ProcessTextAnalysis implements ShouldQueue
     }
 
     /**
+     * Simpan antrean tinjauan bersama metrics.
+     *
+     * review_queue adalah saudara metrics pada respons API, tapi disimpan di
+     * dalam metrics agar tidak perlu kolom baru - keduanya sama-sama penanda
+     * mutu hasil, dan halaman hasil membacanya dari satu tempat.
+     */
+    protected function withReviewQueue(?array $metrics, ?array $reviewQueue): ?array
+    {
+        if (empty($reviewQueue)) {
+            return $metrics;
+        }
+
+        $metrics ??= [];
+        $metrics['review_queue'] = $reviewQueue;
+
+        return $metrics;
+    }
+
+    /**
      * Kembalikan teks asli (sebelum preprocessing) ke setiap prediksi.
      *
      * Pemetaan memakai original_index yang dikirim NLPApiService saat batching,
      * supaya posisi tetap benar walaupun ada batch yang gagal di tengah.
+     *
+     * Sejak service Python mengembalikan `processed_text` sendiri, nilai itu
+     * TIDAK boleh ditimpa di sini. Dulu `text` dari API berisi teks hasil
+     * pembersihan sehingga pemindahan ini benar; sekarang `text` sudah berisi
+     * teks asli, dan menimpanya membuat processed_text == text sehingga panel
+     * "teks setelah preprocessing" pada halaman hasil hilang diam-diam.
      */
     protected function attachOriginalTexts(
         array $predictions,
@@ -406,7 +470,11 @@ class ProcessTextAnalysis implements ShouldQueue
 
             if (isset($originalTexts[$index])) {
                 $prediction['original_text'] = $originalTexts[$index];
-                $prediction['processed_text'] = $prediction['text'] ?? null;
+
+                if (!isset($prediction['processed_text'])) {
+                    $prediction['processed_text'] = $prediction['text'] ?? null;
+                }
+
                 $prediction['text'] = $originalTexts[$index];
             }
 

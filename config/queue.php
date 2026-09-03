@@ -40,7 +40,20 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // WAJIB LEBIH BESAR dari ProcessTextAnalysis::$timeout (1800 detik).
+            //
+            // Dengan nilai lama 90 detik, worker menganggap job "hilang" setelah
+            // 90 detik lalu MELEPASKANNYA KEMBALI ke antrean - padahal worker
+            // pertama masih mengerjakannya. Worker kedua mengambilnya dan
+            // analisis yang sama berjalan berkali-kali sekaligus.
+            //
+            // Terukur, analisis nyata memakan 95-235 detik (82-885 teks), jadi
+            // PRAKTIS SETIAP analisis terduplikasi. Akibatnya beruntun: service
+            // NLP berjalan dengan --workers 1 sehingga permintaan kembar
+            // mengantre dan membuat semuanya makin lambat, hasil saling timpa,
+            // dan job akhirnya ditandai gagal setelah 3 percobaan. Inilah sebab
+            // "analisis gagal / timeout" yang tampak acak.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 2100),
             'after_commit' => false,
         ],
 
