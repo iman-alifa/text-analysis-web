@@ -2,15 +2,15 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Seeder;
-use App\Models\User;
-use App\Models\TextAnalysis;
-use App\Models\AnalysisResult;
-use App\Models\PreprocessingConfig;
-use App\Models\Dataset;
 use App\Models\AnalysisLog;
-use Illuminate\Support\Facades\Hash;
+use App\Models\AnalysisResult;
+use App\Models\Dataset;
+use App\Models\PreprocessingConfig;
+use App\Models\TextAnalysis;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class DashboardSeeder extends Seeder
 {
@@ -122,8 +122,8 @@ class DashboardSeeder extends Seeder
                 'user_id' => $user->id,
                 'name' => $datasetData['name'],
                 'description' => $datasetData['description'],
-                'file_path' => 'datasets/' . $user->id . '/dataset_' . ($index + 1) . '.' . $datasetData['file_type'],
-                'file_name' => 'dataset_' . ($index + 1) . '.' . $datasetData['file_type'],
+                'file_path' => 'datasets/'.$user->id.'/dataset_'.($index + 1).'.'.$datasetData['file_type'],
+                'file_name' => 'dataset_'.($index + 1).'.'.$datasetData['file_type'],
                 'file_type' => $datasetData['file_type'],
                 'file_size' => rand(50000, 500000),
                 'total_rows' => $datasetData['total_rows'],
@@ -168,13 +168,13 @@ class DashboardSeeder extends Seeder
             $status = $statuses[array_rand($statuses)];
             $analysisType = $analysisTypes[array_rand($analysisTypes)];
             $inputType = $inputTypes[array_rand($inputTypes)];
-            
+
             $daysAgo = rand(0, 30);
             $startedAt = Carbon::now()->subDays($daysAgo)->subHours(rand(0, 23))->subMinutes(rand(0, 59));
             $completedAt = $status === 'completed' ? $startedAt->copy()->addSeconds(rand(2, 45)) : null;
 
             $titleList = $titles[$analysisType];
-            $title = $titleList[array_rand($titleList)] . ' #' . ($i + 1);
+            $title = $titleList[array_rand($titleList)].' #'.($i + 1);
 
             $totalRecords = rand(5, 50);
             $randomTexts = [];
@@ -185,11 +185,11 @@ class DashboardSeeder extends Seeder
             $analysis = TextAnalysis::create([
                 'user_id' => $user->id,
                 'title' => $title,
-                'description' => 'Deskripsi detail untuk ' . strtolower($title),
+                'description' => 'Deskripsi detail untuk '.strtolower($title),
                 'input_type' => $inputType,
                 'raw_data' => $randomTexts,
-                'file_path' => $inputType !== 'manual' ? 'uploads/' . $user->id . '/file_' . $i . '.' . $inputType : null,
-                'file_name' => $inputType !== 'manual' ? 'data_' . $i . '.' . $inputType : null,
+                'file_path' => $inputType !== 'manual' ? 'uploads/'.$user->id.'/file_'.$i.'.'.$inputType : null,
+                'file_name' => $inputType !== 'manual' ? 'data_'.$i.'.'.$inputType : null,
                 'total_records' => $totalRecords,
                 'analysis_type' => $analysisType,
                 'status' => $status,
@@ -218,7 +218,7 @@ class DashboardSeeder extends Seeder
                     $user->id,
                     $analysis->id,
                     'Analysis completed successfully',
-                    ['duration' => $startedAt->diffInSeconds($completedAt) . 's']
+                    ['duration' => $startedAt->diffInSeconds($completedAt).'s']
                 );
             } elseif ($status === 'failed') {
                 AnalysisLog::createLog(
@@ -250,7 +250,7 @@ class DashboardSeeder extends Seeder
     {
         $predictions = [];
         $sentiments = ['positive', 'negative', 'neutral'];
-        
+
         foreach ($texts as $text) {
             $sentiment = $sentiments[array_rand($sentiments)];
             $predictions[] = [
@@ -262,9 +262,9 @@ class DashboardSeeder extends Seeder
         }
 
         // Generate sentiment distribution
-        $positiveCount = count(array_filter($predictions, fn($p) => $p['sentiment'] === 'positive'));
-        $negativeCount = count(array_filter($predictions, fn($p) => $p['sentiment'] === 'negative'));
-        $neutralCount = count(array_filter($predictions, fn($p) => $p['sentiment'] === 'neutral'));
+        $positiveCount = count(array_filter($predictions, fn ($p) => $p['sentiment'] === 'positive'));
+        $negativeCount = count(array_filter($predictions, fn ($p) => $p['sentiment'] === 'negative'));
+        $neutralCount = count(array_filter($predictions, fn ($p) => $p['sentiment'] === 'neutral'));
         $total = count($predictions);
 
         $sentimentDistribution = [
@@ -324,10 +324,10 @@ class DashboardSeeder extends Seeder
 
         // Generate summary
         $dominantSentiment = array_keys($sentimentDistribution, max($sentimentDistribution))[0];
-        $summary = "Analisis {$analysis->total_records} data teks menunjukkan kecenderungan sentimen {$dominantSentiment} " .
-                   "dengan persentase {$sentimentDistribution[$dominantSentiment]}%. " .
-                   "Akurasi model mencapai " . ($metrics['accuracy'] * 100) . "%. " .
-                   "Aspek utama yang dibahas meliputi pelayanan, kualitas, dan fitur.";
+        $summary = "Analisis {$analysis->total_records} data teks menunjukkan kecenderungan sentimen {$dominantSentiment} ".
+                   "dengan persentase {$sentimentDistribution[$dominantSentiment]}%. ".
+                   'Akurasi model mencapai '.($metrics['accuracy'] * 100).'%. '.
+                   'Aspek utama yang dibahas meliputi pelayanan, kualitas, dan fitur.';
 
         // Create result
         AnalysisResult::create([
@@ -345,9 +345,9 @@ class DashboardSeeder extends Seeder
             'metrics' => $metrics,
             'summary' => $summary,
             'visualizations' => [
-                'sentiment_chart' => 'charts/sentiment_' . $analysis->id . '.png',
-                'wordcloud' => 'charts/wordcloud_' . $analysis->id . '.png',
-                'topic_chart' => 'charts/topics_' . $analysis->id . '.png',
+                'sentiment_chart' => 'charts/sentiment_'.$analysis->id.'.png',
+                'wordcloud' => 'charts/wordcloud_'.$analysis->id.'.png',
+                'topic_chart' => 'charts/topics_'.$analysis->id.'.png',
             ],
         ]);
     }

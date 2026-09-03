@@ -5,13 +5,13 @@ namespace App\Jobs;
 use App\Models\AnalysisLog;
 use App\Models\ModelTraining;
 use App\Services\NLPApiService;
+use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Exception;
 
 /**
  * Kirim data koreksi (active learning) ke endpoint retraining NLP API.
@@ -24,9 +24,11 @@ class RetrainModel implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public $timeout = 7200; // fine-tuning bisa berjam-jam untuk dataset besar
+
     public $tries = 1;      // jangan mengulang training yang mahal secara otomatis
 
     protected ModelTraining $training;
+
     protected array $trainingData;
 
     public function __construct(ModelTraining $training, array $trainingData)
@@ -86,13 +88,13 @@ class RetrainModel implements ShouldQueue
                 [
                     'training_id' => $this->training->id,
                     'samples' => $this->training->total_samples,
-                    'saved' => !$ditolak,
+                    'saved' => ! $ditolak,
                     'result' => $result,
                 ]
             );
 
             Log::info("Retraining {$type} selesai", [
-                'saved' => !$ditolak,
+                'saved' => ! $ditolak,
                 'result' => $result,
             ]);
 

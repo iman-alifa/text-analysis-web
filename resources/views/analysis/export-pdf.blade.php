@@ -33,6 +33,44 @@
         <div class="summary">{{ $result->summary }}</div>
     @endif
 
+    {{-- Narasi AI ikut diekspor supaya bisa dikutip di naskah, lengkap dengan
+         asal-usulnya. Tanpa keterangan model dan tanggal, kalimat buatan mesin
+         tidak bisa dipertanggungjawabkan sebagai kutipan. --}}
+    @php
+        $judulAi = [
+            'overview' => 'Ringkasan Eksekutif (AI)',
+            'sentiment' => 'Interpretasi Sentimen (AI)',
+            'aspect' => 'Interpretasi Aspek (AI)',
+            'association' => 'Interpretasi Asosiasi (AI)',
+        ];
+    @endphp
+
+    @foreach($judulAi as $bagian => $judul)
+        @php $narasi = $result->ai_interpretations[$bagian] ?? null; @endphp
+        @if(! empty($narasi['narrative']))
+            <h2>{{ $judul }}</h2>
+            <div class="summary">
+                <p style="margin: 0 0 6px 0;">{{ $narasi['narrative'] }}</p>
+
+                @if(! empty($narasi['highlights']))
+                    <ul style="margin: 0 0 6px 16px; padding: 0;">
+                        @foreach($narasi['highlights'] as $poin)
+                            <li>{{ $poin }}</li>
+                        @endforeach
+                    </ul>
+                @endif
+
+                <p style="margin: 0; font-size: 9px; color: #6b7280;">
+                    Ditulis oleh {{ $narasi['model'] ?? 'AI' }}
+                    @if(! empty($narasi['generated_at']))
+                        pada {{ \Carbon\Carbon::parse($narasi['generated_at'])->translatedFormat('d M Y, H:i') }}
+                    @endif
+                    &mdash; seluruh angka berasal dari hasil analisis, bukan dari AI.
+                </p>
+            </div>
+        @endif
+    @endforeach
+
     @if($result->sentiment_distribution)
         <h2>Distribusi Sentimen</h2>
         <table>

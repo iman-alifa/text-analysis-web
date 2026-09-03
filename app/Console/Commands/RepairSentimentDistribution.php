@@ -30,6 +30,7 @@ class RepairSentimentDistribution extends Command
 
         if ($results->isEmpty()) {
             $this->info('Tidak ada hasil analisis yang perlu diperiksa.');
+
             return self::SUCCESS;
         }
 
@@ -40,6 +41,7 @@ class RepairSentimentDistribution extends Command
 
             if ($recalculated === null) {
                 $skipped++;
+
                 continue;
             }
 
@@ -49,12 +51,13 @@ class RepairSentimentDistribution extends Command
             // Toleransi pembulatan; distribusi yang benar selalu mendekati 100%
             if (abs($currentTotal - 100) <= 1) {
                 $skipped++;
+
                 continue;
             }
 
             $rows[] = [
                 $result->text_analysis_id,
-                $currentTotal . '%',
+                $currentTotal.'%',
                 $this->format($current),
                 $this->format($recalculated),
             ];
@@ -68,6 +71,7 @@ class RepairSentimentDistribution extends Command
 
         if ($repaired === 0) {
             $this->info("Semua distribusi sudah benar ({$skipped} hasil diperiksa).");
+
             return self::SUCCESS;
         }
 
@@ -96,7 +100,7 @@ class RepairSentimentDistribution extends Command
 
             $sentiment = strtolower((string) $sentiment);
 
-            if (!array_key_exists($sentiment, $counts)) {
+            if (! array_key_exists($sentiment, $counts)) {
                 continue;
             }
 

@@ -13,18 +13,18 @@ return new class extends Migration
     {
         Schema::table('text_analyses', function (Blueprint $table) {
             // File configuration columns (add after existing file columns)
-            
+
             // Excel/CSV Configuration
             $table->boolean('file_has_header')->default(true)->after('file_name');
             $table->string('text_column_name')->nullable()->after('file_has_header');
             $table->integer('text_column_index')->nullable()->after('text_column_name');
             $table->string('csv_delimiter')->nullable()->after('text_column_index');
             $table->integer('excel_sheet_index')->default(0)->after('csv_delimiter');
-            
+
             // TXT Configuration
             $table->enum('txt_separator', ['newline', 'period', 'double_newline', 'custom'])
-                  ->nullable()
-                  ->after('excel_sheet_index');
+                ->nullable()
+                ->after('excel_sheet_index');
             $table->string('txt_custom_separator')->nullable()->after('txt_separator');
             $table->string('txt_encoding')->default('utf-8')->after('txt_custom_separator');
         });

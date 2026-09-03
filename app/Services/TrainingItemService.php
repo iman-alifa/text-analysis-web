@@ -13,11 +13,15 @@ class TrainingItemService
      */
     public function extractJsonToTable(TextAnalysis $analysis): void
     {
-        if (!$analysis->result) return;
+        if (! $analysis->result) {
+            return;
+        }
 
         // Idempotent: pemanggilan kedua sebelumnya menggandakan seluruh baris
         // (dan koreksi yang sudah dibuat user ikut terduplikasi).
-        if ($analysis->trainingItems()->exists()) return;
+        if ($analysis->trainingItems()->exists()) {
+            return;
+        }
 
         // 1. Build aspect keyword dictionary from global aspect_results
         $globalAspectsRaw = $analysis->result->aspect_results ?? [];
@@ -50,13 +54,17 @@ class TrainingItemService
             $rows = $rows['results'];
         }
 
-        if (!is_array($rows) || empty($rows)) return;
+        if (! is_array($rows) || empty($rows)) {
+            return;
+        }
 
         $batch = [];
         $now = now();
 
         foreach ($rows as $row) {
-            if (empty($row['text'])) continue;
+            if (empty($row['text'])) {
+                continue;
+            }
 
             // Normalise sentiment. Analisis bertipe 'aspect' tidak menghasilkan
             // sentimen sama sekali, jadi biarkan null daripada mengarang 'neutral'
@@ -73,10 +81,10 @@ class TrainingItemService
             // Keyword matching di bawah hanya cadangan untuk hasil analisis lama
             // yang tersimpan sebelum document_aspects ikut disimpan.
             $rowAspects = $row['aspects'] ?? [];
-            if (empty($rowAspects) && !empty($aspectKeywords)) {
+            if (empty($rowAspects) && ! empty($aspectKeywords)) {
                 $textLower = strtolower($row['text']);
                 foreach ($aspectKeywords as $keyword) {
-                    if (preg_match("/\b" . preg_quote($keyword, '/') . "\b/i", $textLower)) {
+                    if (preg_match("/\b".preg_quote($keyword, '/')."\b/i", $textLower)) {
                         $rowAspects[] = $keyword;
                     }
                 }
@@ -84,13 +92,13 @@ class TrainingItemService
 
             $batch[] = [
                 'text_analysis_id' => $analysis->id,
-                'text_content'     => $row['text'],
+                'text_content' => $row['text'],
                 'predicted_sentiment' => $sentimentLabel ? strtolower($sentimentLabel) : null,
-                'confidence_score'    => (float) $confidence,
-                'detected_aspects'    => json_encode(array_values(array_unique($rowAspects))),
-                'is_corrected'        => false,
-                'created_at'          => $now,
-                'updated_at'          => $now,
+                'confidence_score' => (float) $confidence,
+                'detected_aspects' => json_encode(array_values(array_unique($rowAspects))),
+                'is_corrected' => false,
+                'created_at' => $now,
+                'updated_at' => $now,
             ];
 
             if (count($batch) >= 200) {
@@ -99,7 +107,7 @@ class TrainingItemService
             }
         }
 
-        if (!empty($batch)) {
+        if (! empty($batch)) {
             TrainingItem::insert($batch);
         }
     }

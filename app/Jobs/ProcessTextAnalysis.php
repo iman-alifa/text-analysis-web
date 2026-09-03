@@ -2,11 +2,12 @@
 
 namespace App\Jobs;
 
-use App\Models\TextAnalysis;
-use App\Models\AnalysisResult;
 use App\Models\AnalysisLog;
+use App\Models\AnalysisResult;
+use App\Models\TextAnalysis;
 use App\Services\NLPApiService;
 use App\Services\PreprocessingConfigResolver;
+use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -14,9 +15,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
-use Exception;
 
-class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
+class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
@@ -31,7 +31,9 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
     public const PIPELINE_VERSION = 2;
 
     public $timeout = 1800; // 30 menit untuk data besar
+
     public $tries = 3;
+
     public $backoff = [120, 300, 600]; // 2 menit, 5 menit, 10 menit
 
     /**
@@ -63,7 +65,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
      */
     public function uniqueId(): string
     {
-        return 'analysis-' . $this->analysis->id;
+        return 'analysis-'.$this->analysis->id;
     }
 
     public function handle(NLPApiService $nlpService): void
@@ -84,7 +86,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             $nlpService->warmUp();
             $this->analysis->update([
                 'status' => 'processing',
-                'started_at' => now()
+                'started_at' => now(),
             ]);
 
             AnalysisLog::createLog(
@@ -97,7 +99,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             // ✅ Get texts (20%)
             $this->updateProgress(20, 'Memuat data teks...');
             $texts = $this->analysis->raw_data;
-            
+
             if (empty($texts)) {
                 throw new Exception('No texts to analyze');
             }
@@ -110,7 +112,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             $preprocessingConfig = $this->getPreprocessingConfig();
 
             // ✅ Create progress callback
-            $progressCallback = function($progress, $message) {
+            $progressCallback = function ($progress, $message) {
                 $this->updateProgress($progress, $message);
             };
 
@@ -133,23 +135,23 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
                 case 'topic':
                     $this->updateProgress(40, 'Memulai identifikasi topik...');
                     $numTopics = $this->getNumTopics();
-                    
+
                     // Topic modeling untuk data besar bisa lama
                     if ($textCount > 500) {
                         $this->updateProgress(45, "Memproses {$textCount} teks untuk topic modeling...");
                     }
-                    
+
                     $result = $nlpService->analyzeTopic($texts, $preprocessingConfig, $numTopics);
                     $this->updateProgress(70, 'Topic modeling selesai');
                     break;
 
                 case 'combined':
                     $this->updateProgress(40, 'Memulai analisis gabungan...');
-                    
+
                     if ($textCount > 100) {
                         $this->updateProgress(42, "Memproses {$textCount} teks dengan batch processing...");
                     }
-                    
+
                     // Formulir menampilkan pilihan mode aspek untuk tipe
                     // 'combined' juga, jadi keduanya harus ikut diteruskan -
                     // sebelumnya dibuang di sini dan analisis gabungan selalu
@@ -183,11 +185,11 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             $this->updateProgress(100, 'Analisis selesai!');
             $this->analysis->update([
                 'status' => 'completed',
-                'completed_at' => now()
+                'completed_at' => now(),
             ]);
 
             $duration = $this->analysis->started_at->diffInSeconds(now());
-            
+
             AnalysisLog::createLog(
                 'completed',
                 $this->analysis->user_id,
@@ -195,7 +197,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
                 'Analysis completed successfully',
                 [
                     'duration' => $duration,
-                    'text_count' => $textCount
+                    'text_count' => $textCount,
                 ]
             );
 
@@ -203,17 +205,18 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
 
         } catch (\Illuminate\Http\Client\ConnectionException $e) {
             // ✅ Connection timeout - will retry
-            Log::warning("Analysis ID {$this->analysis->id} connection timeout: " . $e->getMessage());
+            Log::warning("Analysis ID {$this->analysis->id} connection timeout: ".$e->getMessage());
 
             if ($this->attempts() < $this->tries) {
                 $retryDelay = $this->backoff[$this->attempts() - 1] ?? 120;
-                
+
                 $this->updateProgress(
                     $this->analysis->progress ?? 0,
                     "Koneksi terputus. Mencoba kembali dalam {$retryDelay} detik... (Percobaan {$this->attempts()}/{$this->tries})"
                 );
-                
+
                 $this->release($retryDelay);
+
                 return;
             }
 
@@ -222,8 +225,8 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
 
         } catch (\Illuminate\Http\Client\RequestException $e) {
             // HTTP errors
-            Log::error("Analysis ID {$this->analysis->id} request error: " . $e->getMessage());
-            
+            Log::error("Analysis ID {$this->analysis->id} request error: ".$e->getMessage());
+
             if ($this->attempts() < $this->tries) {
                 $retryDelay = $this->backoff[$this->attempts() - 1] ?? 120;
                 $this->updateProgress(
@@ -231,9 +234,10 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
                     "Terjadi kesalahan. Mencoba kembali... (Percobaan {$this->attempts()}/{$this->tries})"
                 );
                 $this->release($retryDelay);
+
                 return;
             }
-            
+
             $this->handleFailure($e, 'Service analisis mengembalikan error. Silakan coba lagi atau hubungi administrator.');
 
         } catch (Exception $e) {
@@ -253,18 +257,18 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
     /**
      * ✅ Handle failure
      */
-    private function handleFailure(Exception $e, string $customMessage = null): void
+    private function handleFailure(Exception $e, ?string $customMessage = null): void
     {
         $errorMessage = $customMessage ?? $e->getMessage();
-        
-        Log::error("Analysis ID {$this->analysis->id} failed: " . $errorMessage);
-        Log::error("Exception: " . get_class($e));
-        Log::error("Stack trace: " . $e->getTraceAsString());
+
+        Log::error("Analysis ID {$this->analysis->id} failed: ".$errorMessage);
+        Log::error('Exception: '.get_class($e));
+        Log::error('Stack trace: '.$e->getTraceAsString());
 
         $this->analysis->update([
             'status' => 'failed',
             'error_message' => $errorMessage,
-            'completed_at' => now()
+            'completed_at' => now(),
         ]);
 
         AnalysisLog::createLog(
@@ -275,7 +279,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             [
                 'error' => $errorMessage,
                 'exception' => get_class($e),
-                'attempts' => $this->attempts()
+                'attempts' => $this->attempts(),
             ]
         );
 
@@ -326,6 +330,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             // Mode rule-based tanpa daftar aspek tidak ada artinya bagi Python
             if ($mode === 'rule-based' && empty($predefinedAspects)) {
                 Log::warning("Analisis {$this->analysis->id}: mode rule-based tanpa predefined_aspects, fallback ke automatic");
+
                 return 'automatic';
             }
 
@@ -340,6 +345,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
         if (isset($this->analysis->metadata['predefined_aspects'])) {
             return $this->analysis->metadata['predefined_aspects'];
         }
+
         return null;
     }
 
@@ -357,7 +363,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             'association_results' => null,
             'document_aspects' => null,
             'metrics' => null,
-            'summary' => null
+            'summary' => null,
         ];
 
         $originalTexts = $this->analysis->raw_data;
@@ -471,14 +477,14 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             if (isset($originalTexts[$index])) {
                 $prediction['original_text'] = $originalTexts[$index];
 
-                if (!isset($prediction['processed_text'])) {
+                if (! isset($prediction['processed_text'])) {
                     $prediction['processed_text'] = $prediction['text'] ?? null;
                 }
 
                 $prediction['text'] = $originalTexts[$index];
             }
 
-            if (!empty($documentAspects[$index])) {
+            if (! empty($documentAspects[$index])) {
                 $prediction['aspects'] = array_values(array_unique($documentAspects[$index]));
             }
         }
@@ -527,12 +533,12 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
 
     public function failed(Exception $exception): void
     {
-        Log::error("Job permanently failed for analysis ID {$this->analysis->id}: " . $exception->getMessage());
+        Log::error("Job permanently failed for analysis ID {$this->analysis->id}: ".$exception->getMessage());
 
         $this->analysis->update([
             'status' => 'failed',
-            'error_message' => 'Analisis gagal setelah beberapa percobaan. ' . $exception->getMessage(),
-            'completed_at' => now()
+            'error_message' => 'Analisis gagal setelah beberapa percobaan. '.$exception->getMessage(),
+            'completed_at' => now(),
         ]);
 
         AnalysisLog::createLog(
@@ -542,7 +548,7 @@ class ProcessTextAnalysis implements ShouldQueue, ShouldBeUnique
             'Job permanently failed after all retries',
             [
                 'error' => $exception->getMessage(),
-                'exception' => get_class($exception)
+                'exception' => get_class($exception),
             ]
         );
     }

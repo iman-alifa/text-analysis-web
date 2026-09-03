@@ -19,7 +19,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        if (!Schema::hasTable('model_trainings')) {
+        if (! Schema::hasTable('model_trainings')) {
             return;
         }
 
@@ -30,14 +30,14 @@ return new class extends Migration
 
     public function down(): void
     {
-        if (!Schema::hasTable('model_trainings')) {
+        if (! Schema::hasTable('model_trainings')) {
             return;
         }
 
         Schema::table('model_trainings', function (Blueprint $table) {
             $table->enum('status', ['pending', 'running', 'completed', 'failed'])
-                  ->default('pending')
-                  ->change();
+                ->default('pending')
+                ->change();
         });
     }
 };

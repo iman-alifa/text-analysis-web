@@ -21,7 +21,7 @@ class ReprocessAspectCommandTest extends TestCase
     private function buatAnalisis(
         array $aspectResults,
         array $raw = ['a', 'b'],
-        array $docAspects = null,
+        ?array $docAspects = null,
         ?int $version = null
     ): TextAnalysis {
         $user = User::factory()->create();
@@ -72,7 +72,7 @@ class ReprocessAspectCommandTest extends TestCase
         );
 
         $this->artisan('analysis:reprocess-aspect')
-            ->expectsOutputToContain('terbaru v' . ProcessTextAnalysis::PIPELINE_VERSION)
+            ->expectsOutputToContain('terbaru v'.ProcessTextAnalysis::PIPELINE_VERSION)
             ->assertExitCode(0);
     }
 

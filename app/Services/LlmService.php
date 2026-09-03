@@ -2,116 +2,214 @@
 
 namespace App\Services;
 
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
+use App\Exceptions\LlmException;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+/**
+ * Pembungkus Google Gemini untuk menghasilkan narasi berbahasa Indonesia.
+ *
+ * Dua keputusan yang mengikat di sini:
+ *
+ * 1. Memakai facade Http, bukan Guzzle mentah, supaya bisa di-fake pada tes
+ *    seperti NLPApiService. Versi sebelumnya memakai Guzzle dan akibatnya
+ *    menjadi satu-satunya bagian sistem yang tidak punya tes sama sekali.
+ * 2. Bentuk keluaran dijamin lewat response_schema (structured output), bukan
+ *    lewat kalimat "balas dalam format JSON" di dalam prompt. Versi sebelumnya
+ *    memakai cara kedua dan harus menebak ketika model membalas indeks 1-based.
+ */
 class LlmService
 {
-    protected $client;
-    protected $apiKey;
-    protected $model;
-    protected $baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/';
+    /**
+     * Versi prompt, ikut disimpan bersama hasil. Naikkan setiap kali susunan
+     * prompt berubah, supaya narasi lama bisa dibedakan dari yang baru ketika
+     * hasilnya dikutip di naskah.
+     */
+    public const PROMPT_VERSION = 2;
 
-    public function __construct()
+    private const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
+
+    public function isConfigured(): bool
     {
-        $this->client = new Client([
-            'timeout' => 30,
-        ]);
-        $this->apiKey = config('services.gemini.key');
-        $this->model = config('services.gemini.model', 'gemini-3.5-flash');
+        return ! empty(config('services.gemini.key'));
+    }
+
+    public function model(): string
+    {
+        return (string) config('services.gemini.model', 'gemini-3.5-flash');
     }
 
     /**
-     * Generate interpretation for topic modeling results using Gemini API
-     * 
-     * @param array $topics Array of topics with their keywords
-     * @return array Array of interpretations mapped by topic index
+     * Kirim satu prompt dan kembalikan hasil terstruktur sesuai $schema.
+     *
+     * @param  array  $schema  Skema OpenAPI subset yang dipahami Gemini
+     * @return array Hasil ter-decode sesuai skema
+     *
+     * @throws LlmException
      */
-    public function generateTopicInterpretations(array $topics)
+    public function generate(string $prompt, array $schema, float $temperature = 0.2): array
     {
-        if (empty($this->apiKey)) {
-            Log::warning('GEMINI_API_KEY belum diisi di .env');
-            return [];
+        if (! $this->isConfigured()) {
+            throw new LlmException('GEMINI_API_KEY belum diisi pada .env.');
         }
 
-        // Prepare the prompt
-        $prompt = "Anda adalah ahli linguistik dan data scientist yang ahli dalam merangkum hasil Topic Modeling. "
-                . "Berikut adalah daftar topik yang diekstrak beserta kata-kata kunci teratasnya:\n\n";
-
-        foreach ($topics as $index => $topic) {
-            $keywords = implode(', ', array_slice($topic['words'], 0, 10)); // Take top 10 words
-            $prompt .= "Topik ID " . $index . ": " . $keywords . "\n";
-        }
-
-        $prompt .= "\nTugas Anda: Untuk setiap Topik, berikan 1 nama label singkat (maksimal 3-4 kata) "
-                 . "dan 1 kalimat singkat yang mendeskripsikan makna topik tersebut berdasarkan kata-kata kuncinya.\n"
-                 . "Berikan jawaban dalam format JSON murni TANPA markdown formatting (tanpa ```json ... ```), "
-                 . "dengan struktur array of objects berisi 'topic_id' (sesuai dengan Topik ID di atas), 'label', dan 'description'.\n"
-                 . "Contoh output:\n[\n  {\"topic_id\": 0, \"label\": \"Harga & Promosi\", \"description\": \"Komentar pengguna terkait murahnya harga dan ketersediaan diskon.\"}\n]";
+        $url = self::BASE_URL.$this->model().':generateContent';
 
         try {
-            $response = $this->client->post($this->baseUrl . $this->model . ':generateContent?key=' . $this->apiKey, [
-                'headers' => [
-                    'Content-Type' => 'application/json',
-                ],
-                'json' => [
+            $response = Http::timeout((int) config('services.gemini.timeout', 45))
+                ->retry((int) config('services.gemini.retry', 2), 500, throw: false)
+                ->withHeaders(['Content-Type' => 'application/json'])
+                ->post($url.'?key='.config('services.gemini.key'), [
                     'contents' => [
-                        [
-                            'parts' => [
-                                ['text' => $prompt]
-                            ]
-                        ]
+                        ['parts' => [['text' => $prompt]]],
                     ],
                     'generationConfig' => [
-                        'temperature' => 0.2, // Low temperature for more deterministic/factual output
+                        // Rendah supaya narasi untuk data yang sama tidak
+                        // berubah-ubah setiap kali dibangkitkan ulang.
+                        'temperature' => $temperature,
                         'response_mime_type' => 'application/json',
-                    ]
-                ]
-            ]);
+                        'response_schema' => $schema,
+                    ],
+                ]);
+        } catch (\Throwable $e) {
+            Log::error('Gemini tidak dapat dihubungi: '.$e->getMessage());
 
-            $result = json_decode($response->getBody(), true);
-            
-            if (isset($result['candidates'][0]['content']['parts'][0]['text'])) {
-                $generatedText = $result['candidates'][0]['content']['parts'][0]['text'];
-                
-                // Parse JSON
-                $interpretations = json_decode($generatedText, true);
-                
-                if (json_last_error() === JSON_ERROR_NONE && is_array($interpretations)) {
-                    // Map by topic_id
-                    $mapped = [];
-                    foreach ($interpretations as $i => $item) {
-                        $topicId = isset($item['topic_id']) ? (int)$item['topic_id'] : $i;
-                        
-                        // If the LLM returned 1-based index (e.g. 1 instead of 0), detect and adjust it
-                        if (!array_key_exists($topicId, $topics) && array_key_exists($topicId - 1, $topics)) {
-                            $topicId = $topicId - 1;
-                        }
-                        
-                        $mapped[$topicId] = [
-                            'label' => $item['label'] ?? 'Topik Tidak Diketahui',
-                            'description' => $item['description'] ?? ''
-                        ];
-                    }
-                    return $mapped;
-                } else {
-                    Log::error('Failed to parse Gemini JSON response: ' . json_last_error_msg());
-                    Log::error('Raw Gemini Response: ' . $generatedText);
-                }
-            }
-            
-            return [];
-            
-        } catch (RequestException $e) {
-            Log::error('Gemini API Request Error: ' . $e->getMessage());
-            if ($e->hasResponse()) {
-                Log::error('Gemini API Error Response: ' . $e->getResponse()->getBody());
-            }
-            return [];
-        } catch (\Exception $e) {
-            Log::error('General error during LLM generation: ' . $e->getMessage());
+            throw new LlmException('Layanan AI tidak dapat dihubungi. Coba lagi beberapa saat lagi.');
+        }
+
+        if ($response->failed()) {
+            Log::error('Gemini membalas '.$response->status().': '.$response->body());
+
+            throw new LlmException($this->pesanKegagalan($response->status()));
+        }
+
+        $text = $response->json('candidates.0.content.parts.0.text');
+
+        if (! is_string($text) || $text === '') {
+            // Umumnya karena filter keamanan Gemini memblokir keluaran.
+            $alasan = $response->json('candidates.0.finishReason') ?? 'tidak diketahui';
+            Log::warning('Gemini tidak mengembalikan teks, finishReason: '.$alasan);
+
+            throw new LlmException('AI tidak menghasilkan jawaban (alasan: '.$alasan.').');
+        }
+
+        $decoded = json_decode($text, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+            Log::error('Keluaran Gemini bukan JSON valid: '.$text);
+
+            throw new LlmException('Jawaban AI tidak dapat dibaca. Coba bangkitkan ulang.');
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Metadata asal-usul yang disimpan bersama setiap narasi.
+     *
+     * Naskah skripsi perlu bisa menyebut model dan tanggal pembangkitan;
+     * tanpa ini hasilnya tidak dapat dipertanggungjawabkan.
+     */
+    public function provenance(): array
+    {
+        return [
+            'model' => $this->model(),
+            'prompt_version' => self::PROMPT_VERSION,
+            'generated_at' => now()->toIso8601String(),
+        ];
+    }
+
+    /**
+     * Beri label topik memakai kata kuncinya.
+     *
+     * @param  array  $topics  Daftar topik, tiap topik punya kunci 'words'
+     * @param  string|null  $konteks  Judul/asal korpus, membantu model memilih
+     *                                label yang sesuai domain
+     * @return array<int, array{label: string, description: string}> Dipetakan per topic_id
+     *
+     * @throws LlmException
+     */
+    public function generateTopicInterpretations(array $topics, ?string $konteks = null): array
+    {
+        if (empty($topics)) {
             return [];
         }
+
+        $prompt = "Anda ahli linguistik dan data scientist yang merangkum hasil topic modeling teks berbahasa Indonesia.\n\n";
+
+        if ($konteks) {
+            $prompt .= "Konteks korpus: {$konteks}\n\n";
+        }
+
+        $prompt .= "Berikut daftar topik beserta kata kunci teratasnya:\n\n";
+
+        foreach ($topics as $index => $topic) {
+            $id = $topic['topic_id'] ?? $index;
+            $words = $topic['words'] ?? $topic['keywords'] ?? [];
+            $prompt .= 'Topik '.$id.': '.implode(', ', array_slice($words, 0, 10))."\n";
+        }
+
+        $prompt .= "\nUntuk setiap topik berikan satu label singkat (maksimal 4 kata) dan satu kalimat "
+                 ."deskripsi yang menjelaskan makna topik itu.\n"
+                 ."Gunakan topic_id persis seperti yang tertulis di atas.\n"
+                 .'Dasarkan jawaban hanya pada kata kunci yang diberikan; jangan menambahkan informasi '
+                 .'yang tidak terlihat di sana.';
+
+        $schema = [
+            'type' => 'object',
+            'properties' => [
+                'topics' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'properties' => [
+                            'topic_id' => ['type' => 'integer'],
+                            'label' => ['type' => 'string'],
+                            'description' => ['type' => 'string'],
+                        ],
+                        'required' => ['topic_id', 'label', 'description'],
+                    ],
+                ],
+            ],
+            'required' => ['topics'],
+        ];
+
+        $hasil = $this->generate($prompt, $schema);
+
+        // Kunci topik yang sah, dipakai untuk menolak topic_id karangan.
+        $idSah = [];
+        foreach ($topics as $index => $topic) {
+            $idSah[(int) ($topic['topic_id'] ?? $index)] = true;
+        }
+
+        $mapped = [];
+
+        foreach ($hasil['topics'] ?? [] as $urutan => $item) {
+            $topicId = (int) ($item['topic_id'] ?? $urutan);
+
+            if (! isset($idSah[$topicId])) {
+                Log::warning("Gemini mengembalikan topic_id {$topicId} yang tidak ada, dilewati.");
+
+                continue;
+            }
+
+            $mapped[$topicId] = [
+                'label' => trim((string) ($item['label'] ?? '')) ?: 'Topik Tanpa Label',
+                'description' => trim((string) ($item['description'] ?? '')),
+            ];
+        }
+
+        return $mapped;
+    }
+
+    private function pesanKegagalan(int $status): string
+    {
+        return match (true) {
+            $status === 429 => 'Kuota AI harian sudah habis. Coba lagi besok atau gunakan API key lain.',
+            $status === 400 => 'Permintaan ke AI ditolak. Periksa GEMINI_API_KEY dan nama model.',
+            $status === 404 => 'Model AI "'.$this->model().'" tidak tersedia untuk API key ini.',
+            $status >= 500 => 'Layanan AI sedang bermasalah. Coba lagi beberapa menit lagi.',
+            default => 'Permintaan ke AI gagal (HTTP '.$status.').',
+        };
     }
 }

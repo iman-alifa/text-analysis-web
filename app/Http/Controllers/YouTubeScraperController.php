@@ -6,9 +6,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 class YouTubeScraperController extends Controller
 {
@@ -27,7 +27,7 @@ class YouTubeScraperController extends Controller
     {
         $apiKey = config('services.youtube.key');
 
-        if (!$apiKey) {
+        if (! $apiKey) {
             return response()->json([
                 'status' => 'no_key',
                 'message' => 'YouTube API Key belum dikonfigurasi',
@@ -64,14 +64,14 @@ class YouTubeScraperController extends Controller
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'API Key error: ' . ($errorData['error']['message'] ?? 'Unknown error'),
+                'message' => 'API Key error: '.($errorData['error']['message'] ?? 'Unknown error'),
                 'fallback_available' => $this->isYtDlpAvailable(),
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Gagal memeriksa status API: ' . $e->getMessage(),
+                'message' => 'Gagal memeriksa status API: '.$e->getMessage(),
                 'fallback_available' => $this->isYtDlpAvailable(),
             ]);
         }
@@ -92,11 +92,11 @@ class YouTubeScraperController extends Controller
         ]);
 
         $apiKey = config('services.youtube.key');
-        
-        if (!$apiKey) {
+
+        if (! $apiKey) {
             return response()->json([
                 'success' => false,
-                'message' => 'YouTube API Key belum dikonfigurasi. Silakan tambahkan YOUTUBE_API_KEY di file .env'
+                'message' => 'YouTube API Key belum dikonfigurasi. Silakan tambahkan YOUTUBE_API_KEY di file .env',
             ], 500);
         }
 
@@ -143,15 +143,15 @@ class YouTubeScraperController extends Controller
                     return response()->json([
                         'success' => false,
                         'quota_exceeded' => true,
-                        'message' => 'Kuota YouTube API habis untuk hari ini. Gunakan tab "Link Langsung" untuk tetap mengambil komentar.'
+                        'message' => 'Kuota YouTube API habis untuk hari ini. Gunakan tab "Link Langsung" untuk tetap mengambil komentar.',
                     ], 429);
                 }
 
                 Log::error('YouTube API Request Failed', [
                     'status' => $response->status(),
-                    'body' => $response->body()
+                    'body' => $response->body(),
                 ]);
-                throw new \Exception('YouTube API request failed: ' . $response->status());
+                throw new \Exception('YouTube API request failed: '.$response->status());
             }
 
             $data = $response->json();
@@ -159,25 +159,25 @@ class YouTubeScraperController extends Controller
             // Log response untuk debugging
             Log::info('YouTube Search Response', [
                 'total_results' => $data['pageInfo']['totalResults'] ?? 0,
-                'items_count' => count($data['items'] ?? [])
+                'items_count' => count($data['items'] ?? []),
             ]);
 
             // Validasi response
-            if (!isset($data['items']) || empty($data['items'])) {
+            if (! isset($data['items']) || empty($data['items'])) {
                 return response()->json([
                     'success' => true,
                     'data' => [],
                     'nextPageToken' => null,
                     'totalResults' => 0,
-                    'message' => 'Tidak ada hasil ditemukan'
+                    'message' => 'Tidak ada hasil ditemukan',
                 ]);
             }
 
             // Get video IDs dengan validasi
             $videoIds = collect($data['items'])
-                ->filter(function($item) {
+                ->filter(function ($item) {
                     // Pastikan ini video dan ada videoId
-                    return isset($item['id']['videoId']) && !empty($item['id']['videoId']);
+                    return isset($item['id']['videoId']) && ! empty($item['id']['videoId']);
                 })
                 ->pluck('id.videoId')
                 ->unique()
@@ -191,7 +191,7 @@ class YouTubeScraperController extends Controller
                     'data' => [],
                     'nextPageToken' => null,
                     'totalResults' => 0,
-                    'message' => 'Tidak ada video ditemukan dalam hasil pencarian'
+                    'message' => 'Tidak ada video ditemukan dalam hasil pencarian',
                 ]);
             }
 
@@ -204,7 +204,7 @@ class YouTubeScraperController extends Controller
 
             if ($detailsResponse->failed()) {
                 Log::warning('Failed to get video details', [
-                    'status' => $detailsResponse->status()
+                    'status' => $detailsResponse->status(),
                 ]);
             }
 
@@ -214,15 +214,16 @@ class YouTubeScraperController extends Controller
             $videos = [];
             foreach ($data['items'] as $item) {
                 // Skip jika bukan video atau tidak ada videoId
-                if (!isset($item['id']['videoId']) || empty($item['id']['videoId'])) {
+                if (! isset($item['id']['videoId']) || empty($item['id']['videoId'])) {
                     Log::debug('Skipping non-video item', [
-                        'kind' => $item['id']['kind'] ?? 'unknown'
+                        'kind' => $item['id']['kind'] ?? 'unknown',
                     ]);
+
                     continue;
                 }
 
                 $videoId = $item['id']['videoId'];
-                
+
                 // Find matching details
                 $details = collect($videoDetails['items'] ?? [])->firstWhere('id', $videoId);
 
@@ -232,24 +233,24 @@ class YouTubeScraperController extends Controller
                     'description' => $item['snippet']['description'] ?? '',
                     'channel' => $item['snippet']['channelTitle'] ?? 'Unknown',
                     'channelId' => $item['snippet']['channelId'] ?? '',
-                    'thumbnail' => $item['snippet']['thumbnails']['medium']['url'] ?? 
-                                  $item['snippet']['thumbnails']['default']['url'] ?? 
+                    'thumbnail' => $item['snippet']['thumbnails']['medium']['url'] ??
+                                  $item['snippet']['thumbnails']['default']['url'] ??
                                   'https://via.placeholder.com/320x180?text=No+Thumbnail',
-                    'thumbnailHigh' => $item['snippet']['thumbnails']['high']['url'] ?? 
+                    'thumbnailHigh' => $item['snippet']['thumbnails']['high']['url'] ??
                                       $item['snippet']['thumbnails']['medium']['url'] ?? '',
                     'publishedAt' => $item['snippet']['publishedAt'] ?? '',
-                    'duration' => isset($details['contentDetails']['duration']) 
-                                  ? $this->formatDuration($details['contentDetails']['duration']) 
+                    'duration' => isset($details['contentDetails']['duration'])
+                                  ? $this->formatDuration($details['contentDetails']['duration'])
                                   : '0:00',
-                    'viewCount' => isset($details['statistics']['viewCount']) 
-                                   ? $this->formatNumber($details['statistics']['viewCount']) 
+                    'viewCount' => isset($details['statistics']['viewCount'])
+                                   ? $this->formatNumber($details['statistics']['viewCount'])
                                    : '0',
                     'viewCountRaw' => $details['statistics']['viewCount'] ?? 0,
-                    'likeCount' => isset($details['statistics']['likeCount']) 
-                                   ? $this->formatNumber($details['statistics']['likeCount']) 
+                    'likeCount' => isset($details['statistics']['likeCount'])
+                                   ? $this->formatNumber($details['statistics']['likeCount'])
                                    : '0',
                     'commentCount' => $details['statistics']['commentCount'] ?? 0,
-                    'url' => 'https://www.youtube.com/watch?v=' . $videoId,
+                    'url' => 'https://www.youtube.com/watch?v='.$videoId,
                 ];
             }
 
@@ -262,13 +263,13 @@ class YouTubeScraperController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            Log::error('YouTube API Error: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
+            Log::error('YouTube API Error: '.$e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal mengambil data dari YouTube: ' . $e->getMessage()
+                'message' => 'Gagal mengambil data dari YouTube: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -283,23 +284,29 @@ class YouTubeScraperController extends Controller
         switch ($value) {
             case 'last_hour':
                 $now->modify('-1 hour');
+
                 return $now->format('c');
             case 'today':
                 $now->setTime(0, 0, 0);
+
                 return $now->format('c');
             case 'this_week':
                 $now->modify('-7 days');
+
                 return $now->format('c');
             case 'this_month':
                 $now->modify('-30 days');
+
                 return $now->format('c');
             case 'this_year':
                 $now->modify('-365 days');
+
                 return $now->format('c');
             default:
                 // Try parsing as a date string
                 try {
                     $date = new \DateTime($value);
+
                     return $date->format('c');
                 } catch (\Exception $e) {
                     return null;
@@ -320,25 +327,25 @@ class YouTubeScraperController extends Controller
         $videoId = $request->video_id;
 
         // If URL is provided, extract video ID
-        if (!$videoId && $request->url) {
+        if (! $videoId && $request->url) {
             $videoId = $this->extractVideoId($request->url);
-            if (!$videoId) {
+            if (! $videoId) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'URL YouTube tidak valid. Format yang didukung: youtube.com/watch?v=xxx, youtu.be/xxx, youtube.com/shorts/xxx'
+                    'message' => 'URL YouTube tidak valid. Format yang didukung: youtube.com/watch?v=xxx, youtu.be/xxx, youtube.com/shorts/xxx',
                 ], 400);
             }
         }
 
-        if (!$videoId) {
+        if (! $videoId) {
             return response()->json([
                 'success' => false,
-                'message' => 'Video ID atau URL diperlukan'
+                'message' => 'Video ID atau URL diperlukan',
             ], 400);
         }
 
         $apiKey = config('services.youtube.key');
-        
+
         // Try API first
         if ($apiKey) {
             try {
@@ -354,7 +361,7 @@ class YouTubeScraperController extends Controller
                     if (empty($data['items'])) {
                         return response()->json([
                             'success' => false,
-                            'message' => 'Video tidak ditemukan'
+                            'message' => 'Video tidak ditemukan',
                         ], 404);
                     }
 
@@ -369,7 +376,7 @@ class YouTubeScraperController extends Controller
                             'description' => $video['snippet']['description'] ?? '',
                             'channel' => $video['snippet']['channelTitle'] ?? '',
                             'channelId' => $video['snippet']['channelId'] ?? '',
-                            'thumbnail' => $video['snippet']['thumbnails']['high']['url'] ?? 
+                            'thumbnail' => $video['snippet']['thumbnails']['high']['url'] ??
                                           $video['snippet']['thumbnails']['medium']['url'] ?? '',
                             'duration' => $this->formatDuration($video['contentDetails']['duration'] ?? 'PT0S'),
                             'viewCount' => $this->formatNumber($video['statistics']['viewCount'] ?? 0),
@@ -377,8 +384,8 @@ class YouTubeScraperController extends Controller
                             'likeCount' => $this->formatNumber($video['statistics']['likeCount'] ?? 0),
                             'commentCount' => $video['statistics']['commentCount'] ?? 0,
                             'publishedAt' => $video['snippet']['publishedAt'] ?? '',
-                            'url' => 'https://www.youtube.com/watch?v=' . $video['id'],
-                        ]
+                            'url' => 'https://www.youtube.com/watch?v='.$video['id'],
+                        ],
                     ]);
                 }
 
@@ -391,7 +398,7 @@ class YouTubeScraperController extends Controller
 
                 Log::warning('YouTube API quota exceeded, trying yt-dlp fallback for video info');
             } catch (\Exception $e) {
-                Log::warning('YouTube API failed for video info, trying fallback: ' . $e->getMessage());
+                Log::warning('YouTube API failed for video info, trying fallback: '.$e->getMessage());
             }
         }
 
@@ -407,13 +414,13 @@ class YouTubeScraperController extends Controller
                     ]);
                 }
             } catch (\Exception $e) {
-                Log::error('yt-dlp video info failed: ' . $e->getMessage());
+                Log::error('yt-dlp video info failed: '.$e->getMessage());
             }
         }
 
         return response()->json([
             'success' => false,
-            'message' => 'Gagal mengambil informasi video. API key tidak tersedia atau kuota habis, dan fallback yt-dlp tidak tersedia.'
+            'message' => 'Gagal mengambil informasi video. API key tidak tersedia atau kuota habis, dan fallback yt-dlp tidak tersedia.',
         ], 500);
     }
 
@@ -436,7 +443,9 @@ class YouTubeScraperController extends Controller
 
         foreach ($request->urls as $url) {
             $url = trim($url);
-            if (empty($url)) continue;
+            if (empty($url)) {
+                continue;
+            }
 
             $videoId = $this->extractVideoId($url);
             if ($videoId) {
@@ -467,10 +476,10 @@ class YouTubeScraperController extends Controller
         $responseData = json_decode($result->getContent(), true);
 
         // Append invalid URLs info
-        if (!empty($invalidUrls)) {
+        if (! empty($invalidUrls)) {
             $responseData['invalid_urls'] = $invalidUrls;
             if ($responseData['success'] ?? false) {
-                $responseData['message'] .= ' ' . count($invalidUrls) . ' URL tidak valid diabaikan.';
+                $responseData['message'] .= ' '.count($invalidUrls).' URL tidak valid diabaikan.';
             }
         }
 
@@ -495,13 +504,13 @@ class YouTubeScraperController extends Controller
         $useYtDlp = false;
 
         // If no API key, check if yt-dlp is available
-        if (!$apiKey) {
+        if (! $apiKey) {
             if ($this->isYtDlpAvailable()) {
                 $useYtDlp = true;
             } else {
                 return response()->json([
                     'success' => false,
-                    'message' => 'YouTube API Key belum dikonfigurasi dan yt-dlp tidak tersedia.'
+                    'message' => 'YouTube API Key belum dikonfigurasi dan yt-dlp tidak tersedia.',
                 ], 500);
             }
         }
@@ -529,7 +538,7 @@ class YouTubeScraperController extends Controller
                         // Try API first
                         try {
                             $comments = $this->getVideoComments(
-                                $videoId, 
+                                $videoId,
                                 $request->comment_limit,
                                 $request->custom_limit,
                                 $request->include_replies ?? false,
@@ -537,12 +546,12 @@ class YouTubeScraperController extends Controller
                             );
                         } catch (\Exception $e) {
                             // Check if quota exceeded → fallback to yt-dlp
-                            if (str_contains($e->getMessage(), 'quotaExceeded') || 
+                            if (str_contains($e->getMessage(), 'quotaExceeded') ||
                                 str_contains($e->getMessage(), 'dailyLimitExceeded') ||
                                 str_contains($e->getMessage(), 'rateLimitExceeded')) {
-                                
+
                                 Log::warning("API quota exceeded for video {$videoId}, switching to yt-dlp fallback");
-                                
+
                                 if ($this->isYtDlpAvailable()) {
                                     $comments = $this->getCommentsViaYtDlp(
                                         $videoId,
@@ -563,11 +572,11 @@ class YouTubeScraperController extends Controller
                     $allComments = array_merge($allComments, $comments);
                     $processedVideos++;
 
-                    Log::info("Processed video {$videoId}: " . count($comments) . " comments" . ($usedFallback ? ' (via yt-dlp)' : ''));
+                    Log::info("Processed video {$videoId}: ".count($comments).' comments'.($usedFallback ? ' (via yt-dlp)' : ''));
 
                 } catch (\Exception $e) {
                     $failedVideos[] = ['id' => $videoId, 'error' => $e->getMessage()];
-                    Log::error("Failed to get comments for video {$videoId}: " . $e->getMessage());
+                    Log::error("Failed to get comments for video {$videoId}: ".$e->getMessage());
                 }
             }
 
@@ -582,12 +591,12 @@ class YouTubeScraperController extends Controller
             // Save or export comments
             $filename = $this->exportComments($allComments, $request->output_format);
 
-            $message = 'Berhasil mengambil ' . count($allComments) . ' komentar dari ' . $processedVideos . ' video';
+            $message = 'Berhasil mengambil '.count($allComments).' komentar dari '.$processedVideos.' video';
             if ($usedFallback) {
                 $message .= ' (menggunakan mode fallback)';
             }
-            if (!empty($failedVideos)) {
-                $message .= '. Gagal mengambil komentar dari ' . count($failedVideos) . ' video.';
+            if (! empty($failedVideos)) {
+                $message .= '. Gagal mengambil komentar dari '.count($failedVideos).' video.';
             }
 
             return response()->json([
@@ -602,15 +611,15 @@ class YouTubeScraperController extends Controller
                     'used_fallback' => $usedFallback,
                     'filename' => $filename,
                     'download_url' => route('youtube.download', ['filename' => $filename]),
-                ]
+                ],
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Scraping Error: ' . $e->getMessage());
-            
+            Log::error('Scraping Error: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
-                'message' => 'Gagal mengambil komentar: ' . $e->getMessage()
+                'message' => 'Gagal mengambil komentar: '.$e->getMessage(),
             ], 500);
         }
     }
@@ -622,9 +631,9 @@ class YouTubeScraperController extends Controller
     {
         $comments = [];
         $pageToken = null;
-        
+
         // Tentukan limit
-        $maxComments = match($limitType) {
+        $maxComments = match ($limitType) {
             '100' => 100,
             '500' => 500,
             'all' => PHP_INT_MAX,
@@ -656,7 +665,7 @@ class YouTubeScraperController extends Controller
                     $errorData = $response->json();
                     $errorMessage = $errorData['error']['message'] ?? 'Unknown error';
                     $errorReason = $errorData['error']['errors'][0]['reason'] ?? '';
-                    
+
                     // Jika komentar disabled, throw exception
                     if (str_contains($errorMessage, 'disabled')) {
                         throw new \Exception('Komentar dinonaktifkan untuk video ini');
@@ -664,25 +673,25 @@ class YouTubeScraperController extends Controller
 
                     // Propagate quota errors for fallback handling
                     if ($errorReason === 'quotaExceeded' || $errorReason === 'dailyLimitExceeded' || $errorReason === 'rateLimitExceeded') {
-                        throw new \Exception($errorReason . ': ' . $errorMessage);
+                        throw new \Exception($errorReason.': '.$errorMessage);
                     }
-                    
-                    throw new \Exception('API Error: ' . $errorMessage);
+
+                    throw new \Exception('API Error: '.$errorMessage);
                 }
 
                 $data = $response->json();
 
-                if (!isset($data['items'])) {
+                if (! isset($data['items'])) {
                     break;
                 }
 
                 foreach ($data['items'] ?? [] as $item) {
-                    if (!isset($item['snippet']['topLevelComment']['snippet'])) {
+                    if (! isset($item['snippet']['topLevelComment']['snippet'])) {
                         continue;
                     }
 
                     $topComment = $item['snippet']['topLevelComment']['snippet'];
-                    
+
                     $comments[] = [
                         'video_id' => $videoId,
                         'comment_id' => $item['id'] ?? '',
@@ -707,18 +716,18 @@ class YouTubeScraperController extends Controller
 
             } catch (\Exception $e) {
                 // Don't retry on quota exceeded — propagate immediately
-                if (str_contains($e->getMessage(), 'quotaExceeded') || 
+                if (str_contains($e->getMessage(), 'quotaExceeded') ||
                     str_contains($e->getMessage(), 'dailyLimitExceeded') ||
                     str_contains($e->getMessage(), 'rateLimitExceeded')) {
                     throw $e;
                 }
 
                 $retries++;
-                
+
                 if ($retries >= $maxRetries) {
                     throw $e;
                 }
-                
+
                 // Wait before retry
                 sleep(2);
                 Log::warning("Retry {$retries}/{$maxRetries} for video {$videoId}");
@@ -735,7 +744,7 @@ class YouTubeScraperController extends Controller
     private function getCommentReplies($commentId, $apiKey)
     {
         $replies = [];
-        
+
         try {
             $response = Http::timeout(30)->get('https://www.googleapis.com/youtube/v3/comments', [
                 'part' => 'snippet',
@@ -747,10 +756,10 @@ class YouTubeScraperController extends Controller
 
             if ($response->successful()) {
                 $data = $response->json();
-                
+
                 foreach ($data['items'] ?? [] as $item) {
                     $snippet = $item['snippet'] ?? [];
-                    
+
                     $replies[] = [
                         'video_id' => $snippet['videoId'] ?? '',
                         'comment_id' => $item['id'] ?? '',
@@ -766,7 +775,7 @@ class YouTubeScraperController extends Controller
                 }
             }
         } catch (\Exception $e) {
-            Log::warning("Failed to get replies for comment {$commentId}: " . $e->getMessage());
+            Log::warning("Failed to get replies for comment {$commentId}: ".$e->getMessage());
         }
 
         return $replies;
@@ -783,7 +792,8 @@ class YouTubeScraperController extends Controller
     {
         try {
             $result = shell_exec('yt-dlp --version 2>&1');
-            return !empty($result) && !str_contains($result, 'not recognized') && !str_contains($result, 'not found');
+
+            return ! empty($result) && ! str_contains($result, 'not recognized') && ! str_contains($result, 'not found');
         } catch (\Exception $e) {
             return false;
         }
@@ -795,16 +805,16 @@ class YouTubeScraperController extends Controller
     private function getVideoInfoViaYtDlp($videoId)
     {
         $url = "https://www.youtube.com/watch?v={$videoId}";
-        $command = 'yt-dlp --dump-json --no-download --no-playlist ' . escapeshellarg($url) . ' 2>&1';
+        $command = 'yt-dlp --dump-json --no-download --no-playlist '.escapeshellarg($url).' 2>&1';
 
         $output = shell_exec($command);
 
-        if (!$output) {
+        if (! $output) {
             return null;
         }
 
         $data = json_decode($output, true);
-        if (!$data) {
+        if (! $data) {
             return null;
         }
 
@@ -815,13 +825,13 @@ class YouTubeScraperController extends Controller
             'channel' => $data['uploader'] ?? $data['channel'] ?? 'Unknown',
             'channelId' => $data['channel_id'] ?? '',
             'thumbnail' => $data['thumbnail'] ?? '',
-            'duration' => $this->formatDuration('PT' . intval($data['duration'] ?? 0) . 'S'),
+            'duration' => $this->formatDuration('PT'.intval($data['duration'] ?? 0).'S'),
             'viewCount' => $this->formatNumber($data['view_count'] ?? 0),
             'viewCountRaw' => $data['view_count'] ?? 0,
             'likeCount' => $this->formatNumber($data['like_count'] ?? 0),
             'commentCount' => $data['comment_count'] ?? 0,
-            'publishedAt' => isset($data['upload_date']) 
-                ? substr($data['upload_date'], 0, 4) . '-' . substr($data['upload_date'], 4, 2) . '-' . substr($data['upload_date'], 6, 2) . 'T00:00:00Z'
+            'publishedAt' => isset($data['upload_date'])
+                ? substr($data['upload_date'], 0, 4).'-'.substr($data['upload_date'], 4, 2).'-'.substr($data['upload_date'], 6, 2).'T00:00:00Z'
                 : '',
             'url' => $url,
         ];
@@ -832,7 +842,7 @@ class YouTubeScraperController extends Controller
      */
     private function getCommentsViaYtDlp($videoId, $limitType = '100', $customLimit = null)
     {
-        $maxComments = match($limitType) {
+        $maxComments = match ($limitType) {
             '100' => 100,
             '500' => 500,
             'all' => 0, // 0 means no limit in yt-dlp
@@ -841,26 +851,26 @@ class YouTubeScraperController extends Controller
         };
 
         $url = "https://www.youtube.com/watch?v={$videoId}";
-        
+
         $command = 'yt-dlp --write-comments --skip-download --no-write-info-json --dump-json --no-playlist';
-        
+
         if ($maxComments > 0) {
-            $command .= ' --extractor-args "youtube:max_comments=' . $maxComments . '"';
+            $command .= ' --extractor-args "youtube:max_comments='.$maxComments.'"';
         }
-        
-        $command .= ' ' . escapeshellarg($url) . ' 2>&1';
+
+        $command .= ' '.escapeshellarg($url).' 2>&1';
 
         Log::info("Running yt-dlp command for video {$videoId}");
 
         $output = shell_exec($command);
 
-        if (!$output) {
+        if (! $output) {
             throw new \Exception("yt-dlp tidak mengembalikan output untuk video {$videoId}");
         }
 
         $data = json_decode($output, true);
 
-        if (!$data || !isset($data['comments'])) {
+        if (! $data || ! isset($data['comments'])) {
             // Try to check if comments are disabled
             if ($data && empty($data['comments'])) {
                 return [];
@@ -874,13 +884,13 @@ class YouTubeScraperController extends Controller
                 'video_id' => $videoId,
                 'comment_id' => $comment['id'] ?? '',
                 'author' => $comment['author'] ?? 'Unknown',
-                'author_channel_url' => isset($comment['author_id']) 
-                    ? 'https://www.youtube.com/channel/' . $comment['author_id'] 
+                'author_channel_url' => isset($comment['author_id'])
+                    ? 'https://www.youtube.com/channel/'.$comment['author_id']
                     : '',
                 'text' => $comment['text'] ?? '',
                 'like_count' => $comment['like_count'] ?? 0,
-                'published_at' => isset($comment['timestamp']) 
-                    ? date('c', $comment['timestamp']) 
+                'published_at' => isset($comment['timestamp'])
+                    ? date('c', $comment['timestamp'])
                     : '',
                 'updated_at' => '',
                 'reply_count' => 0,
@@ -939,11 +949,11 @@ class YouTubeScraperController extends Controller
      */
     private function exportComments($comments, $format)
     {
-        $filename = 'youtube_comments_' . date('YmdHis') . '.' . $format;
-        $path = storage_path('app/public/exports/' . $filename);
+        $filename = 'youtube_comments_'.date('YmdHis').'.'.$format;
+        $path = storage_path('app/public/exports/'.$filename);
 
         // Pastikan direktori exists
-        if (!file_exists(dirname($path))) {
+        if (! file_exists(dirname($path))) {
             mkdir(dirname($path), 0755, true);
         }
 
@@ -968,23 +978,23 @@ class YouTubeScraperController extends Controller
     private function exportToCsv($comments, $path)
     {
         $file = fopen($path, 'w');
-        
+
         // Add BOM untuk support UTF-8 di Excel
         fprintf($file, chr(0xEF).chr(0xBB).chr(0xBF));
-        
+
         // Header
         fputcsv($file, [
-            'No', 
-            'Video ID', 
+            'No',
+            'Video ID',
             'Comment ID',
-            'Author', 
-            'Comment', 
-            'Likes', 
-            'Published At', 
+            'Author',
+            'Comment',
+            'Likes',
+            'Published At',
             'Updated At',
-            'Reply Count'
+            'Reply Count',
         ]);
-        
+
         // Data
         foreach ($comments as $index => $comment) {
             fputcsv($file, [
@@ -999,13 +1009,13 @@ class YouTubeScraperController extends Controller
                 $comment['reply_count'] ?? 0,
             ]);
         }
-        
+
         fclose($file);
     }
 
     private function exportToExcel($comments, $path)
     {
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('YouTube Comments');
 
@@ -1019,7 +1029,7 @@ class YouTubeScraperController extends Controller
             'Likes',
             'Published At',
             'Updated At',
-            'Reply Count'
+            'Reply Count',
         ];
 
         $sheet->fromArray($headers, null, 'A1');
@@ -1078,11 +1088,11 @@ class YouTubeScraperController extends Controller
         $sheet->getStyle("A2:A{$row}")
             ->getAlignment()
             ->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        
+
         $sheet->getStyle("F2:F{$row}")
             ->getAlignment()
             ->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        
+
         $sheet->getStyle("I2:I{$row}")
             ->getAlignment()
             ->setHorizontal(Alignment::HORIZONTAL_CENTER);
@@ -1100,21 +1110,21 @@ class YouTubeScraperController extends Controller
         $content = "==============================================\n";
         $content .= "       YouTube Comments Export\n";
         $content .= "==============================================\n";
-        $content .= "Total: " . count($comments) . " comments\n";
-        $content .= "Generated: " . date('Y-m-d H:i:s') . "\n";
+        $content .= 'Total: '.count($comments)." comments\n";
+        $content .= 'Generated: '.date('Y-m-d H:i:s')."\n";
         $content .= "==============================================\n\n";
 
         foreach ($comments as $index => $comment) {
-            $content .= "Comment #" . ($index + 1) . "\n";
-            $content .= str_repeat("-", 80) . "\n";
-            $content .= "Video ID    : " . ($comment['video_id'] ?? '') . "\n";
-            $content .= "Author      : " . ($comment['author'] ?? '') . "\n";
-            $content .= "Likes       : " . ($comment['like_count'] ?? 0) . "\n";
-            $content .= "Published   : " . ($comment['published_at'] ?? '') . "\n";
-            $content .= "Replies     : " . ($comment['reply_count'] ?? 0) . "\n";
+            $content .= 'Comment #'.($index + 1)."\n";
+            $content .= str_repeat('-', 80)."\n";
+            $content .= 'Video ID    : '.($comment['video_id'] ?? '')."\n";
+            $content .= 'Author      : '.($comment['author'] ?? '')."\n";
+            $content .= 'Likes       : '.($comment['like_count'] ?? 0)."\n";
+            $content .= 'Published   : '.($comment['published_at'] ?? '')."\n";
+            $content .= 'Replies     : '.($comment['reply_count'] ?? 0)."\n";
             $content .= "\nComment:\n";
-            $content .= ($comment['text'] ?? '') . "\n";
-            $content .= "\n" . str_repeat("=", 80) . "\n\n";
+            $content .= ($comment['text'] ?? '')."\n";
+            $content .= "\n".str_repeat('=', 80)."\n\n";
         }
 
         file_put_contents($path, $content);
@@ -1123,15 +1133,37 @@ class YouTubeScraperController extends Controller
     /**
      * Download file hasil scraping
      */
+    /**
+     * Unduh berkas hasil scraping.
+     *
+     * Nama berkas datang dari URL, jadi harus dibatasi ketat: sebelumnya ia
+     * disambung langsung ke path sehingga nama seperti '..%2F..%2F.env' bisa
+     * keluar dari direktori exports. Karena respons memakai
+     * deleteFileAfterSend(), celah itu bukan hanya membocorkan berkas tetapi
+     * juga menghapusnya.
+     */
     public function download($filename)
     {
-        $path = storage_path('app/public/exports/' . $filename);
+        $direktori = storage_path('app/public/exports');
 
-        if (!file_exists($path)) {
+        // basename() membuang komponen path apa pun, lalu polanya dibatasi
+        // pada nama yang memang dihasilkan exportComments().
+        $filename = basename($filename);
+
+        if (! preg_match('/^[A-Za-z0-9._-]+\.(csv|xlsx|txt)$/', $filename)) {
             abort(404, 'File tidak ditemukan');
         }
 
-        return response()->download($path)->deleteFileAfterSend(true);
+        $path = $direktori.DIRECTORY_SEPARATOR.$filename;
+        $realPath = realpath($path);
+
+        // Penjagaan terakhir: pastikan berkas yang diselesaikan benar-benar
+        // berada di dalam direktori exports (mis. bila ada symlink).
+        if ($realPath === false || ! str_starts_with($realPath, realpath($direktori).DIRECTORY_SEPARATOR)) {
+            abort(404, 'File tidak ditemukan');
+        }
+
+        return response()->download($realPath)->deleteFileAfterSend(true);
     }
 
     /**
@@ -1141,7 +1173,7 @@ class YouTubeScraperController extends Controller
     {
         try {
             preg_match('/PT(\d+H)?(\d+M)?(\d+S)?/', $duration, $matches);
-            
+
             $hours = isset($matches[1]) ? rtrim($matches[1], 'H') : 0;
             $minutes = isset($matches[2]) ? rtrim($matches[2], 'M') : 0;
             $seconds = isset($matches[3]) ? rtrim($matches[3], 'S') : 0;
@@ -1149,6 +1181,7 @@ class YouTubeScraperController extends Controller
             if ($hours > 0) {
                 return sprintf('%d:%02d:%02d', $hours, $minutes, $seconds);
             }
+
             return sprintf('%d:%02d', $minutes, $seconds);
         } catch (\Exception $e) {
             return '0:00';
@@ -1161,16 +1194,17 @@ class YouTubeScraperController extends Controller
     private function formatNumber($number)
     {
         $number = intval($number);
-        
+
         if ($number >= 1000000000) {
-            return round($number / 1000000000, 1) . 'B';
+            return round($number / 1000000000, 1).'B';
         }
         if ($number >= 1000000) {
-            return round($number / 1000000, 1) . 'M';
+            return round($number / 1000000, 1).'M';
         }
         if ($number >= 1000) {
-            return round($number / 1000, 1) . 'K';
+            return round($number / 1000, 1).'K';
         }
+
         return $number;
     }
 }

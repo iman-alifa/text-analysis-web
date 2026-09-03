@@ -14,9 +14,9 @@ class FileProcessingService
      */
     public function saveFile(UploadedFile $file, $directory = 'uploads')
     {
-        $filename = time() . '_' . $file->getClientOriginalName();
+        $filename = time().'_'.$file->getClientOriginalName();
         $path = $file->storeAs($directory, $filename, 'public');
-        
+
         return [
             'path' => $path,
             'filename' => $filename,
@@ -33,18 +33,18 @@ class FileProcessingService
     public function processFile(UploadedFile $file)
     {
         $extension = strtolower($file->getClientOriginalExtension());
-        
+
         switch ($extension) {
             case 'xlsx':
             case 'xls':
                 return $this->previewExcelFile($file->getRealPath());
-                
+
             case 'csv':
                 return $this->previewCsvFile($file->getRealPath());
-                
+
             case 'txt':
                 return $this->previewTxtFile($file->getRealPath());
-                
+
             default:
                 throw new \Exception('Unsupported file type');
         }
@@ -57,18 +57,18 @@ class FileProcessingService
     public function processFileWithConfig(UploadedFile $file, array $config)
     {
         $extension = strtolower($file->getClientOriginalExtension());
-        
+
         switch ($extension) {
             case 'xlsx':
             case 'xls':
                 return $this->processExcelWithConfig($file->getRealPath(), $config);
-                
+
             case 'csv':
                 return $this->processCsvWithConfig($file->getRealPath(), $config);
-                
+
             case 'txt':
                 return $this->processTxtWithConfig($file->getRealPath(), $config);
-                
+
             default:
                 throw new \Exception('Unsupported file type');
         }
@@ -92,8 +92,8 @@ class FileProcessingService
         $data = $worksheet->toArray();
 
         // Remove empty rows
-        $data = array_filter($data, function($row) {
-            return !empty(array_filter($row));
+        $data = array_filter($data, function ($row) {
+            return ! empty(array_filter($row));
         });
         $data = array_values($data);
 
@@ -133,7 +133,7 @@ class FileProcessingService
      */
     private function previewCsvFile($filePath, $delimiter = ',')
     {
-        $reader = new CsvReader();
+        $reader = new CsvReader;
         $reader->setDelimiter($delimiter);
         $reader->setEnclosure('"');
         $reader->setSheetIndex(0);
@@ -143,8 +143,8 @@ class FileProcessingService
         $data = $worksheet->toArray();
 
         // Remove empty rows
-        $data = array_filter($data, function($row) {
-            return !empty(array_filter($row));
+        $data = array_filter($data, function ($row) {
+            return ! empty(array_filter($row));
         });
         $data = array_values($data);
 
@@ -188,7 +188,7 @@ class FileProcessingService
 
         $samples = array_slice($data, $headerRow + 1, 0, 50);
         $samples = array_values(array_filter($samples, function ($row) {
-            return !empty(array_filter($row, fn ($v) => $v !== null && $v !== ''));
+            return ! empty(array_filter($row, fn ($v) => $v !== null && $v !== ''));
         }));
 
         $bestIndex = null;
@@ -247,14 +247,14 @@ class FileProcessingService
     private function previewTxtFile($filePath)
     {
         $content = file_get_contents($filePath);
-        
+
         // Split by newline for preview
         $lines = explode("\n", $content);
         $lines = array_filter(array_map('trim', $lines));
         $lines = array_values($lines);
-        
+
         $sample = array_slice($lines, 0, 5);
-        
+
         return [
             'total' => count($lines),
             'valid' => count($lines),
@@ -268,63 +268,63 @@ class FileProcessingService
     private function processExcelWithConfig($filePath, array $config)
     {
         $spreadsheet = IOFactory::load($filePath);
-        
+
         // Select sheet
         $sheetIndex = $config['excel_sheet'] ?? 0;
-        $spreadsheet->setActiveSheetIndex((int)$sheetIndex);
+        $spreadsheet->setActiveSheetIndex((int) $sheetIndex);
         $worksheet = $spreadsheet->getActiveSheet();
-        
+
         $data = $worksheet->toArray();
-        
+
         // Remove empty rows
-        $data = array_filter($data, function($row) {
-            return !empty(array_filter($row));
+        $data = array_filter($data, function ($row) {
+            return ! empty(array_filter($row));
         });
         $data = array_values($data);
-        
+
         $texts = [];
         $hasHeader = isset($config['file_has_header']) && $config['file_has_header'] == 'on';
-        
+
         if ($hasHeader) {
             // Use column name
             $columnName = $config['text_column_name'] ?? null;
-            
-            if (empty($data) || !$columnName) {
+
+            if (empty($data) || ! $columnName) {
                 return ['texts' => [], 'total' => 0];
             }
-            
+
             $headers = $data[0];
             $columnIndex = array_search($columnName, $headers);
-            
+
             if ($columnIndex === false) {
                 throw new \Exception("Column '$columnName' not found");
             }
-            
+
             // Extract text from column (skip header)
             for ($i = 1; $i < count($data); $i++) {
                 $text = $data[$i][$columnIndex] ?? '';
                 $text = trim($text);
-                if (!empty($text)) {
+                if (! empty($text)) {
                     $texts[] = $text;
                 }
             }
-            
+
         } else {
             // Use column index
-            $columnIndex = isset($config['text_column_index']) 
-                ? (int)$config['text_column_index'] - 1  // Convert to 0-based
+            $columnIndex = isset($config['text_column_index'])
+                ? (int) $config['text_column_index'] - 1  // Convert to 0-based
                 : 0;
-            
+
             // Extract text from column
             foreach ($data as $row) {
                 $text = $row[$columnIndex] ?? '';
                 $text = trim($text);
-                if (!empty($text)) {
+                if (! empty($text)) {
                     $texts[] = $text;
                 }
             }
         }
-        
+
         return [
             'texts' => $texts,
             'total' => count($texts),
@@ -338,69 +338,69 @@ class FileProcessingService
     {
         // Get delimiter
         $delimiter = $config['csv_delimiter'] ?? ',';
-        
+
         // Handle special characters
         if ($delimiter === '\t') {
             $delimiter = "\t";
         }
-        
-        $reader = new CsvReader();
+
+        $reader = new CsvReader;
         $reader->setDelimiter($delimiter);
         $reader->setEnclosure('"');
         $reader->setSheetIndex(0);
-        
+
         $spreadsheet = $reader->load($filePath);
         $worksheet = $spreadsheet->getActiveSheet();
         $data = $worksheet->toArray();
-        
+
         // Remove empty rows
-        $data = array_filter($data, function($row) {
-            return !empty(array_filter($row));
+        $data = array_filter($data, function ($row) {
+            return ! empty(array_filter($row));
         });
         $data = array_values($data);
-        
+
         $texts = [];
         $hasHeader = isset($config['file_has_header']) && $config['file_has_header'] == 'on';
-        
+
         if ($hasHeader) {
             // Use column name
             $columnName = $config['text_column_name'] ?? null;
-            
-            if (empty($data) || !$columnName) {
+
+            if (empty($data) || ! $columnName) {
                 return ['texts' => [], 'total' => 0];
             }
-            
+
             $headers = $data[0];
             $columnIndex = array_search($columnName, $headers);
-            
+
             if ($columnIndex === false) {
                 throw new \Exception("Column '$columnName' not found");
             }
-            
+
             // Extract text (skip header)
             for ($i = 1; $i < count($data); $i++) {
                 $text = $data[$i][$columnIndex] ?? '';
                 $text = trim($text);
-                if (!empty($text)) {
+                if (! empty($text)) {
                     $texts[] = $text;
                 }
             }
-            
+
         } else {
             // Use column index
-            $columnIndex = isset($config['text_column_index']) 
-                ? (int)$config['text_column_index'] - 1
+            $columnIndex = isset($config['text_column_index'])
+                ? (int) $config['text_column_index'] - 1
                 : 0;
-            
+
             foreach ($data as $row) {
                 $text = $row[$columnIndex] ?? '';
                 $text = trim($text);
-                if (!empty($text)) {
+                if (! empty($text)) {
                     $texts[] = $text;
                 }
             }
         }
-        
+
         return [
             'texts' => $texts,
             'total' => count($texts),
@@ -414,48 +414,48 @@ class FileProcessingService
     {
         // Get encoding
         $encoding = $config['txt_encoding'] ?? 'utf-8';
-        
+
         // Read file
         $content = file_get_contents($filePath);
-        
+
         // Convert encoding if needed
         if (strtolower($encoding) !== 'utf-8') {
             $content = mb_convert_encoding($content, 'UTF-8', $encoding);
         }
-        
+
         // Get separator
         $separator = $config['txt_separator'] ?? 'newline';
-        
+
         $texts = [];
-        
+
         switch ($separator) {
             case 'newline':
                 $texts = explode("\n", $content);
                 break;
-                
+
             case 'period':
                 $texts = explode('.', $content);
                 break;
-                
+
             case 'double_newline':
                 $texts = preg_split('/\n\s*\n/', $content);
                 break;
-                
+
             case 'custom':
                 $customSeparator = $config['txt_custom_separator'] ?? "\n";
                 $texts = explode($customSeparator, $content);
                 break;
-                
+
             default:
                 $texts = explode("\n", $content);
         }
-        
+
         // Clean up
-        $texts = array_filter(array_map('trim', $texts), function($text) {
-            return !empty($text);
+        $texts = array_filter(array_map('trim', $texts), function ($text) {
+            return ! empty($text);
         });
         $texts = array_values($texts);
-        
+
         return [
             'texts' => $texts,
             'total' => count($texts),

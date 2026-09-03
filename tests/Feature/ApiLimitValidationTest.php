@@ -40,14 +40,14 @@ class ApiLimitValidationTest extends TestCase
     public function test_menolak_jumlah_teks_melebihi_batas(): void
     {
         $this->submit(implode("\n", array_map(fn ($i) => "baris {$i}", range(1, 6))))
-             ->assertSessionHasErrors('manual_text');
+            ->assertSessionHasErrors('manual_text');
 
         $this->assertSame(0, TextAnalysis::count());
     }
 
     public function test_menyebut_baris_yang_terlalu_panjang(): void
     {
-        $response = $this->submit("pendek\n" . str_repeat('a', 25));
+        $response = $this->submit("pendek\n".str_repeat('a', 25));
 
         $response->assertSessionHasErrors('manual_text');
 

@@ -41,7 +41,20 @@ return [
      */
     'gemini' => [
         'key' => env('GEMINI_API_KEY'),
+
+        // Sengaja dipatok versinya, bukan alias 'gemini-flash-latest': narasi
+        // yang dikutip di naskah harus bisa direproduksi berbulan-bulan
+        // kemudian, dan alias -latest berubah tanpa pemberitahuan.
+        //
+        // Jangan otomatis mengejar versi terbaru. Diuji 3 Sep 2026 dengan API
+        // key proyek ini: gemini-3.5-flash membalas 200, gemini-3.8-flash
+        // membalas 503.
         'model' => env('GEMINI_MODEL', 'gemini-3.5-flash'),
+
+        // Narasi hasil analisis lebih panjang daripada label topik, jadi
+        // batas 30 detik yang lama kadang terpotong.
+        'timeout' => (int) env('GEMINI_TIMEOUT', 45),
+        'retry' => (int) env('GEMINI_RETRY', 2),
     ],
 
     'youtube' => [

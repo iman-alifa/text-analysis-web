@@ -43,12 +43,12 @@ class NlpStatusTest extends TestCase
         ]), 200)]);
 
         $this->actingAs(User::factory()->create())
-             ->getJson(route('analysis.nlp-status'))
-             ->assertOk()
-             ->assertJsonPath('all_ready', false)
-             ->assertJsonPath('weights_loaded.topic', false)
-             ->assertJsonPath('model.sentiment_source', 'crypter70/IndoBERT-Sentiment-Analysis')
-             ->assertJsonPath('model.sentiment_review_threshold', 0.94);
+            ->getJson(route('analysis.nlp-status'))
+            ->assertOk()
+            ->assertJsonPath('all_ready', false)
+            ->assertJsonPath('weights_loaded.topic', false)
+            ->assertJsonPath('model.sentiment_source', 'crypter70/IndoBERT-Sentiment-Analysis')
+            ->assertJsonPath('model.sentiment_review_threshold', 0.94);
     }
 
     public function test_semua_siap_saat_seluruh_bobot_termuat(): void
@@ -58,9 +58,9 @@ class NlpStatusTest extends TestCase
         ]), 200)]);
 
         $this->actingAs(User::factory()->create())
-             ->getJson(route('analysis.nlp-status'))
-             ->assertOk()
-             ->assertJsonPath('all_ready', true);
+            ->getJson(route('analysis.nlp-status'))
+            ->assertOk()
+            ->assertJsonPath('all_ready', true);
     }
 
     public function test_membedakan_layanan_mati_dari_model_belum_siap(): void
@@ -68,9 +68,9 @@ class NlpStatusTest extends TestCase
         Http::fake(['*/health' => Http::response('', 500)]);
 
         $this->actingAs(User::factory()->create())
-             ->getJson(route('analysis.nlp-status'))
-             ->assertStatus(503)
-             ->assertJsonPath('success', false);
+            ->getJson(route('analysis.nlp-status'))
+            ->assertStatus(503)
+            ->assertJsonPath('success', false);
     }
 
     public function test_pemanasan_melaporkan_hasilnya(): void
@@ -86,10 +86,10 @@ class NlpStatusTest extends TestCase
         ], 200)]);
 
         $this->actingAs(User::factory()->create())
-             ->postJson(route('analysis.warm-up'))
-             ->assertOk()
-             ->assertJsonPath('all_ready', true)
-             ->assertJsonPath('message', 'Semua model siap.');
+            ->postJson(route('analysis.warm-up'))
+            ->assertOk()
+            ->assertJsonPath('all_ready', true)
+            ->assertJsonPath('message', 'Semua model siap.');
     }
 
     public function test_pemanasan_sebagian_tidak_dianggap_gagal_total(): void
@@ -103,10 +103,10 @@ class NlpStatusTest extends TestCase
         ], 200)]);
 
         $this->actingAs(User::factory()->create())
-             ->postJson(route('analysis.warm-up'))
-             ->assertOk()
-             ->assertJsonPath('all_ready', false)
-             ->assertJsonPath('success', true);
+            ->postJson(route('analysis.warm-up'))
+            ->assertOk()
+            ->assertJsonPath('all_ready', false)
+            ->assertJsonPath('success', true);
     }
 
     public function test_status_hanya_untuk_pengguna_yang_login(): void

@@ -10,6 +10,9 @@ use Illuminate\Http\Request;
 
 class AnalysisFeedbackController extends Controller
 {
+    /** Jumlah baris koreksi per halaman. */
+    private const PER_PAGE = 25;
+
     public function __construct(
         private TrainingItemService $trainingItemService,
         private ModelEvaluationService $modelEvaluationService
@@ -30,12 +33,20 @@ class AnalysisFeedbackController extends Controller
             $this->trainingItemService->extractJsonToTable($analysis);
         }
 
-        // Show low-confidence items first so the user sees what most needs review.
+        // Evaluasi memerlukan seluruh baris, tetapi yang dirender hanya satu
+        // halaman: menampilkan ratusan kartu koreksi sekaligus membuat halaman
+        // ini mencapai 2,1 MB dan berat dibuka saat mengoreksi.
+        $allItems = $analysis->trainingItems()->get();
+        $correctedItems = $allItems->where('is_corrected', true)->values();
+        $evaluation = $this->modelEvaluationService->buildEvaluationSummary($analysis, $correctedItems, $allItems);
+
+        // Baris paling tidak yakin didahulukan supaya yang paling perlu
+        // ditinjau langsung terlihat.
         $items = $analysis->trainingItems()
             ->orderBy('confidence_score', 'asc')
-            ->get();
-        $correctedItems = $items->where('is_corrected', true)->values();
-        $evaluation = $this->modelEvaluationService->buildEvaluationSummary($analysis, $correctedItems, $items);
+            ->orderBy('id')
+            ->paginate(self::PER_PAGE)
+            ->withQueryString();
 
         // Count how many corrections this user has already made (across all analyses).
         $userCorrectionCount = TrainingItem::where('verified_by', auth()->id())
@@ -55,11 +66,11 @@ class AnalysisFeedbackController extends Controller
         $this->authorize('view', $analysis);
 
         $request->validate([
-            'corrections'                         => 'required|array|min:1',
-            'corrections.*.item_id'               => 'required|integer|exists:training_items,id',
-            'corrections.*.corrected_sentiment'   => 'nullable|in:positive,negative,neutral',
-            'corrections.*.corrected_aspects'     => 'nullable|string',
-            'corrections.*.correction_notes'      => 'nullable|string|max:500',
+            'corrections' => 'required|array|min:1',
+            'corrections.*.item_id' => 'required|integer|exists:training_items,id',
+            'corrections.*.corrected_sentiment' => 'nullable|in:positive,negative,neutral',
+            'corrections.*.corrected_aspects' => 'nullable|string',
+            'corrections.*.correction_notes' => 'nullable|string|max:500',
         ]);
 
         $userId = auth()->id();
@@ -70,11 +81,13 @@ class AnalysisFeedbackController extends Controller
                 ->where('text_analysis_id', $analysis->id)
                 ->first();
 
-            if (!$item) continue;
+            if (! $item) {
+                continue;
+            }
 
             // Parse aspects from comma-separated string
             $aspects = null;
-            if (!empty($correction['corrected_aspects'])) {
+            if (! empty($correction['corrected_aspects'])) {
                 $aspects = array_values(array_filter(
                     array_map('trim', explode(',', $correction['corrected_aspects']))
                 ));
@@ -82,18 +95,24 @@ class AnalysisFeedbackController extends Controller
 
             $item->update([
                 'corrected_sentiment' => $correction['corrected_sentiment'] ?? $item->predicted_sentiment,
-                'corrected_aspects'   => $aspects,
-                'correction_notes'    => $correction['correction_notes'] ?? null,
-                'is_corrected'        => true,
-                'verified_at'         => now(),
-                'verified_by'         => $userId,
+                'corrected_aspects' => $aspects,
+                'correction_notes' => $correction['correction_notes'] ?? null,
+                'is_corrected' => true,
+                'verified_at' => now(),
+                'verified_by' => $userId,
             ]);
 
             $savedCount++;
         }
 
+        // Kembali ke halaman koreksi yang sama, bukan ke halaman hasil: dengan
+        // daftar yang dipaginasi, pengguna biasanya melanjutkan ke halaman
+        // berikutnya alih-alih berhenti setelah satu batch koreksi.
         return redirect()
-            ->route('analysis.show', $analysis->id)
+            ->route('analysis.feedback', [
+                'id' => $analysis->id,
+                'page' => $request->integer('page') ?: null,
+            ])
             ->with('feedback_success', "Terima kasih! {$savedCount} koreksi Anda telah disimpan dan akan membantu meningkatkan akurasi model.");
     }
 }

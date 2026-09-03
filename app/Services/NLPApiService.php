@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
+use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Exception;
 
 class NLPApiService
 {
@@ -12,7 +12,9 @@ class NLPApiService
     public const MIN_RETRAIN_SAMPLES = 10;
 
     private string $apiUrl;
+
     private int $timeout;
+
     private int $batchSize;
 
     public function __construct()
@@ -52,7 +54,8 @@ class NLPApiService
             return $response->successful() ? $response->json() : null;
 
         } catch (Exception $e) {
-            Log::warning('Health check NLP API gagal: ' . $e->getMessage());
+            Log::warning('Health check NLP API gagal: '.$e->getMessage());
+
             return null;
         }
     }
@@ -62,8 +65,9 @@ class NLPApiService
         try {
             $response = Http::timeout($this->timeout)->post("{$this->apiUrl}/api/warmup");
 
-            if (!$response->successful()) {
-                Log::warning('Pemanasan model NLP gagal: ' . $response->status());
+            if (! $response->successful()) {
+                Log::warning('Pemanasan model NLP gagal: '.$response->status());
+
                 return false;
             }
 
@@ -77,7 +81,8 @@ class NLPApiService
 
             return $siap;
         } catch (Exception $e) {
-            Log::warning('Pemanasan model NLP dilewati: ' . $e->getMessage());
+            Log::warning('Pemanasan model NLP dilewati: '.$e->getMessage());
+
             return false;
         }
     }
@@ -86,28 +91,28 @@ class NLPApiService
     {
         try {
             $response = Http::timeout(10)->get("{$this->apiUrl}/health");
-            
+
             if ($response->successful()) {
                 return [
                     'status' => 'success',
                     'message' => 'Connected to NLP API',
-                    'data' => $response->json()
+                    'data' => $response->json(),
                 ];
             }
-            
+
             return [
                 'status' => 'error',
                 'message' => 'NLP API returned error',
-                'data' => $response->json()
+                'data' => $response->json(),
             ];
-            
+
         } catch (Exception $e) {
-            Log::error('NLP API Connection Failed: ' . $e->getMessage());
-            
+            Log::error('NLP API Connection Failed: '.$e->getMessage());
+
             return [
                 'status' => 'error',
                 'message' => 'Failed to connect to NLP API',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ];
         }
     }
@@ -137,10 +142,9 @@ class NLPApiService
                 return $response->json();
             }
 
-            throw new Exception('Preprocessing failed: ' . $response->body());
-            
+            throw new Exception('Preprocessing failed: '.$response->body());
         } catch (Exception $e) {
-            Log::error('Preprocessing Error: ' . $e->getMessage());
+            Log::error('Preprocessing Error: '.$e->getMessage());
             throw $e;
         }
     }
@@ -156,9 +160,9 @@ class NLPApiService
             }
 
             return $this->batchSentimentAnalysis($texts, $config, $progressCallback);
-            
+
         } catch (Exception $e) {
-            Log::error('Sentiment Analysis Error: ' . $e->getMessage());
+            Log::error('Sentiment Analysis Error: '.$e->getMessage());
             throw $e;
         }
     }
@@ -169,20 +173,20 @@ class NLPApiService
             ->retry(3, 1000)
             ->post("{$this->apiUrl}/api/analyze/sentiment", [
                 'texts' => $texts,
-                'preprocessing_config' => $config
+                'preprocessing_config' => $config,
             ]);
 
         if ($response->successful()) {
             $result = $response->json();
-            
-            if (!isset($result['status']) || $result['status'] !== 'success') {
+
+            if (! isset($result['status']) || $result['status'] !== 'success') {
                 throw new Exception('Invalid response from NLP API');
             }
-            
+
             return $result;
         }
 
-        throw new Exception('Sentiment analysis failed: ' . $response->body());
+        throw new Exception('Sentiment analysis failed: '.$response->body());
     }
 
     private function batchSentimentAnalysis(array $texts, array $config, $progressCallback = null): array
@@ -230,7 +234,7 @@ class NLPApiService
             } catch (Exception $e) {
                 // Satu batch gagal tidak boleh membatalkan seluruh analisis.
                 // Batch yang gagal dicatat dan dilaporkan lewat metrics.
-                Log::error("Batch {$batchNumber} failed: " . $e->getMessage());
+                Log::error("Batch {$batchNumber} failed: ".$e->getMessage());
                 $failedBatches[] = [
                     'batch' => $batchNumber,
                     'texts' => count($batch),
@@ -241,7 +245,7 @@ class NLPApiService
 
         if (empty($allPredictions)) {
             throw new Exception(
-                'Analisis sentimen gagal: seluruh ' . $totalBatches . ' batch tidak berhasil diproses.'
+                'Analisis sentimen gagal: seluruh '.$totalBatches.' batch tidak berhasil diproses.'
             );
         }
 
@@ -284,6 +288,7 @@ class NLPApiService
     {
         if ($threshold === null) {
             Log::info('review_queue dilewati: API tidak mengirim threshold');
+
             return null;
         }
 
@@ -362,7 +367,7 @@ class NLPApiService
 
         return [
             'positive' => round(($counts['positive'] / $total) * 100, 2),
-            'neutral'  => round(($counts['neutral'] / $total) * 100, 2),
+            'neutral' => round(($counts['neutral'] / $total) * 100, 2),
             'negative' => round(($counts['negative'] / $total) * 100, 2),
         ];
     }
@@ -384,7 +389,7 @@ class NLPApiService
         // menurunkan mutu hasil tanpa memunculkan galat apa pun ke pengguna.
         $truncated = count(array_filter(
             $predictions,
-            fn ($prediction) => !empty($prediction['truncated'])
+            fn ($prediction) => ! empty($prediction['truncated'])
         ));
         $failed = count(array_filter(
             $predictions,
@@ -405,7 +410,7 @@ class NLPApiService
             'max_confidence' => $confidences ? round(max($confidences), 4) : 0.0,
         ];
 
-        if (!empty($failedBatches)) {
+        if (! empty($failedBatches)) {
             $metrics['failed_batches'] = $failedBatches;
             $metrics['batch_summary'] = sprintf(
                 '%d dari %d batch berhasil diproses.',
@@ -433,9 +438,9 @@ class NLPApiService
             }
 
             return $this->batchAspectAnalysis($texts, $config, $predefinedAspects, $mode, $progressCallback);
-            
+
         } catch (Exception $e) {
-            Log::error('Aspect Analysis Error: ' . $e->getMessage());
+            Log::error('Aspect Analysis Error: '.$e->getMessage());
             throw $e;
         }
     }
@@ -449,7 +454,7 @@ class NLPApiService
         $payload = [
             'texts' => $texts,
             'preprocessing_config' => $config,
-            'mode' => $mode
+            'mode' => $mode,
         ];
 
         if ($predefinedAspects) {
@@ -462,20 +467,20 @@ class NLPApiService
 
         if ($response->successful()) {
             $result = $response->json();
-            
-            if (!isset($result['status']) || $result['status'] !== 'success') {
+
+            if (! isset($result['status']) || $result['status'] !== 'success') {
                 throw new Exception('Invalid response from NLP API');
             }
-            
+
             return $result;
         }
 
-        throw new Exception('Aspect analysis failed: ' . $response->body());
+        throw new Exception('Aspect analysis failed: '.$response->body());
     }
 
     /**
      * Batch aspect analysis - FIXED untuk Python AspectService format
-     * 
+     *
      * Python AspectService returns:
      * {
      *   'status': 'success',
@@ -495,25 +500,25 @@ class NLPApiService
     ): array {
         $batches = array_chunk($texts, $this->batchSize, true);
         $totalBatches = count($batches);
-        
+
         // Aggregated aspect data
         $aggregatedAspects = [];
         // Aspek per dokumen dari Python, dipetakan ke indeks teks aslinya.
         // Dipakai untuk mengisi training_items tanpa menebak lewat keyword.
         $documentAspects = array_fill(0, count($texts), []);
         $failedBatches = [];
-        
+
         Log::info("Processing {$totalBatches} batches for aspect analysis", [
             'total_texts' => count($texts),
             'batch_size' => $this->batchSize,
-            'mode' => $mode
+            'mode' => $mode,
         ]);
 
         foreach ($batches as $index => $batch) {
             $batchNumber = $index + 1;
-            
+
             Log::info("Processing batch {$batchNumber}/{$totalBatches}");
-            
+
             if ($progressCallback) {
                 $progress = 40 + (($batchNumber / $totalBatches) * 30);
                 call_user_func($progressCallback, $progress, "Mengekstrak aspek batch {$batchNumber}/{$totalBatches}...");
@@ -531,35 +536,36 @@ class NLPApiService
                         }
                     }
                 }
-                
+
                 // Log untuk debugging
                 Log::info("Batch {$batchNumber} response structure", [
                     'status' => $result['status'] ?? 'unknown',
                     'has_results' => isset($result['results']),
                     'result_keys' => isset($result['results']) ? array_keys($result['results']) : [],
                 ]);
-                
+
                 if (isset($result['results']['aspect_sentiments']) && is_array($result['results']['aspect_sentiments'])) {
                     $batchAspects = $result['results']['aspect_sentiments'];
-                    
+
                     Log::info("Batch {$batchNumber} found aspects", [
                         'count' => count($batchAspects),
-                        'sample' => array_slice($batchAspects, 0, 2)
+                        'sample' => array_slice($batchAspects, 0, 2),
                     ]);
-                    
+
                     // Aggregate aspects
                     foreach ($batchAspects as $aspectData) {
                         // Validate aspect data structure
-                        if (!isset($aspectData['aspect']) || !isset($aspectData['count'])) {
-                            Log::warning("Invalid aspect data", ['data' => $aspectData]);
+                        if (! isset($aspectData['aspect']) || ! isset($aspectData['count'])) {
+                            Log::warning('Invalid aspect data', ['data' => $aspectData]);
+
                             continue;
                         }
-                        
+
                         $aspectName = $aspectData['aspect'];
                         $count = $aspectData['count'];
                         $sentiments = $aspectData['sentiments'] ?? ['positive' => 0, 'neutral' => 0, 'negative' => 0];
-                        
-                        if (!isset($aggregatedAspects[$aspectName])) {
+
+                        if (! isset($aggregatedAspects[$aspectName])) {
                             $aggregatedAspects[$aspectName] = [
                                 'aspect' => $aspectName,
                                 'count' => 0,
@@ -568,30 +574,30 @@ class NLPApiService
                                 'negative' => 0,
                             ];
                         }
-                        
+
                         // Aggregate count
                         $aggregatedAspects[$aspectName]['count'] += $count;
-                        
+
                         // sentiments dari Python adalah percentages (e.g. 60.5)
                         // Convert ke counts untuk aggregasi
                         $positiveCount = round(($sentiments['positive'] / 100) * $count);
                         $neutralCount = round(($sentiments['neutral'] / 100) * $count);
                         $negativeCount = round(($sentiments['negative'] / 100) * $count);
-                        
+
                         $aggregatedAspects[$aspectName]['positive'] += $positiveCount;
                         $aggregatedAspects[$aspectName]['neutral'] += $neutralCount;
                         $aggregatedAspects[$aspectName]['negative'] += $negativeCount;
                     }
                 } else {
                     Log::warning("Batch {$batchNumber} has no aspect_sentiments in results", [
-                        'available_keys' => isset($result['results']) ? array_keys($result['results']) : []
+                        'available_keys' => isset($result['results']) ? array_keys($result['results']) : [],
                     ]);
                 }
-                
+
                 usleep(100000);
-                
+
             } catch (Exception $e) {
-                Log::error("Batch {$batchNumber} failed: " . $e->getMessage());
+                Log::error("Batch {$batchNumber} failed: ".$e->getMessage());
                 $failedBatches[] = [
                     'batch' => $batchNumber,
                     'texts' => count($batch),
@@ -602,25 +608,26 @@ class NLPApiService
 
         if (empty($aggregatedAspects) && count($failedBatches) === $totalBatches) {
             throw new Exception(
-                'Ekstraksi aspek gagal: seluruh ' . $totalBatches . ' batch tidak berhasil diproses.'
+                'Ekstraksi aspek gagal: seluruh '.$totalBatches.' batch tidak berhasil diproses.'
             );
         }
 
-        Log::info("Aggregation complete", [
+        Log::info('Aggregation complete', [
             'total_aspects' => count($aggregatedAspects),
-            'aspects' => array_keys($aggregatedAspects)
+            'aspects' => array_keys($aggregatedAspects),
         ]);
 
         // Convert to final format
         $finalAspects = [];
         foreach ($aggregatedAspects as $aspectData) {
             $total = $aspectData['count'];
-            
+
             if ($total == 0) {
-                Log::warning("Skipping aspect with zero count", ['aspect' => $aspectData['aspect']]);
+                Log::warning('Skipping aspect with zero count', ['aspect' => $aspectData['aspect']]);
+
                 continue;
             }
-            
+
             // Calculate percentages
             $finalAspects[] = [
                 'aspect' => $aspectData['aspect'],
@@ -629,27 +636,27 @@ class NLPApiService
                     'positive' => round(($aspectData['positive'] / $total) * 100, 1),
                     'neutral' => round(($aspectData['neutral'] / $total) * 100, 1),
                     'negative' => round(($aspectData['negative'] / $total) * 100, 1),
-                ]
+                ],
             ];
         }
-        
+
         // Sort by count (descending)
-        usort($finalAspects, function($a, $b) {
+        usort($finalAspects, function ($a, $b) {
             return $b['count'] <=> $a['count'];
         });
-        
+
         // Generate summary
-        $summary = count($finalAspects) > 0 
-            ? $this->generateAspectSummary($finalAspects) 
+        $summary = count($finalAspects) > 0
+            ? $this->generateAspectSummary($finalAspects)
             : 'Tidak ada aspek yang teridentifikasi dari analisis.';
 
         $results = [
             'aspect_sentiments' => $finalAspects,
             'document_aspects' => $documentAspects,
-            'summary' => $summary
+            'summary' => $summary,
         ];
 
-        if (!empty($failedBatches)) {
+        if (! empty($failedBatches)) {
             $results['failed_batches'] = $failedBatches;
             $results['batch_summary'] = sprintf(
                 '%d dari %d batch berhasil diproses.',
@@ -660,7 +667,7 @@ class NLPApiService
 
         return [
             'status' => 'success',
-            'results' => $results
+            'results' => $results,
         ];
     }
 
@@ -672,23 +679,22 @@ class NLPApiService
                 ->post("{$this->apiUrl}/api/analyze/topic", [
                     'texts' => $texts,
                     'preprocessing_config' => $config,
-                    'num_topics' => $numTopics
+                    'num_topics' => $numTopics,
                 ]);
 
             if ($response->successful()) {
                 $result = $response->json();
-                
-                if (!isset($result['status']) || $result['status'] !== 'success') {
+
+                if (! isset($result['status']) || $result['status'] !== 'success') {
                     throw new Exception('Invalid response from NLP API');
                 }
-                
+
                 return $result;
             }
 
-            throw new Exception('Topic analysis failed: ' . $response->body());
-            
+            throw new Exception('Topic analysis failed: '.$response->body());
         } catch (Exception $e) {
-            Log::error('Topic Analysis Error: ' . $e->getMessage());
+            Log::error('Topic Analysis Error: '.$e->getMessage());
             throw $e;
         }
     }
@@ -710,28 +716,28 @@ class NLPApiService
         int $numTopics = 5
     ): array {
         try {
-            Log::info("Starting combined analysis for " . count($texts) . " texts");
+            Log::info('Starting combined analysis for '.count($texts).' texts');
 
             if (count($texts) <= $this->batchSize) {
                 return $this->executeCombinedAnalysis($texts, $config, $predefinedAspects, $mode, $numTopics);
             }
 
-            $sentimentResult = $this->analyzeSentiment($texts, $config, function($progress, $message) use ($progressCallback) {
+            $sentimentResult = $this->analyzeSentiment($texts, $config, function ($progress, $message) use ($progressCallback) {
                 if ($progressCallback) {
                     call_user_func($progressCallback, 40 + ($progress - 40) * 0.33, $message);
                 }
             });
 
-            $aspectResult = $this->analyzeAspect($texts, $config, $predefinedAspects, $mode, function($progress, $message) use ($progressCallback) {
+            $aspectResult = $this->analyzeAspect($texts, $config, $predefinedAspects, $mode, function ($progress, $message) use ($progressCallback) {
                 if ($progressCallback) {
                     call_user_func($progressCallback, 50 + ($progress - 40) * 0.33, $message);
                 }
             });
 
             if ($progressCallback) {
-                call_user_func($progressCallback, 60, "Mengidentifikasi topik...");
+                call_user_func($progressCallback, 60, 'Mengidentifikasi topik...');
             }
-            
+
             $topicResult = $this->analyzeTopic($texts, $config, $numTopics);
 
             $sentiment = $sentimentResult['results'] ?? $sentimentResult;
@@ -757,12 +763,12 @@ class NLPApiService
                     'sentiment' => $sentiment,
                     'aspect' => $aspect,
                     'topic' => $topic,
-                    'association' => $association
-                ]
+                    'association' => $association,
+                ],
             ];
-            
+
         } catch (Exception $e) {
-            Log::error('Combined Analysis Error: ' . $e->getMessage());
+            Log::error('Combined Analysis Error: '.$e->getMessage());
             throw $e;
         }
     }
@@ -807,7 +813,7 @@ class NLPApiService
             return $response->json();
         }
 
-        throw new Exception("Pemeriksaan data {$modelType} gagal: " . $response->body());
+        throw new Exception("Pemeriksaan data {$modelType} gagal: ".$response->body());
     }
 
     private function executeRetrain(
@@ -842,13 +848,13 @@ class NLPApiService
             $result = $response->json();
 
             if (($result['status'] ?? null) !== 'success') {
-                throw new Exception("Retraining {$type} ditolak NLP API: " . $response->body());
+                throw new Exception("Retraining {$type} ditolak NLP API: ".$response->body());
             }
 
             return $result['results'] ?? [];
         }
 
-        throw new Exception("Retraining {$type} gagal: " . $response->body());
+        throw new Exception("Retraining {$type} gagal: ".$response->body());
     }
 
     /**
@@ -864,6 +870,7 @@ class NLPApiService
     ): ?array {
         if (empty($documentAspects) || empty($documentTopics) || $numTopics <= 0) {
             Log::info('Association analysis dilewati: document_aspects/document_topics tidak lengkap');
+
             return null;
         }
 
@@ -872,6 +879,7 @@ class NLPApiService
                 'aspects' => count($documentAspects),
                 'topics' => count($documentTopics),
             ]);
+
             return null;
         }
 
@@ -888,11 +896,13 @@ class NLPApiService
                 return $response->json()['results'] ?? null;
             }
 
-            Log::warning('Association analysis failed: ' . $response->body());
+            Log::warning('Association analysis failed: '.$response->body());
+
             return null;
 
         } catch (Exception $e) {
-            Log::warning('Association analysis error: ' . $e->getMessage());
+            Log::warning('Association analysis error: '.$e->getMessage());
+
             return null;
         }
     }
@@ -925,22 +935,22 @@ class NLPApiService
 
         if ($response->successful()) {
             $result = $response->json();
-            
-            if (!isset($result['status']) || $result['status'] !== 'success') {
+
+            if (! isset($result['status']) || $result['status'] !== 'success') {
                 throw new Exception('Invalid response from NLP API');
             }
-            
+
             return $result;
         }
 
-        throw new Exception('Combined analysis failed: ' . $response->body());
+        throw new Exception('Combined analysis failed: '.$response->body());
     }
 
     private function generateSentimentSummary(array $metrics, array $distribution): string
     {
         $dominant = array_keys($distribution, max($distribution))[0];
         $percentage = $metrics["{$dominant}_percentage"];
-        
+
         return "Dari {$metrics['total_texts']} teks yang dianalisis, mayoritas ({$percentage}%) memiliki sentimen {$dominant}.";
     }
 
@@ -949,13 +959,13 @@ class NLPApiService
         if (empty($aspectResults)) {
             return 'Tidak ada aspek yang teridentifikasi.';
         }
-        
+
         $topAspects = array_slice($aspectResults, 0, 3);
         $aspectNames = array_column($topAspects, 'aspect');
-        
+
         $totalMentions = array_sum(array_column($aspectResults, 'count'));
-        
-        return "Teridentifikasi " . count($aspectResults) . " aspek dari {$totalMentions} mentions. " .
-               "Aspek utama: " . implode(', ', $aspectNames) . ".";
+
+        return 'Teridentifikasi '.count($aspectResults)." aspek dari {$totalMentions} mentions. ".
+               'Aspek utama: '.implode(', ', $aspectNames).'.';
     }
 }

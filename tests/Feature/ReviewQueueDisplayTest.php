@@ -57,12 +57,12 @@ class ReviewQueueDisplayTest extends TestCase
         ], $this->predictions());
 
         $this->actingAs($analysis->user)
-             ->get(route('analysis.show', $analysis->id))
-             ->assertOk()
-             ->assertSee('Perlu Ditinjau (2)')
-             ->assertSee('di bawah 94%', false)
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->assertSee('Perlu Ditinjau (2)')
+            ->assertSee('di bawah 94%', false)
              // peringatan agar antrean tidak dipakai mengukur akurasi
-             ->assertSee('jangan memakainya untuk mengukur akurasi', false);
+            ->assertSee('jangan memakainya untuk mengukur akurasi', false);
     }
 
     public function test_baris_antrean_ditandai_dengan_peringkatnya(): void
@@ -72,9 +72,9 @@ class ReviewQueueDisplayTest extends TestCase
         ], $this->predictions());
 
         $html = $this->actingAs($analysis->user)
-                     ->get(route('analysis.show', $analysis->id))
-                     ->assertOk()
-                     ->getContent();
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->getContent();
 
         // indices [2, 1] berarti teks ke-2 peringkat 0, teks ke-1 peringkat 1
         $this->assertStringContainsString('data-review-rank="0"', $html);
@@ -88,10 +88,10 @@ class ReviewQueueDisplayTest extends TestCase
         $analysis = $this->makeAnalysis([], $this->predictions());
 
         $this->actingAs($analysis->user)
-             ->get(route('analysis.show', $analysis->id))
-             ->assertOk()
-             ->assertSee('Tanpa model')
-             ->assertSee('Tidak dinilai');
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->assertSee('Tanpa model')
+            ->assertSee('Tidak dinilai');
     }
 
     public function test_penghitung_mutu_hanya_muncul_kalau_tidak_nol(): void
@@ -103,9 +103,9 @@ class ReviewQueueDisplayTest extends TestCase
         ], $this->predictions());
 
         $this->actingAs($bersih->user)
-             ->get(route('analysis.show', $bersih->id))
-             ->assertOk()
-             ->assertDontSee('Catatan mutu data');
+            ->get(route('analysis.show', $bersih->id))
+            ->assertOk()
+            ->assertDontSee('Catatan mutu data');
 
         $bermasalah = $this->makeAnalysis([
             'total_empty' => 2,
@@ -114,12 +114,12 @@ class ReviewQueueDisplayTest extends TestCase
         ], $this->predictions());
 
         $this->actingAs($bermasalah->user)
-             ->get(route('analysis.show', $bermasalah->id))
-             ->assertOk()
-             ->assertSee('Catatan mutu data')
-             ->assertSee('2 baris kosong')
-             ->assertSee('1 teks terpotong')
-             ->assertDontSee('baris gagal dinilai');
+            ->get(route('analysis.show', $bermasalah->id))
+            ->assertOk()
+            ->assertSee('Catatan mutu data')
+            ->assertSee('2 baris kosong')
+            ->assertSee('1 teks terpotong')
+            ->assertDontSee('baris gagal dinilai');
     }
 
     /**
@@ -145,13 +145,20 @@ class ReviewQueueDisplayTest extends TestCase
         $analysis = $this->makeAnalysis(['total_analyzed' => 40], $predictions);
 
         $html = $this->actingAs($analysis->user)
-                     ->get(route('analysis.show', $analysis->id))
-                     ->assertOk()
-                     ->getContent();
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->getContent();
 
-        // Skor per kelas hanya ada di dalam JSON, tidak pernah dirender sebagai HTML
+        // Tidak ada lagi salinan JSON prediksi di dalam halaman
         $this->assertStringNotContainsString('"scores"', $html);
-        $this->assertStringContainsString('const totalPredictions = 40;', $html);
+        $this->assertStringNotContainsString('const allPredictions', $html);
+
+        // Hanya satu halaman kartu yang dirender, bukan keseluruhan 40 baris
+        $this->assertSame(
+            \App\Services\PredictionQueryService::PER_PAGE,
+            substr_count($html, 'class="prediction-card')
+        );
+        $this->assertStringContainsString('dari 40 prediksi', $html);
     }
 
     public function test_tab_tidak_muncul_kalau_tidak_ada_antrean(): void
@@ -159,9 +166,9 @@ class ReviewQueueDisplayTest extends TestCase
         $analysis = $this->makeAnalysis(['total_analyzed' => 4], $this->predictions());
 
         $this->actingAs($analysis->user)
-             ->get(route('analysis.show', $analysis->id))
-             ->assertOk()
-             ->assertDontSee('Perlu Ditinjau');
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->assertDontSee('Perlu Ditinjau');
     }
 
     public function test_panel_filter_duplikat_tidak_lagi_dirender(): void
@@ -180,14 +187,14 @@ class ReviewQueueDisplayTest extends TestCase
         $analysis = $this->makeAnalysis(['total_analyzed' => 12], $predictions);
 
         $html = $this->actingAs($analysis->user)
-                     ->get(route('analysis.show', $analysis->id))
-                     ->assertOk()
-                     ->getContent();
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->getContent();
 
         // Deklarasi ganda inilah yang dulu memicu SyntaxError di browser.
         // Sekarang array prediksi tidak ditanam ke JS sama sekali.
         $this->assertSame(0, substr_count($html, 'const allPredictions'));
         $this->assertSame(1, substr_count($html, 'id="searchPredictions"'));
-        $this->assertStringContainsString('const totalPredictions = 12;', $html);
+        $this->assertStringContainsString('Halaman 1 dari 1', $html);
     }
 }

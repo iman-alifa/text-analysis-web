@@ -52,7 +52,7 @@ class RetrainRegressionTest extends TestCase
                 'status' => 'success',
                 'results' => [
                     'saved' => $saved,
-                    'rejected_for_regression' => !$saved,
+                    'rejected_for_regression' => ! $saved,
                     'weighted_f1_delta' => $delta,
                     'metrics_before' => ['weighted_f1' => 0.8123, 'accuracy' => 0.82],
                     'metrics_after' => ['weighted_f1' => round(0.8123 + $delta, 4), 'accuracy' => 0.79],
@@ -70,7 +70,7 @@ class RetrainRegressionTest extends TestCase
         $training = $this->training();
 
         (new RetrainModel($training, $this->sampleData()))
-            ->handle(new NLPApiService());
+            ->handle(new NLPApiService);
 
         $training->refresh();
 
@@ -87,7 +87,7 @@ class RetrainRegressionTest extends TestCase
         $training = $this->training();
 
         (new RetrainModel($training, $this->sampleData()))
-            ->handle(new NLPApiService());
+            ->handle(new NLPApiService);
 
         $training->refresh();
 
@@ -108,7 +108,7 @@ class RetrainRegressionTest extends TestCase
         $training = $this->training();
 
         (new RetrainModel($training, $this->sampleData()))
-            ->handle(new NLPApiService());
+            ->handle(new NLPApiService);
 
         $this->assertSame('completed', $training->refresh()->status);
     }

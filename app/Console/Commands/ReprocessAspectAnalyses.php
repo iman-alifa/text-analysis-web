@@ -49,6 +49,7 @@ class ReprocessAspectAnalyses extends Command
 
         if ($candidates->isEmpty()) {
             $this->info('Tidak ada analisis aspek/gabungan yang selesai.');
+
             return self::SUCCESS;
         }
 
@@ -74,6 +75,7 @@ class ReprocessAspectAnalyses extends Command
 
         if (! $rows) {
             $this->info('Semua analisis sudah memakai perhitungan terbaru.');
+
             return self::SUCCESS;
         }
 
@@ -84,6 +86,7 @@ class ReprocessAspectAnalyses extends Command
                 '%d analisis perlu diproses ulang. Jalankan dengan --apply untuk mengantrekannya.',
                 count($targets)
             ));
+
             return self::SUCCESS;
         }
 
@@ -117,6 +120,7 @@ class ReprocessAspectAnalyses extends Command
 
         if (is_string($value)) {
             $decoded = json_decode($value, true);
+
             return is_array($decoded) ? $decoded : [];
         }
 

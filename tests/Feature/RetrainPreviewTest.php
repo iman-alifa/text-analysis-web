@@ -81,13 +81,13 @@ class RetrainPreviewTest extends TestCase
         $this->fakePreview();
 
         $this->actingAs($this->admin())
-             ->getJson(route('admin.training.preview'))
-             ->assertOk()
-             ->assertJsonPath('reports.sentiment.available', true)
-             ->assertJsonPath('reports.sentiment.label_distribution.imbalance_ratio', 12)
+            ->getJson(route('admin.training.preview'))
+            ->assertOk()
+            ->assertJsonPath('reports.sentiment.available', true)
+            ->assertJsonPath('reports.sentiment.label_distribution.imbalance_ratio', 12)
              // 1.0 kembali sebagai 1 setelah JSON encode
-             ->assertJsonPath('reports.sentiment.majority_baseline_accuracy', 1)
-             ->assertJsonPath('minimum_samples', 10);
+            ->assertJsonPath('reports.sentiment.majority_baseline_accuracy', 1)
+            ->assertJsonPath('minimum_samples', 10);
 
         // Tidak boleh menyentuh endpoint pelatihan
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/api/retrain/sentiment'));
@@ -99,9 +99,9 @@ class RetrainPreviewTest extends TestCase
         $this->fakePreview();
 
         $this->actingAs($this->admin())
-             ->getJson(route('admin.training.preview'))
-             ->assertOk()
-             ->assertJsonPath('reports.sentiment.warnings.0', 'Data sangat timpang (rasio 12:1).');
+            ->getJson(route('admin.training.preview'))
+            ->assertOk()
+            ->assertJsonPath('reports.sentiment.warnings.0', 'Data sangat timpang (rasio 12:1).');
     }
 
     public function test_tetap_melaporkan_saat_nlp_api_mati(): void
@@ -110,25 +110,25 @@ class RetrainPreviewTest extends TestCase
         Http::fake(['*/api/retrain/preview' => Http::response('down', 500)]);
 
         $this->actingAs($this->admin())
-             ->getJson(route('admin.training.preview'))
-             ->assertOk()
-             ->assertJsonPath('success', true)
-             ->assertJsonPath('reports.sentiment.available', false);
+            ->getJson(route('admin.training.preview'))
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('reports.sentiment.available', false);
     }
 
     public function test_menolak_saat_belum_ada_koreksi(): void
     {
         $this->actingAs($this->admin())
-             ->getJson(route('admin.training.preview'))
-             ->assertStatus(422)
-             ->assertJsonPath('success', false);
+            ->getJson(route('admin.training.preview'))
+            ->assertStatus(422)
+            ->assertJsonPath('success', false);
     }
 
     public function test_hanya_admin(): void
     {
         $this->actingAs(User::factory()->create(['role' => 'user']))
-             ->getJson(route('admin.training.preview'))
-             ->assertForbidden();
+            ->getJson(route('admin.training.preview'))
+            ->assertForbidden();
     }
 
     /**

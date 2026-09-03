@@ -27,7 +27,7 @@ return new class extends Migration
         // 3. Buat Tabel Custom Stopwords (Untuk Service Topik)
         // Tabel yang sama juga dibuat migrasi create_active_learning_tables,
         // jadi harus dijaga agar `migrate` pada database baru tidak gagal.
-        if (!Schema::hasTable('custom_stopwords')) {
+        if (! Schema::hasTable('custom_stopwords')) {
             Schema::create('custom_stopwords', function (Blueprint $table) {
                 $table->id();
                 $table->string('word')->unique();
@@ -36,7 +36,6 @@ return new class extends Migration
             });
         }
     }
-
 
     /**
      * Reverse the migrations.

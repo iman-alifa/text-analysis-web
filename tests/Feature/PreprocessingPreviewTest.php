@@ -42,10 +42,10 @@ class PreprocessingPreviewTest extends TestCase
     private function preview(array $overrides = [])
     {
         return $this->actingAs(User::factory()->create())
-                    ->postJson(route('analysis.preprocess-preview'), array_merge([
-                        'texts' => ['Pelayanannya tidak bagus sama sekali'],
-                        'analysis_type' => 'sentiment',
-                    ], $overrides));
+            ->postJson(route('analysis.preprocess-preview'), array_merge([
+                'texts' => ['Pelayanannya tidak bagus sama sekali'],
+                'analysis_type' => 'sentiment',
+            ], $overrides));
     }
 
     public function test_mengirim_task_transformer_untuk_analisis_sentimen(): void
@@ -53,15 +53,15 @@ class PreprocessingPreviewTest extends TestCase
         $this->fakePreprocess();
 
         $this->preview(['analysis_type' => 'sentiment'])
-             ->assertOk()
-             ->assertJsonPath('task', 'transformer');
+            ->assertOk()
+            ->assertJsonPath('task', 'transformer');
 
         Http::assertSent(fn ($request) => $request['task'] === 'transformer');
     }
 
     public function test_mengirim_task_sesuai_tiap_jenis_analisis(): void
     {
-        $resolver = new PreprocessingConfigResolver();
+        $resolver = new PreprocessingConfigResolver;
 
         $this->assertSame('transformer', $resolver->taskForAnalysisType('sentiment'));
         $this->assertSame('bag_of_words', $resolver->taskForAnalysisType('topic'));
@@ -75,9 +75,9 @@ class PreprocessingPreviewTest extends TestCase
         $this->fakePreprocess();
 
         $this->preview(['analysis_type' => 'sentiment'])
-             ->assertOk()
-             ->assertJsonPath('applied_policy.stemming', false)
-             ->assertJsonFragment(['notice' => 'Stemming dan penghapusan stopword dinonaktifkan untuk analisis sentimen karena merusak deteksi negasi.']);
+            ->assertOk()
+            ->assertJsonPath('applied_policy.stemming', false)
+            ->assertJsonFragment(['notice' => 'Stemming dan penghapusan stopword dinonaktifkan untuk analisis sentimen karena merusak deteksi negasi.']);
     }
 
     public function test_memakai_konfigurasi_yang_sama_dengan_yang_dijalankan_job(): void
@@ -98,8 +98,8 @@ class PreprocessingPreviewTest extends TestCase
         ]);
 
         $this->preview(['preprocessing_config_id' => $config->id])
-             ->assertOk()
-             ->assertJsonPath('config_name', 'Tanpa stemming');
+            ->assertOk()
+            ->assertJsonPath('config_name', 'Tanpa stemming');
 
         Http::assertSent(function ($request) {
             return $request['config']['stemming'] === false
@@ -111,7 +111,7 @@ class PreprocessingPreviewTest extends TestCase
     public function test_menolak_lebih_dari_lima_teks(): void
     {
         $this->preview(['texts' => ['a', 'b', 'c', 'd', 'e', 'f']])
-             ->assertStatus(422);
+            ->assertStatus(422);
     }
 
     public function test_memberi_pesan_ramah_saat_nlp_api_mati(): void
@@ -119,9 +119,9 @@ class PreprocessingPreviewTest extends TestCase
         Http::fake(['*/api/preprocess' => Http::response('down', 500)]);
 
         $this->preview()
-             ->assertStatus(503)
-             ->assertJsonPath('success', false)
-             ->assertJsonPath('message', 'Tidak bisa menghubungi layanan analisis. Pastikan NLP API berjalan.');
+            ->assertStatus(503)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('message', 'Tidak bisa menghubungi layanan analisis. Pastikan NLP API berjalan.');
     }
 
     public function test_hanya_untuk_pengguna_yang_login(): void

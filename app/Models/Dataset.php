@@ -4,8 +4,8 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Dataset extends Model
 {
@@ -45,6 +45,6 @@ class Dataset extends Model
             $unitIndex++;
         }
 
-        return round($size, 2) . ' ' . $units[$unitIndex];
+        return round($size, 2).' '.$units[$unitIndex];
     }
 }

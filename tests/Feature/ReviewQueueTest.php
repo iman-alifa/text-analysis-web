@@ -76,7 +76,7 @@ class ReviewQueueTest extends TestCase
                 ->push($this->batchResponse([0.99, 0.30]), 200),  // teks 5 paling ragu
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd', 'e', 'f']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd', 'e', 'f']);
         $queue = $result['results']['review_queue'];
 
         // Diurutkan dari yang paling tidak yakin: teks 5 (0.30) lalu teks 2 (0.55)
@@ -98,7 +98,7 @@ class ReviewQueueTest extends TestCase
                 ->push($this->batchResponse([0.99, 0.99]), 200),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd']);
         $queue = $result['results']['review_queue'];
 
         $this->assertSame([0], $queue['indices']);
@@ -114,7 +114,7 @@ class ReviewQueueTest extends TestCase
                 ->push($this->batchResponse([0.99, 0.99], withQueue: false), 200),
         ]);
 
-        $result = (new NLPApiService())->analyzeSentiment(['a', 'b', 'c', 'd']);
+        $result = (new NLPApiService)->analyzeSentiment(['a', 'b', 'c', 'd']);
 
         $this->assertArrayNotHasKey('review_queue', $result['results']);
     }
@@ -138,7 +138,7 @@ class ReviewQueueTest extends TestCase
             'status' => 'pending',
         ]);
 
-        (new ProcessTextAnalysis($analysis))->handle(new NLPApiService());
+        (new ProcessTextAnalysis($analysis))->handle(new NLPApiService);
 
         $metrics = AnalysisResult::where('text_analysis_id', $analysis->id)->firstOrFail()->metrics;
 
