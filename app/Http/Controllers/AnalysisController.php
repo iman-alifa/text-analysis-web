@@ -7,10 +7,12 @@ use App\Models\AnalysisLog;
 use App\Models\PreprocessingConfig;
 use App\Models\TextAnalysis;
 use App\Services\AnalysisInterpretationService;
+use App\Services\ConfidenceReportService;
 use App\Services\FileProcessingService;
 use App\Services\NLPApiService;
 use App\Services\PredictionQueryService;
 use App\Services\PreprocessingConfigResolver;
+use App\Services\SegmentAnalysisService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -27,14 +29,39 @@ class AnalysisController extends Controller
         $this->fileProcessingService = $fileProcessingService;
     }
 
-    public function index()
+    public function index(Request $request)
     {
+        $filter = [
+            'q' => trim((string) $request->query('q', '')),
+            'type' => (string) $request->query('type', ''),
+            'status' => (string) $request->query('status', ''),
+        ];
+
+        // Disaring di server, bukan di browser: daftarnya dipaginasi, jadi
+        // penyaringan sisi klien hanya akan menyentuh 15 baris yang kebetulan
+        // sedang tampil. Sebelumnya ketiga kontrol ini tidak berfungsi sama
+        // sekali - hanya memanggil console.log.
         $analyses = TextAnalysis::where('user_id', Auth::id())
             ->with('result')
+            ->when($filter['q'] !== '', function ($query) use ($filter) {
+                $query->where(function ($cari) use ($filter) {
+                    $cari->where('title', 'like', '%'.$filter['q'].'%')
+                        ->orWhere('description', 'like', '%'.$filter['q'].'%');
+                });
+            })
+            ->when(
+                in_array($filter['type'], ['sentiment', 'aspect', 'topic', 'combined'], true),
+                fn ($query) => $query->where('analysis_type', $filter['type'])
+            )
+            ->when(
+                in_array($filter['status'], ['completed', 'processing', 'failed', 'pending'], true),
+                fn ($query) => $query->where('status', $filter['status'])
+            )
             ->orderBy('created_at', 'desc')
-            ->paginate(15);
+            ->paginate(15)
+            ->withQueryString();
 
-        return view('analysis.index', compact('analyses'));
+        return view('analysis.index', compact('analyses', 'filter'));
     }
 
     public function create()
@@ -65,13 +92,16 @@ class AnalysisController extends Controller
             'filter' => 'nullable|string|in:'.implode(',', PredictionQueryService::FILTERS),
             'q' => 'nullable|string|max:200',
             'page' => 'nullable|integer|min:1',
+            'aspect' => 'nullable|string|max:100',
         ]);
 
         $hasil = $query->paginate(
             $analysis->result,
             $validated['filter'] ?? 'all',
             $validated['q'] ?? '',
-            (int) ($validated['page'] ?? 1)
+            (int) ($validated['page'] ?? 1),
+            PredictionQueryService::PER_PAGE,
+            $validated['aspect'] ?? null
         );
 
         return response()->json([
@@ -105,11 +135,15 @@ class AnalysisController extends Controller
             'success' => true,
             'weights_loaded' => $weights,
             'all_ready' => ! empty($weights) && collect($weights)->every(fn ($loaded) => $loaded === true),
+            // Nilainya berada di dalam blok `models`, bukan di tingkat atas.
+            // Dibaca langsung dari tingkat atas, seluruh kolom ini selalu null.
             'model' => [
-                'sentiment_source' => $health['sentiment_source'] ?? null,
-                'sentiment_base' => $health['sentiment_base'] ?? null,
-                'sentiment_temperature' => $health['sentiment_temperature'] ?? null,
-                'sentiment_review_threshold' => $health['sentiment_review_threshold'] ?? null,
+                'sentiment_source' => $nlpService->healthModelValue($health, 'sentiment_source'),
+                'sentiment_base' => $nlpService->healthModelValue($health, 'sentiment_base'),
+                'sentiment_temperature' => $nlpService->healthModelValue($health, 'sentiment_temperature'),
+                'sentiment_review_threshold' => $nlpService->healthModelValue($health, 'sentiment_review_threshold'),
+                'sentiment_retrained' => $nlpService->healthModelValue($health, 'sentiment_retrained'),
+                'aspect_retrained' => $nlpService->healthModelValue($health, 'aspect_retrained'),
             ],
         ]);
     }
@@ -259,6 +293,11 @@ class AnalysisController extends Controller
             'file_has_header' => 'nullable|string',
             'text_column_name' => 'nullable|string',
             'text_column_index' => 'nullable|integer|min:1',
+            // Kolom pemisah bersifat opsional. Dibatasi tiga: tiap kolom
+            // tambahan menggandakan nilai yang disimpan per baris, dan lebih
+            // dari tiga pilihan tidak terbaca lagi di halaman hasil.
+            'segment_columns' => 'nullable|array|max:3',
+            'segment_columns.*' => 'nullable|string|max:255',
             'csv_delimiter' => 'nullable|string',
             'excel_sheet' => 'nullable|integer|min:0',
 
@@ -345,6 +384,15 @@ class AnalysisController extends Controller
                 $data['file_name'] = $fileData['filename'];
                 $data['raw_data'] = $processedData['texts'];
                 $data['total_records'] = $processedData['total'];
+
+                // Hanya disimpan bila benar-benar ada nilainya; kolom kosong
+                // akan memunculkan penyaring yang tidak menghasilkan apa-apa.
+                if (! empty($processedData['segments']) && ! empty($processedData['segment_columns'])) {
+                    $data['segment_data'] = [
+                        'columns' => $processedData['segment_columns'],
+                        'rows' => $processedData['segments'],
+                    ];
+                }
             }
 
             // Batas API diperiksa di sini supaya pesannya jelas dan analisis
@@ -448,6 +496,17 @@ class AnalysisController extends Controller
                 $config['text_column_index'] = $request->input('text_column_index', 1);
             }
 
+            // Kolom pemisah opsional, dipakai untuk merinci hasil per nilai
+            // unik (tanggal, sumber, judul video) tanpa analisis terpisah.
+            $segmentColumns = array_values(array_filter(
+                (array) $request->input('segment_columns', []),
+                fn ($kolom) => is_string($kolom) && trim($kolom) !== ''
+            ));
+
+            if (! empty($segmentColumns)) {
+                $config['segment_columns'] = $segmentColumns;
+            }
+
             // CSV specific
             if ($fileExtension === 'csv') {
                 $config['csv_delimiter'] = $request->input('csv_delimiter', ',');
@@ -494,7 +553,7 @@ class AnalysisController extends Controller
     /**
      * Show analysis details
      */
-    public function show($id)
+    public function show(Request $request, $id)
     {
         $analysis = TextAnalysis::where('user_id', Auth::id())
             ->with('result')
@@ -504,6 +563,10 @@ class AnalysisController extends Controller
         $chartData = null;
         $predictionPage = null;
         $aiSections = [];
+        $segmentColumns = [];
+        $segmentBreakdown = null;
+        $segmentActive = '';
+        $confidence = null;
 
         if ($analysis->status === 'completed' && $analysis->result) {
             $chartData = $this->prepareChartData($analysis);
@@ -512,11 +575,34 @@ class AnalysisController extends Controller
             // tanpa JavaScript, dan halaman berikutnya diambil lewat AJAX.
             $predictionPage = app(PredictionQueryService::class)->paginate($analysis->result);
 
+            // Seberapa yakin model pada korpus ini, dan berapa baris yang
+            // layak ditawarkan untuk dikoreksi.
+            $confidence = app(ConfidenceReportService::class)->build($analysis->result);
+
             // Narasi AI yang sudah pernah dibangkitkan, dipetakan per bagian.
             $aiSections = $analysis->result->ai_interpretations ?? [];
+
+            // Kolom pemisah yang bisa dipakai merinci hasil. Rinciannya tidak
+            // dihitung kecuali diminta lewat ?segment= - halaman hasil harus
+            // menampilkan gambaran keseluruhan lebih dulu.
+            //
+            // Memakai parameter kueri, bukan hanya AJAX, supaya pilihannya bisa
+            // ditandai/dibagikan dan tetap bekerja tanpa JavaScript.
+            $segmenter = app(SegmentAnalysisService::class);
+            $segmentColumns = $segmenter->availableColumns($analysis);
+            $segmentActive = (string) $request->query('segment', '');
+
+            if ($segmentActive !== '' && in_array($segmentActive, $segmentColumns, true)) {
+                $segmentBreakdown = $segmenter->breakdown($analysis, $segmentActive);
+            } else {
+                $segmentActive = '';
+            }
         }
 
-        return view('analysis.show', compact('analysis', 'chartData', 'predictionPage', 'aiSections'));
+        return view('analysis.show', compact(
+            'analysis', 'chartData', 'predictionPage', 'aiSections',
+            'segmentColumns', 'segmentBreakdown', 'segmentActive', 'confidence'
+        ));
     }
 
     /**
@@ -537,8 +623,19 @@ class AnalysisController extends Controller
         // Aspect chart data
         $aspects = $result->normalizedAspectResults();
 
+        // Aspek terbanyak dulu. Mode otomatis bisa menghasilkan puluhan aspek
+        // tanpa urutan yang berarti (urutan ekstraksi mentah); mengurutkan di
+        // sini membuat pemotongan grafik di bawah membuang yang paling
+        // sedikit disebut, dan kartu Detail Aspek halaman pertama langsung
+        // menampilkan yang paling signifikan.
+        usort($aspects, fn ($a, $b) => $b['count'] <=> $a['count']);
+
         if (! empty($aspects)) {
-            $data['aspect'] = \App\Helpers\ChartHelper::prepareAspectChartData($aspects);
+            $maxChart = (int) config('analysis.chart.max_aspects', 15);
+            $data['aspect'] = \App\Helpers\ChartHelper::prepareAspectChartData(
+                array_slice($aspects, 0, $maxChart)
+            );
+            $data['aspect_chart_truncated'] = count($aspects) > $maxChart;
         }
 
         $data['aspects'] = $aspects;
@@ -734,6 +831,36 @@ class AnalysisController extends Controller
     }
 
     /**
+     * Rincian hasil menurut satu kolom pemisah.
+     *
+     * Dihitung ulang dari prediksi yang sudah tersimpan - tidak ada permintaan
+     * baru ke NLP API, sehingga pengguna tidak perlu menjalankan analisis
+     * terpisah untuk tiap tanggal, sumber, atau video.
+     */
+    public function segments(Request $request, SegmentAnalysisService $segmenter, $id)
+    {
+        $analysis = TextAnalysis::where('user_id', Auth::id())
+            ->with('result')
+            ->findOrFail($id);
+
+        $column = (string) $request->query('column', '');
+        $breakdown = $segmenter->breakdown($analysis, $column);
+
+        if ($breakdown === null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Kolom pemisah tidak tersedia untuk analisis ini.',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'column' => $column,
+            'html' => view('analysis.partials.segment-breakdown', compact('breakdown'))->render(),
+        ]);
+    }
+
+    /**
      * Bangkitkan narasi AI untuk satu bagian halaman hasil.
      *
      * Dipanggil dari tombol per bagian, bukan otomatis saat analisis berjalan:
@@ -755,7 +882,8 @@ class AnalysisController extends Controller
             $narasi = $interpreter->generate(
                 $analysis,
                 $section,
-                $request->boolean('regenerate')
+                $request->boolean('regenerate'),
+                $request->query('column')
             );
         } catch (LlmException $e) {
             return response()->json([

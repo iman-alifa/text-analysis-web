@@ -66,13 +66,13 @@
                     </div>
                     <div>
                         <h1 class="text-2xl font-bold leading-tight">Bantu Tingkatkan Akurasi Model AI</h1>
-                        <p class="text-indigo-200 text-sm mt-0.5">Active Learning — Kontribusi Anda sangat berarti</p>
+                        <p class="text-indigo-200 text-sm mt-0.5">Active Learning - Kontribusi Anda sangat berarti</p>
                     </div>
                 </div>
                 <p class="text-indigo-100 leading-relaxed">
                     Hasil analisis di bawah ini memiliki tingkat kepercayaan (<em>confidence</em>) yang bervariasi.
                     Teks dengan kepercayaan rendah paling membutuhkan masukan Anda. Setiap koreksi yang Anda
-                    berikan langsung digunakan untuk melatih ulang model agar semakin akurat ke depannya.
+                    berikan dipakai untuk melatih ulang model agar semakin akurat ke depannya.
                 </p>
             </div>
 
@@ -84,15 +84,15 @@
 
                 @if($userCorrectionCount >= 10)
                 <div class="mt-3 inline-flex items-center gap-1.5 px-3 py-1 bg-yellow-400/30 text-yellow-200 rounded-full text-xs font-medium">
-                    🏆 Expert Contributor
+                    🏆 Kontributor Ahli
                 </div>
                 @elseif($userCorrectionCount >= 3)
                 <div class="mt-3 inline-flex items-center gap-1.5 px-3 py-1 bg-green-400/30 text-green-200 rounded-full text-xs font-medium">
-                    ⭐ Active Contributor
+                    ⭐ Kontributor Aktif
                 </div>
                 @else
                 <div class="mt-3 inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 text-indigo-200 rounded-full text-xs font-medium">
-                    🌱 New Contributor
+                    🌱 Kontributor Baru
                 </div>
                 @endif
             </div>
@@ -111,20 +111,20 @@
             <div class="text-sm text-blue-800 space-y-1">
                 <p class="font-semibold">Apa itu Confidence Score?</p>
                 <p>
-                    Nilai <strong>confidence</strong> (0 – 1) menunjukkan seberapa yakin model terhadap prediksinya.
-                    Nilai mendekati <span class="font-medium text-red-600">0 (merah)</span> berarti model ragu-ragu —
+                    Nilai <strong>confidence</strong> (0 - 1) menunjukkan seberapa yakin model terhadap prediksinya.
+                    Nilai mendekati <span class="font-medium text-red-600">0 (merah)</span> berarti model ragu-ragu -
                     kemungkinan besar prediksinya salah dan membutuhkan koreksi Anda.
                     Nilai mendekati <span class="font-medium text-green-600">1 (hijau)</span> berarti model sangat yakin.
                 </p>
                 <div class="flex flex-wrap gap-3 pt-1">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-red-500"></span> &lt; 40% — Rendah, perlu koreksi
+                        <span class="w-2 h-2 rounded-full bg-red-500"></span> &lt; 40% - Rendah, perlu koreksi
                     </span>
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-yellow-500"></span> 40–70% — Sedang
+                        <span class="w-2 h-2 rounded-full bg-yellow-500"></span> 40-70% - Sedang
                     </span>
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-green-500"></span> &gt; 70% — Tinggi, sudah akurat
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span> &gt; 70% - Tinggi, sudah akurat
                     </span>
                 </div>
             </div>
@@ -263,7 +263,7 @@
                         <div class="bg-white border border-indigo-100 rounded-lg p-2">
                             <p class="text-gray-500">Pasangan Kata</p>
                             <p class="font-bold text-indigo-700">
-                                {{ $evaluation['topic']['coherence_pairs'] ?? '—' }}
+                                {{ $evaluation['topic']['coherence_pairs'] ?? '-' }}
                             </p>
                         </div>
                     </div>
@@ -294,16 +294,110 @@
     @else
 
     <form method="POST" action="{{ route('analysis.feedback.store', $analysis->id) }}" id="feedbackForm">
+        {{-- Seluruh koreksi analisis ini dikirim lewat satu medan JSON, bukan
+             sebagai medan formulir per baris. Empat medan x 262 koreksi = 1.048
+             variabel, sementara max_input_vars PHP bawaannya 1.000 - sisanya
+             dibuang diam-diam. Medan per baris di bawah tetap ada sebagai jalur
+             tanpa JavaScript, dan di jalur itu jumlahnya selalu satu halaman. --}}
+        <input type="hidden" name="corrections_json" id="corrections_json">
         @csrf
         <input type="hidden" name="page" value="{{ $items->currentPage() }}">
+        <input type="hidden" name="fokus" value="{{ $fokusInfo['aktif'] }}">
+
+        {{-- Penyaring fokus. Pengguna yang datang dari ajakan di halaman hasil
+             langsung berada pada "sangat ragu" - ajakan active learning
+             sengaja hanya meminta pita paling meragukan dulu, bukan seluruh
+             "ragu" sekaligus (lihat ConfidenceReportService::build). Tetap
+             bisa berpindah ke pita yang lebih luas atau daftar penuh tanpa
+             kehilangan konteks. --}}
+        <div class="mb-4 flex items-center gap-2 flex-wrap" role="group" aria-label="Saring baris koreksi">
+            <a href="{{ route('analysis.feedback', ['id' => $analysis->id, 'fokus' => 'sangat-ragu']) }}"
+               aria-pressed="{{ $fokusInfo['aktif'] === 'sangat-ragu' ? 'true' : 'false' }}"
+               class="px-3 py-1.5 rounded-lg text-sm font-medium border
+                      {{ $fokusInfo['aktif'] === 'sangat-ragu'
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' }}">
+                Sangat ragu ({{ number_format($fokusInfo['jumlah_sangat_ragu']) }})
+            </a>
+            <a href="{{ route('analysis.feedback', ['id' => $analysis->id, 'fokus' => 'ragu']) }}"
+               aria-pressed="{{ $fokusInfo['aktif'] === 'ragu' ? 'true' : 'false' }}"
+               class="px-3 py-1.5 rounded-lg text-sm font-medium border
+                      {{ $fokusInfo['aktif'] === 'ragu'
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' }}">
+                Baris yang ragu ({{ number_format($fokusInfo['jumlah_ragu']) }})
+            </a>
+            <a href="{{ route('analysis.feedback', $analysis->id) }}"
+               aria-pressed="{{ $fokusInfo['aktif'] === 'semua' ? 'true' : 'false' }}"
+               class="px-3 py-1.5 rounded-lg text-sm font-medium border
+                      {{ $fokusInfo['aktif'] === 'semua'
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' }}">
+                Semua baris ({{ number_format($fokusInfo['jumlah_semua']) }})
+            </a>
+
+            <span class="text-xs text-gray-500 ml-1">
+                &ldquo;Sangat ragu&rdquo; = keyakinan di bawah {{ number_format($fokusInfo['ambang_sangat_ragu'] * 100, 0) }}%,
+                &ldquo;Ragu&rdquo; = di bawah {{ number_format($fokusInfo['ambang'] * 100, 0) }}%
+            </span>
+        </div>
+
+        {{-- Baris uji disembunyikan, dan jumlahnya disebut supaya angkanya tidak
+             terlihat tidak cocok dengan jumlah prediksi di halaman hasil.
+             Kalimatnya sengaja netral: mengoreksinya memang tidak akan berguna,
+             bukan karena barisnya bermasalah. --}}
+        @if(($fokusInfo['disembunyikan_uji'] ?? 0) > 0)
+        <p class="mb-4 text-xs text-gray-500">
+            {{ number_format($fokusInfo['disembunyikan_uji']) }} baris tidak ditampilkan karena
+            dipakai sebagai data uji evaluasi.
+        </p>
+        @endif
+
+        @if($fokusInfo['aktif'] === 'sangat-ragu' && $fokusInfo['jumlah_sangat_ragu'] === 0)
+        <p class="mb-4 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-4">
+            Tidak ada baris dengan keyakinan di bawah
+            {{ number_format($fokusInfo['ambang_sangat_ragu'] * 100, 0) }}% pada analisis ini.
+            Anda tetap bisa membuka <a href="{{ route('analysis.feedback', ['id' => $analysis->id, 'fokus' => 'ragu']) }}" class="text-indigo-700 underline">baris yang ragu</a>
+            atau <a href="{{ route('analysis.feedback', $analysis->id) }}" class="text-indigo-700 underline">semua baris</a>.
+        </p>
+        @endif
+
+        @if($fokusInfo['aktif'] === 'ragu' && $fokusInfo['jumlah_ragu'] === 0)
+        <p class="mb-4 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-4">
+            Tidak ada baris dengan keyakinan di bawah
+            {{ number_format($fokusInfo['ambang'] * 100, 0) }}% pada analisis ini.
+            Anda tetap bisa membuka <a href="{{ route('analysis.feedback', $analysis->id) }}" class="text-indigo-700 underline">semua baris</a>.
+        </p>
+        @endif
+
+        {{-- Kemajuan koreksi. Tanpa ini pengguna tidak punya rasa "tinggal
+             sedikit lagi" dan cenderung berhenti di tengah. --}}
+        @php
+            $persenKoreksi = $fokusInfo['jumlah_semua'] > 0
+                ? round(($fokusInfo['sudah_dikoreksi'] / $fokusInfo['jumlah_semua']) * 100)
+                : 0;
+        @endphp
+        <div class="mb-4">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+                Kemajuan pada analisis ini
+            </p>
+            <div class="flex items-center justify-between text-sm mb-1">
+                <span class="text-gray-600">{{ number_format($fokusInfo['sudah_dikoreksi']).' dari '.number_format($fokusInfo['jumlah_semua']).' baris sudah dikoreksi' }}</span>
+                <span class="text-gray-500">{{ $persenKoreksi }}%</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2" role="img"
+                 aria-label="Kemajuan koreksi {{ $persenKoreksi }} persen">
+                <div class="h-2 rounded-full bg-indigo-600" style="width: {{ $persenKoreksi }}%"></div>
+            </div>
+        </div>
 
         <div class="mb-4 flex items-center justify-between gap-4 flex-wrap">
             <p class="text-sm text-gray-600">
-                Menampilkan {{ $items->firstItem() }}&ndash;{{ $items->lastItem() }}
+                Menampilkan {{ $items->firstItem() ?? 0 }}-{{ $items->lastItem() ?? 0 }}
                 dari {{ $items->total() }} baris, diurutkan dari yang paling tidak yakin.
             </p>
             <p class="text-sm text-gray-500">
-                Halaman {{ $items->currentPage() }} dari {{ $items->lastPage() }}
+                Halaman {{ $items->currentPage() }} dari {{ max($items->lastPage(), 1) }}
             </p>
         </div>
 
@@ -337,8 +431,10 @@
                 <div class="flex flex-col md:flex-row gap-4">
                     {{-- LEFT: Text + confidence --}}
                     <div class="flex-1 min-w-0">
-                        {{-- Text content --}}
-                        <p class="text-gray-800 leading-relaxed text-sm">{{ $item->text_content }}</p>
+                        {{-- Text content. Bisa diblok untuk menambah aspek (maks. 3
+                             kata) - lihat data-aspect-source, sama seperti komentar
+                             pada halaman anotasi (public/anotasi/index.html). --}}
+                        <p class="text-gray-800 leading-relaxed text-sm" data-aspect-source="aspek-{{ $item->id }}">{{ $item->text_content }}</p>
 
                         {{-- Confidence meter --}}
                         <div class="mt-3">
@@ -395,7 +491,13 @@
                                            name="corrections[{{ $index }}][corrected_sentiment]"
                                            value="{{ $sent }}"
                                            class="sr-only peer"
-                                           {{ ($item->corrected_sentiment ?? $item->predicted_sentiment) == $sent ? 'checked' : '' }}>
+                                           {{-- Sengaja TIDAK otomatis terpilih pada baris
+                                                yang belum ditinjau: kalau terpilih, menekan
+                                                Simpan akan menandai seluruh baris di halaman
+                                                ini sebagai "sudah dikoreksi manusia", termasuk
+                                                yang tidak pernah dibaca siapa pun - dan baris
+                                                itu ikut terkirim sebagai data latih. --}}
+                                           {{ $item->is_corrected && $item->corrected_sentiment == $sent ? 'checked' : '' }}>
                                     <div class="sentiment-btn text-center py-2 rounded-lg border {{ $borderColor }} text-xs font-medium {{ $textColor }}
                                                 peer-checked:bg-indigo-600 peer-checked:text-white peer-checked:border-indigo-600
                                                 hover:bg-gray-50 transition">
@@ -416,11 +518,20 @@
                                 Koreksi Aspek
                                 <span class="text-gray-400 font-normal">(pisahkan dengan koma)</span>
                             </label>
+                            {{-- Placeholder ini cuma tampil kalau modelnya sama sekali
+                                 tidak mendeteksi aspek (value di bawah kosong). Dulu
+                                 memakai contoh nama aspek nyata ("harga, kualitas,
+                                 pelayanan...") yang gampang dikira aspek yang memang
+                                 sudah terdeteksi. Kini kalimat instruksi, bukan contoh
+                                 data, dan digayakan miring/lebih pudar supaya beda jelas
+                                 dari aspek asli yang tersimpan sebagai value. --}}
                             <input type="text"
+                                   id="aspek-{{ $item->id }}"
                                    name="corrections[{{ $index }}][corrected_aspects]"
                                    value="{{ $item->corrected_aspects ? implode(', ', $item->corrected_aspects) : (is_array($item->detected_aspects) ? implode(', ', $item->detected_aspects) : '') }}"
-                                   placeholder="harga, kualitas, pelayanan..."
-                                   class="w-full text-xs px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                                   placeholder="Belum ada aspek terdeteksi - isi kalau ada, pisahkan dengan koma"
+                                   class="w-full text-xs px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder:italic placeholder:text-gray-400">
+                            <p class="mt-1 text-[11px] text-gray-400">Atau blok kata pada teks di sebelah kiri (maks. 3 kata) untuk menambahkannya.</p>
                         </div>
                         @endif
 
@@ -445,7 +556,13 @@
             <div class="bg-white border border-indigo-200 rounded-2xl shadow-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4 fade-in-up">
                 <div>
                     <p class="font-semibold text-gray-900">Siap mengirimkan koreksi?</p>
-                    <p class="text-sm text-gray-500">Setiap koreksi secara langsung berkontribusi pada peningkatan model.</p>
+                    {{-- Hitungannya wajib terlihat. Bug yang membuat 218 koreksi
+                         menyusut jadi 19 tidak pernah ketahuan justru karena
+                         tidak ada satu pun angka di layar yang bisa dibandingkan
+                         pengguna dengan yang dikerjakannya. --}}
+                    <p class="text-sm text-gray-500" id="ringkasKirim">
+                        Setiap koreksi secara langsung berkontribusi pada peningkatan model.
+                    </p>
                 </div>
                 <div class="flex gap-3 flex-shrink-0">
                     <a href="{{ route('analysis.show', $analysis->id) }}"
@@ -453,7 +570,9 @@
                         Batalkan
                     </a>
                     <button type="submit"
-                            class="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition shadow-md">
+                            id="btnKirimKoreksi"
+                            class="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition shadow-md
+                                   disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600 disabled:active:scale-100">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                                   d="M5 13l4 4L19 7"/>
@@ -465,10 +584,346 @@
         </div>
     </form>
 
+    {{-- Id baris yang BENAR-BENAR tersimpan pada kiriman terakhir. Dipakai
+         peramban untuk menghapus drafnya, dan hanya itu. Draf tidak pernah
+         dihapus optimistis saat menekan Kirim: kalau kirimannya gagal di tengah
+         jalan, pekerjaan pengguna harus tetap ada saat halaman dibuka lagi. --}}
+    <script type="application/json" id="koreksi-tersimpan">@json(session('koreksi_tersimpan', []))</script>
+
+    @push('scripts')
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('feedbackForm');
+        const tombol = document.getElementById('btnKirimKoreksi');
+
+        if (!form || !tombol) {
+            return;
+        }
+
+        // Nilai awal tiap kolom, untuk membedakan "diisi bawaan" dari
+        // "diubah pengguna". Kolom aspek selalu terisi hasil deteksi model,
+        // jadi terisinya saja bukan tanda pengguna meninjau baris itu.
+        //
+        // Diambil SEBELUM draf dipulihkan di bawah: kalau tidak, nilai hasil
+        // pemulihan akan tercatat seolah "nilai awal dari server", dan
+        // tombol Kirim Koreksi tidak pernah menyala untuk baris yang
+        // koreksinya sebenarnya cuma dipulihkan dari draf.
+        const awal = new Map();
+
+        form.querySelectorAll('input[type=text], textarea').forEach(function (el) {
+            awal.set(el, el.value);
+        });
+
+        // ============================================================
+        // Draf otomatis - supaya koreksi yang belum dikirim tidak hilang
+        // kalau halaman ini di-refresh atau tertutup tidak sengaja.
+        //
+        // Disimpan di localStorage peramban (sama seperti halaman anotasi,
+        // public/anotasi/index.html), per item_id - bukan per halaman/fokus -
+        // supaya draf tetap ketemu walau pengguna berpindah halaman atau
+        // penyaring sebelum sempat mengirim. Tidak dikirim ke mana pun.
+        // ============================================================
+        const KUNCI_DRAF = 'koreksi-draf:{{ $analysis->id }}';
+
+        function bacaDraf() {
+            try {
+                return JSON.parse(localStorage.getItem(KUNCI_DRAF) || '{}');
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function tulisDraf(draf) {
+            try {
+                localStorage.setItem(KUNCI_DRAF, JSON.stringify(draf));
+            } catch (e) {
+                // Penuh atau diblokir peramban - draf tidak tersimpan, tetapi
+                // halaman tetap harus berfungsi seperti biasa.
+            }
+        }
+
+        function idBarisDari(kartu) {
+            const el = kartu.querySelector('input[name$="[item_id]"]');
+
+            return el ? el.value : null;
+        }
+
+        function simpanBarisKeDraf(kartu) {
+            const id = idBarisDari(kartu);
+            if (!id) {
+                return;
+            }
+
+            const radioTerpilih = kartu.querySelector('input[type=radio]:checked');
+            const aspekInput = kartu.querySelector('input[type=text][name$="[corrected_aspects]"]');
+            const catatanInput = kartu.querySelector('textarea[name$="[correction_notes]"]');
+
+            const draf = bacaDraf();
+            draf[id] = {
+                corrected_sentiment: radioTerpilih ? radioTerpilih.value : null,
+                corrected_aspects: aspekInput ? aspekInput.value : null,
+                correction_notes: catatanInput ? catatanInput.value : null,
+            };
+            tulisDraf(draf);
+        }
+
+        // Pulihkan draf yang ada SEBELUM listener autosave dipasang, supaya
+        // pemulihan itu sendiri tidak langsung tertulis ulang sebagai draf
+        // "baru" dengan nilai yang persis sama.
+        (function pulihkanDraf() {
+            const draf = bacaDraf();
+            if (Object.keys(draf).length === 0) {
+                return;
+            }
+
+            form.querySelectorAll('.item-card').forEach(function (kartu) {
+                const id = idBarisDari(kartu);
+                const barisDraf = id ? draf[id] : null;
+                if (!barisDraf) {
+                    return;
+                }
+
+                if (barisDraf.corrected_sentiment) {
+                    const radio = kartu.querySelector(
+                        'input[type=radio][value="' + barisDraf.corrected_sentiment + '"]'
+                    );
+                    if (radio) {
+                        radio.checked = true;
+                    }
+                }
+
+                if (barisDraf.corrected_aspects !== null && barisDraf.corrected_aspects !== undefined) {
+                    const aspekInput = kartu.querySelector('input[type=text][name$="[corrected_aspects]"]');
+                    if (aspekInput) {
+                        aspekInput.value = barisDraf.corrected_aspects;
+                    }
+                }
+
+                if (barisDraf.correction_notes !== null && barisDraf.correction_notes !== undefined) {
+                    const catatanInput = kartu.querySelector('textarea[name$="[correction_notes]"]');
+                    if (catatanInput) {
+                        catatanInput.value = barisDraf.correction_notes;
+                    }
+                }
+            });
+        })();
+
+        // ============================================================
+        // Bersihkan draf milik baris yang SERVER konfirmasi tersimpan.
+        //
+        // Dulu draf dihapus begitu tombol Kirim ditekan, untuk baris pada
+        // halaman yang sedang tampil - optimistis pada dua hal sekaligus:
+        // bahwa kirimannya berhasil, dan bahwa setiap baris terkirim memang
+        // disimpan (padahal baris yang tidak benar-benar ditinjau dilewati
+        // server). Sekarang yang dihapus persis daftar id yang dibalas server.
+        // ============================================================
+        (function bersihkanYangTersimpan() {
+            const wadah = document.getElementById('koreksi-tersimpan');
+            if (!wadah) {
+                return;
+            }
+
+            let tersimpan = [];
+            try {
+                tersimpan = JSON.parse(wadah.textContent || '[]');
+            } catch (e) {
+                return;
+            }
+
+            if (!Array.isArray(tersimpan) || tersimpan.length === 0) {
+                return;
+            }
+
+            const draf = bacaDraf();
+            tersimpan.forEach(function (id) {
+                delete draf[String(id)];
+            });
+            tulisDraf(draf);
+        })();
+
+        // ============================================================
+        // Kirim SELURUH koreksi analisis ini, bukan hanya halaman yang tampil.
+        //
+        // Inilah perbaikan utamanya. Draf peramban menyimpan koreksi per
+        // item_id lintas halaman, tetapi formulir hanya memuat medan untuk 25
+        // baris yang sedang dirender - jadi koreksi halaman sebelumnya tidak
+        // pernah sampai ke server. Terukur pada studi kasus: 218 koreksi
+        // tersimpan, 19 yang dilatihkan.
+        //
+        // Nilai pada halaman yang sedang tampil menang atas draf: itu yang
+        // barusan dilihat dan disunting pengguna.
+        // ============================================================
+        function kumpulkanSemua() {
+            const gabungan = {};
+            const draf = bacaDraf();
+
+            Object.keys(draf).forEach(function (id) {
+                const baris = draf[id] || {};
+                gabungan[id] = {
+                    item_id: Number(id),
+                    corrected_sentiment: baris.corrected_sentiment || null,
+                    corrected_aspects: baris.corrected_aspects || null,
+                    correction_notes: baris.correction_notes || null,
+                };
+            });
+
+            form.querySelectorAll('.item-card').forEach(function (kartu) {
+                const id = idBarisDari(kartu);
+                if (!id) {
+                    return;
+                }
+
+                const radio = kartu.querySelector('input[type=radio]:checked');
+                const aspek = kartu.querySelector('input[type=text][name$="[corrected_aspects]"]');
+                const catatan = kartu.querySelector('textarea[name$="[correction_notes]"]');
+
+                gabungan[id] = {
+                    item_id: Number(id),
+                    corrected_sentiment: radio ? radio.value : null,
+                    corrected_aspects: aspek ? aspek.value : null,
+                    correction_notes: catatan ? catatan.value : null,
+                };
+            });
+
+            return Object.keys(gabungan).map(function (id) {
+                return gabungan[id];
+            });
+        }
+
+        const medanJson = document.getElementById('corrections_json');
+
+        form.addEventListener('submit', function () {
+            if (medanJson) {
+                medanJson.value = JSON.stringify(kumpulkanSemua());
+            }
+        });
+
+        // Berapa baris berdraf yang TIDAK sedang tampil di halaman ini.
+        // Angka inilah yang dulu hilang tanpa jejak.
+        function drafLuarHalaman() {
+            const draf = bacaDraf();
+            const idTampil = new Set();
+
+            form.querySelectorAll('.item-card').forEach(function (kartu) {
+                const id = idBarisDari(kartu);
+                if (id) {
+                    idTampil.add(String(id));
+                }
+            });
+
+            return Object.keys(draf).filter(function (id) {
+                if (idTampil.has(id)) {
+                    return false;
+                }
+
+                const baris = draf[id] || {};
+
+                return Boolean(baris.corrected_sentiment)
+                    || Boolean((baris.corrected_aspects || '').trim())
+                    || Boolean((baris.correction_notes || '').trim());
+            }).length;
+        }
+
+        function adaKoreksi() {
+            const radioTerpilih = form.querySelector('input[type=radio]:checked');
+
+            if (radioTerpilih) {
+                return true;
+            }
+
+            for (const [el, nilaiAwal] of awal) {
+                if (el.value !== nilaiAwal) {
+                    return true;
+                }
+            }
+
+            // Draf dari halaman lain juga akan ikut terkirim, jadi tombolnya
+            // harus menyala walau halaman ini belum disentuh sama sekali.
+            // Tanpa ini, koreksi halaman sebelumnya terkunci di peramban.
+            return drafLuarHalaman() > 0;
+        }
+
+        const ringkas = document.getElementById('ringkasKirim');
+
+        function perbarui() {
+            // Aturannya sama dengan yang dipakai server saat menyimpan, jadi
+            // tombol tidak pernah aktif untuk kiriman yang toh akan kosong.
+            tombol.disabled = !adaKoreksi();
+
+            if (!ringkas) {
+                return;
+            }
+
+            const luar = drafLuarHalaman();
+
+            ringkas.textContent = luar > 0
+                ? 'Termasuk ' + luar + ' koreksi dari halaman lain yang belum terkirim. '
+                    + 'Semuanya ikut dalam satu kiriman ini.'
+                : 'Setiap koreksi secara langsung berkontribusi pada peningkatan model.';
+        }
+
+        function tanganiPerubahan(e) {
+            perbarui();
+
+            const kartu = e.target.closest('.item-card');
+            if (kartu) {
+                simpanBarisKeDraf(kartu);
+            }
+        }
+
+        form.addEventListener('input', tanganiPerubahan);
+        form.addEventListener('change', tanganiPerubahan);
+        perbarui();
+
+        // Blok kata pada teks untuk menambahkannya sebagai aspek - mekanisme
+        // yang sama dengan komentar pada halaman anotasi (public/anotasi/index.html):
+        // ejaannya persis sama dengan yang tertulis, jadi tidak ada aspek yang
+        // meleset karena salah ketik, dan lebih cepat daripada mengetik ulang.
+        // Dibatasi maksimal tiga kata supaya menyeret kalimat panjang tidak
+        // tercatat sebagai aspek.
+        form.querySelectorAll('[data-aspect-source]').forEach(function (teks) {
+            teks.addEventListener('mouseup', function () {
+                const aspekInput = document.getElementById(teks.dataset.aspectSource);
+                if (!aspekInput) {
+                    return;
+                }
+
+                const pilihan = String(window.getSelection()).trim();
+
+                if (pilihan.length <= 1 || pilihan.split(/\s+/).length > 3) {
+                    return;
+                }
+
+                const daftar = aspekInput.value
+                    .split(',')
+                    .map(function (a) { return a.trim(); })
+                    .filter(Boolean);
+
+                const sudahAda = daftar.some(function (a) {
+                    return a.toLowerCase() === pilihan.toLowerCase();
+                });
+
+                if (!sudahAda) {
+                    daftar.push(pilihan);
+                    aspekInput.value = daftar.join(', ');
+                    // dispatchEvent, bukan mengandalkan browser: mengubah .value
+                    // lewat skrip tidak memicu event 'input' dengan sendirinya,
+                    // dan tanpa ini tombol Kirim Koreksi tidak pernah menyala
+                    // untuk koreksi yang datang dari menyorot teks.
+                    aspekInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+
+                window.getSelection().removeAllRanges();
+            });
+        });
+    });
+    </script>
+    @endpush
+
     @if($items->hasPages())
     <div class="mt-6">
         <p class="mb-2 text-xs text-gray-500">
-            Simpan koreksi pada halaman ini sebelum berpindah &mdash; perubahan yang belum
+            Simpan koreksi pada halaman ini sebelum berpindah - perubahan yang belum
             disimpan tidak ikut terbawa ke halaman berikutnya.
         </p>
         {{ $items->links() }}

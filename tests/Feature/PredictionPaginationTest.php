@@ -149,6 +149,46 @@ class PredictionPaginationTest extends TestCase
             ->assertStatus(422);
     }
 
+    public function test_penyaringan_per_aspek_dipakai_tombol_mata(): void
+    {
+        $analysis = $this->analysis();
+        $analysis->result->update([
+            'predictions' => collect($analysis->result->predictions)->map(function ($prediction, $i) {
+                // Aspek "pelayanan" hanya disebut pada tiga baris tertentu -
+                // tombol mata pada kartu aspek harus menampilkan persis baris
+                // itu, bukan seluruh 60 prediksi.
+                $prediction['aspects'] = in_array($i, [2, 7, 15], true) ? ['pelayanan'] : ['harga'];
+
+                return $prediction;
+            })->all(),
+        ]);
+
+        $this->actingAs($analysis->user)
+            ->getJson(route('analysis.predictions', $analysis->id).'?aspect=pelayanan')
+            ->assertOk()
+            ->assertJsonPath('meta.filtered', 3)
+            ->assertJsonPath('meta.total', 60);
+    }
+
+    public function test_penyaringan_aspek_digabung_dengan_penyaring_sentimen(): void
+    {
+        $analysis = $this->analysis();
+        $analysis->result->update([
+            'predictions' => collect($analysis->result->predictions)->map(function ($prediction, $i) {
+                $prediction['aspects'] = in_array($i, [0, 1], true) ? ['pelayanan'] : ['harga'];
+
+                return $prediction;
+            })->all(),
+        ]);
+
+        // Baris 0 dan 1 sama-sama menyebut "pelayanan", tetapi sentimennya
+        // berbeda (i=0 -> positive, i=1 -> neutral pada fixture ini).
+        $this->actingAs($analysis->user)
+            ->getJson(route('analysis.predictions', $analysis->id).'?aspect=pelayanan&filter=positive')
+            ->assertOk()
+            ->assertJsonPath('meta.filtered', 1);
+    }
+
     public function test_analisis_milik_pengguna_lain_tidak_bisa_dibaca(): void
     {
         $analysis = $this->analysis();

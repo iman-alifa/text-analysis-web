@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\RetrainBusyException;
 use Exception;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -55,6 +56,66 @@ class NLPApiService
 
         } catch (Exception $e) {
             Log::warning('Health check NLP API gagal: '.$e->getMessage());
+
+            return null;
+        }
+    }
+
+    /**
+     * Ambil satu nilai dari blok `models` pada respons /health.
+     *
+     * Bentuk sebenarnya adalah `{"models": {"sentiment_review_threshold": 0.94,
+     * ...}}` - bukan di tingkat atas. Kode lama membacanya di tingkat atas
+     * sehingga selalu mendapat null: panel kesiapan model pada formulir
+     * analisis menampilkan seluruh kolomnya kosong, dan pencarian ambang
+     * tinjauan selalu jatuh ke nilai cadangan.
+     *
+     * Tingkat atas tetap diperiksa sebagai cadangan supaya versi layanan yang
+     * lebih tua (bila ada) tidak ikut rusak.
+     */
+    public function healthModelValue(?array $health, string $key): mixed
+    {
+        return $health['models'][$key] ?? $health[$key] ?? null;
+    }
+
+    /**
+     * Bentuk dasar nama aspek, memakai stemmer yang sama persis dengan yang
+     * dipakai ekstraksi aspek di layanan.
+     *
+     * Wajib lewat layanan, bukan ditebak di PHP: stemmer Sastrawi hidup di
+     * Python, dan menebak bentuk dasar di sini akan melahirkan definisi
+     * kecocokan kedua yang berbeda dari definisi yang dipakai ekstraksinya -
+     * persis kesalahan yang sedang diperbaiki.
+     *
+     * @param  array<int, string>  $aspects
+     * @return array<string, string>|null peta nama asal -> bentuk dasar
+     */
+    public function normalizeAspectNames(array $aspects): ?array
+    {
+        $aspects = array_values(array_unique(array_filter(array_map(
+            fn ($a) => trim((string) $a),
+            $aspects
+        ), fn ($a) => $a !== '')));
+
+        if (empty($aspects)) {
+            return [];
+        }
+
+        try {
+            $response = Http::timeout(60)
+                ->post("{$this->apiUrl}/api/normalize/aspects", ['aspects' => $aspects]);
+
+            if (! $response->successful()) {
+                Log::warning('Normalisasi aspek gagal: '.$response->status().' '.$response->body());
+
+                return null;
+            }
+
+            $peta = $response->json('results.normalized');
+
+            return is_array($peta) ? $peta : null;
+        } catch (Exception $e) {
+            Log::warning('Normalisasi aspek gagal: '.$e->getMessage());
 
             return null;
         }
@@ -506,6 +567,15 @@ class NLPApiService
         // Aspek per dokumen dari Python, dipetakan ke indeks teks aslinya.
         // Dipakai untuk mengisi training_items tanpa menebak lewat keyword.
         $documentAspects = array_fill(0, count($texts), []);
+
+        // Bentuk dasar tiap aspek, sejajar indeks dengan $documentAspects.
+        // WAJIB ikut dikumpulkan di jalur batch. Sebelumnya hanya bentuk
+        // permukaan yang dirakit, sehingga korpus di atas batch_size (50)
+        // kehilangan `document_aspects_normalized` sama sekali - dan evaluasi
+        // hold-out, yang golden dataset-nya 300 baris, SELALU melewati jalur
+        // ini. Akibatnya metrik aspek tidak bisa dihitung sama sekali.
+        $documentAspectsNormalized = array_fill(0, count($texts), []);
+        $adaNormalisasi = false;
         $failedBatches = [];
 
         Log::info("Processing {$totalBatches} batches for aspect analysis", [
@@ -533,6 +603,18 @@ class NLPApiService
                     foreach ($result['results']['document_aspects'] as $position => $aspectsOfDocument) {
                         if (isset($originalIndexes[$position])) {
                             $documentAspects[$originalIndexes[$position]] = array_values((array) $aspectsOfDocument);
+                        }
+                    }
+                }
+
+                // Dipetakan lewat $originalIndexes yang sama persis, supaya
+                // bentuk dasar dan bentuk permukaan menunjuk dokumen yang sama.
+                if (isset($result['results']['document_aspects_normalized'])
+                    && is_array($result['results']['document_aspects_normalized'])) {
+                    $adaNormalisasi = true;
+                    foreach ($result['results']['document_aspects_normalized'] as $position => $aspectsOfDocument) {
+                        if (isset($originalIndexes[$position])) {
+                            $documentAspectsNormalized[$originalIndexes[$position]] = array_values((array) $aspectsOfDocument);
                         }
                     }
                 }
@@ -655,6 +737,14 @@ class NLPApiService
             'document_aspects' => $documentAspects,
             'summary' => $summary,
         ];
+
+        // Hanya disertakan bila layanan benar-benar mengirimnya. Mengirim
+        // larik kosong akan membuat evaluasi mengira normalisasi tersedia lalu
+        // membandingkan label emas dengan daftar kosong - nol untuk semua
+        // metrik aspek, tanpa satu pun tanda bahwa penyebabnya versi layanan.
+        if ($adaNormalisasi) {
+            $results['document_aspects_normalized'] = $documentAspectsNormalized;
+        }
 
         if (! empty($failedBatches)) {
             $results['failed_batches'] = $failedBatches;
@@ -852,6 +942,14 @@ class NLPApiService
             }
 
             return $result['results'] ?? [];
+        }
+
+        // 409 berarti layanan sedang melatih model yang sama. Sejak lock
+        // ditambahkan di sisi Python, ini keadaan yang wajar - bukan kerusakan.
+        if ($response->status() === 409) {
+            throw new RetrainBusyException(
+                "Layanan NLP sedang melatih model {$type}. Pelatihan ini dilewati."
+            );
         }
 
         throw new Exception("Retraining {$type} gagal: ".$response->body());

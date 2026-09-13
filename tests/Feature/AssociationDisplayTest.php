@@ -119,6 +119,49 @@ class AssociationDisplayTest extends TestCase
             ->assertDontSee('Data asosiasi aspek&ndash;topik belum tersedia', false);
     }
 
+    public function test_heatmap_tetap_sejajar_saat_topik_bukan_tiga(): void
+    {
+        // Heatmap PMI dulu memakai grid CSS dengan kolom dipatok
+        // "repeat(3,1fr)" - benar kalau kebetulan 3 topik, tetapi begitu
+        // num_topics lain (2-20, atau hasil mode otomatis) header dan baris
+        // skor tidak lagi sebaris dengan label topiknya. Tabel biasa dipakai
+        // sebagai gantinya karena menangani jumlah kolom berapa pun.
+        $topicResults = [
+            'topics' => [
+                ['topic_id' => 0, 'words' => ['a'], 'size' => 1, 'proportion' => 0.25],
+                ['topic_id' => 1, 'words' => ['b'], 'size' => 1, 'proportion' => 0.25],
+                ['topic_id' => 2, 'words' => ['c'], 'size' => 1, 'proportion' => 0.25],
+                ['topic_id' => 3, 'words' => ['d'], 'size' => 1, 'proportion' => 0.25],
+            ],
+            'document_topics' => [0, 1, 2, 3],
+            'num_topics' => 4,
+        ];
+
+        $association = [
+            'pmi_top_associations' => [],
+            'heatmap_matrix' => [
+                ['aspect' => 'pajak', 'topic_0' => 0.1, 'topic_1' => 0.2, 'topic_2' => 0.3, 'topic_3' => 0.4],
+            ],
+        ];
+
+        $analysis = $this->makeCombinedAnalysis($association, [['pajak'], ['pajak'], ['pajak'], ['pajak']]);
+        $analysis->result->update(['topic_results' => $topicResults]);
+
+        $html = $this->actingAs($analysis->user)
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringNotContainsString('grid-cols-[80px_repeat(3,1fr)]', $html);
+
+        // Bekas bug: grid CSS dengan kolom dipatok 3 membuat topik keempat
+        // tidak sebaris dengan skornya. Memastikan keempat label topik
+        // benar-benar dirender, bukan cuma tiga yang pertama.
+        foreach (['Topik #1', 'Topik #2', 'Topik #3', 'Topik #4'] as $label) {
+            $this->assertStringContainsString($label, $html);
+        }
+    }
+
     public function test_halaman_hasil_tidak_menampilkan_angka_contoh_saat_data_kosong(): void
     {
         $analysis = $this->makeCombinedAnalysis(null, []);

@@ -394,6 +394,31 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                                 <p class="text-xs text-gray-500">Masukkan nomor kolom (dimulai dari 1) yang berisi teks untuk dianalisis</p>
                             </div>
 
+                            <!-- Kolom Pemisah (opsional) -->
+                            <div id="segment-columns-config" class="space-y-3">
+                                <label class="block text-sm font-medium text-gray-700">
+                                    Kolom Pemisah <span class="text-gray-400 font-normal">(opsional)</span>
+                                </label>
+                                <p class="text-xs text-gray-500">
+                                    Pilih kolom yang ingin dipakai untuk merinci hasil, misalnya tanggal,
+                                    sumber data, atau judul video. Hasil keseluruhan tetap dihitung seperti
+                                    biasa - rinciannya bisa dibuka di halaman hasil tanpa menjalankan
+                                    analisis ulang. Kosongkan bila tidak perlu.
+                                </p>
+
+                                <div id="segment-columns-list"
+                                     class="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto
+                                            border border-gray-200 rounded-lg p-3 bg-gray-50">
+                                    <p class="text-xs text-gray-500 sm:col-span-2" id="segment-columns-empty">
+                                        Daftar kolom muncul setelah berkas diunggah.
+                                    </p>
+                                </div>
+
+                                <p class="text-xs text-gray-500" id="segment-columns-hint" aria-live="polite">
+                                    Maksimal 3 kolom.
+                                </p>
+                            </div>
+
                             <!-- CSV Delimiter (CSV only) -->
                             <div id="csv-delimiter-config" class="hidden space-y-3">
                                 <label for="csv_delimiter" class="block text-sm font-medium text-gray-700">
@@ -645,16 +670,16 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                         <select name="num_topics"
                                 id="num_topics"
                                 class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            <option value="0" selected>Otomatis &mdash; cari jumlah topik terbaik</option>
+                            <option value="0" selected>Otomatis - cari jumlah topik terbaik</option>
                             @for($i = 2; $i <= 20; $i++)
                             <option value="{{ $i }}">{{ $i }} topik</option>
                             @endfor
                         </select>
                         <p class="mt-2 text-sm text-gray-500">
                             Mode <strong>Otomatis</strong> memilih jumlah topik yang memaksimalkan koherensi (c<sub>v</sub>).
-                            Untuk laporan yang perlu dibandingkan antar waktu, tetapkan angka tertentu &mdash;
+                            Untuk laporan yang perlu dibandingkan antar waktu, tetapkan angka tertentu -
                             mode otomatis bisa menghasilkan jumlah topik berbeda tiap kali dijalankan
-                            (terukur 6&ndash;19 topik) meski mutunya stabil.
+                            (terukur 6-19 topik) meski mutunya stabil.
                         </p>
                     </div>
                 </div>
@@ -663,20 +688,14 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
 
         {{-- Bobot model dimuat malas di sisi API, jadi analisis pertama setelah
              layanan menyala terasa menggantung. Kesiapannya ditampilkan di sini
-             supaya bisa dipanaskan lebih dulu. --}}
+             sekadar informasi - pemanasannya sendiri sudah berjalan otomatis di
+             latar belakang begitu sebuah analisis dimulai (lihat
+             ProcessTextAnalysis::handle), jadi tidak ada tombol untuk dipilih
+             di sini lagi. --}}
         <div id="nlp-status-panel" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hidden">
-            <div class="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                    <h3 class="text-sm font-semibold text-gray-900">Kesiapan Model</h3>
-                    <p class="mt-1 text-xs text-gray-500" id="nlp-status-message">Memeriksa...</p>
-                    <div class="mt-2 flex flex-wrap gap-2" id="nlp-status-badges"></div>
-                </div>
-                <button type="button"
-                        id="btn-warm-up"
-                        class="px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 hidden">
-                    Panaskan Model
-                </button>
-            </div>
+            <h3 class="text-sm font-semibold text-gray-900">Kesiapan Model</h3>
+            <p class="mt-1 text-xs text-gray-500" id="nlp-status-message">Memeriksa...</p>
+            <div class="mt-2 flex flex-wrap gap-2" id="nlp-status-badges"></div>
         </div>
 
         <!-- Submit Buttons -->
@@ -983,6 +1002,77 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
             } else if (data.headers.length > 0) {
                 columnSelect.value = data.headers[0];
             }
+
+            populateSegmentColumns(data.headers, columnSelect.value);
+
+            // Kolom teks tidak boleh sekaligus jadi pemisah - tiap baris akan
+            // menjadi satu segmen sendiri dan rinciannya tidak berarti apa-apa.
+            columnSelect.addEventListener('change', function () {
+                populateSegmentColumns(data.headers, columnSelect.value);
+            });
+        }
+    }
+
+    const SEGMENT_MAX = 3;
+
+    function populateSegmentColumns(headers, textColumn) {
+        const wadah = document.getElementById('segment-columns-list');
+
+        if (!wadah || !headers) {
+            return;
+        }
+
+        // Pilihan yang sudah dibuat dipertahankan saat daftar disusun ulang.
+        const terpilih = new Set(
+            Array.from(wadah.querySelectorAll('input:checked')).map((el) => el.value)
+        );
+
+        wadah.innerHTML = '';
+
+        const kandidat = headers.filter((h) => h && h !== textColumn);
+
+        if (kandidat.length === 0) {
+            wadah.innerHTML = '<p class="text-xs text-gray-500 sm:col-span-2">'
+                + 'Tidak ada kolom lain yang bisa dipakai sebagai pemisah.</p>';
+            return;
+        }
+
+        kandidat.forEach((header) => {
+            const label = document.createElement('label');
+            label.className = 'flex items-center gap-2 text-sm text-gray-700 cursor-pointer';
+
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.name = 'segment_columns[]';
+            input.value = header;
+            input.checked = terpilih.has(header);
+            input.className = 'rounded border-gray-300 text-blue-600 focus:ring-blue-500';
+            input.addEventListener('change', terapkanBatasSegmen);
+
+            const teks = document.createElement('span');
+            teks.textContent = header;
+
+            label.append(input, teks);
+            wadah.appendChild(label);
+        });
+
+        terapkanBatasSegmen();
+    }
+
+    function terapkanBatasSegmen() {
+        const kotak = document.querySelectorAll('#segment-columns-list input[type=checkbox]');
+        const jumlah = Array.from(kotak).filter((el) => el.checked).length;
+
+        kotak.forEach((el) => {
+            el.disabled = !el.checked && jumlah >= SEGMENT_MAX;
+        });
+
+        const petunjuk = document.getElementById('segment-columns-hint');
+
+        if (petunjuk) {
+            petunjuk.textContent = jumlah === 0
+                ? 'Maksimal 3 kolom. Kosongkan bila tidak perlu.'
+                : jumlah + ' dari ' + SEGMENT_MAX + ' kolom dipilih.';
         }
     }
 
@@ -1540,7 +1630,7 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                         + '<p class="mt-2 text-xs font-medium uppercase tracking-wide text-gray-400">Setelah preprocessing</p>'
                         + '<p class="' + (unchanged ? 'text-gray-500 italic' : 'text-gray-800') + '">'
                         + (processed ? escapeHtml(processed) : '<span class="italic text-gray-400">(kosong)</span>')
-                        + (unchanged ? ' &mdash; tidak berubah' : '')
+                        + (unchanged ? ' - tidak berubah' : '')
                         + '</p></div>';
                 }).join('');
 
@@ -1569,7 +1659,6 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
 
         const messageEl = document.getElementById('nlp-status-message');
         const badgesEl = document.getElementById('nlp-status-badges');
-        const warmButton = document.getElementById('btn-warm-up');
 
         const LABELS = { sentiment: 'Sentimen', aspect: 'Aspek', topic: 'Topik' };
 
@@ -1595,7 +1684,6 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                 if (!ok || !data.success) {
                     messageEl.textContent = data.message || 'Layanan analisis tidak merespons.';
                     badgesEl.innerHTML = '';
-                    warmButton.classList.add('hidden');
                     return;
                 }
 
@@ -1603,10 +1691,8 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
 
                 if (data.all_ready) {
                     messageEl.textContent = 'Semua model siap. Analisis akan langsung berjalan.';
-                    warmButton.classList.add('hidden');
                 } else {
-                    messageEl.textContent = 'Sebagian model belum dimuat. Analisis pertama akan lebih lambat karena menunggu model dimuat.';
-                    warmButton.classList.remove('hidden');
+                    messageEl.textContent = 'Sebagian model belum dimuat. Analisis pertama akan memuatnya otomatis di latar belakang, jadi mungkin sedikit lebih lambat.';
                 }
             })
             .catch(() => {
@@ -1614,28 +1700,6 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                 messageEl.textContent = 'Tidak bisa memeriksa status layanan analisis.';
             });
         }
-
-        warmButton.addEventListener('click', function () {
-            warmButton.disabled = true;
-            warmButton.textContent = 'Memanaskan...';
-            messageEl.textContent = 'Memuat bobot model, mohon tunggu...';
-
-            fetch('{{ route('analysis.warm-up') }}', {
-                method: 'POST',
-                headers: {
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
-                    'Accept': 'application/json',
-                },
-            })
-            .then(response => response.json())
-            .then(data => { messageEl.textContent = data.message || 'Selesai.'; })
-            .catch(() => { messageEl.textContent = 'Pemanasan gagal.'; })
-            .finally(() => {
-                warmButton.disabled = false;
-                warmButton.textContent = 'Panaskan Model';
-                loadStatus();
-            });
-        });
 
         loadStatus();
     })();

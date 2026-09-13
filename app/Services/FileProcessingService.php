@@ -282,7 +282,6 @@ class FileProcessingService
         });
         $data = array_values($data);
 
-        $texts = [];
         $hasHeader = isset($config['file_has_header']) && $config['file_has_header'] == 'on';
 
         if ($hasHeader) {
@@ -300,35 +299,15 @@ class FileProcessingService
                 throw new \Exception("Column '$columnName' not found");
             }
 
-            // Extract text from column (skip header)
-            for ($i = 1; $i < count($data); $i++) {
-                $text = $data[$i][$columnIndex] ?? '';
-                $text = trim($text);
-                if (! empty($text)) {
-                    $texts[] = $text;
-                }
-            }
-
-        } else {
-            // Use column index
-            $columnIndex = isset($config['text_column_index'])
-                ? (int) $config['text_column_index'] - 1  // Convert to 0-based
-                : 0;
-
-            // Extract text from column
-            foreach ($data as $row) {
-                $text = $row[$columnIndex] ?? '';
-                $text = trim($text);
-                if (! empty($text)) {
-                    $texts[] = $text;
-                }
-            }
+            return $this->collectRows(array_slice($data, 1), $columnIndex, $headers, $config);
         }
 
-        return [
-            'texts' => $texts,
-            'total' => count($texts),
-        ];
+        // Use column index
+        $columnIndex = isset($config['text_column_index'])
+            ? (int) $config['text_column_index'] - 1  // Convert to 0-based
+            : 0;
+
+        return $this->collectRows($data, $columnIndex, null, $config);
     }
 
     /**
@@ -359,7 +338,6 @@ class FileProcessingService
         });
         $data = array_values($data);
 
-        $texts = [];
         $hasHeader = isset($config['file_has_header']) && $config['file_has_header'] == 'on';
 
         if ($hasHeader) {
@@ -377,34 +355,121 @@ class FileProcessingService
                 throw new \Exception("Column '$columnName' not found");
             }
 
-            // Extract text (skip header)
-            for ($i = 1; $i < count($data); $i++) {
-                $text = $data[$i][$columnIndex] ?? '';
-                $text = trim($text);
-                if (! empty($text)) {
-                    $texts[] = $text;
-                }
+            return $this->collectRows(array_slice($data, 1), $columnIndex, $headers, $config);
+        }
+
+        // Use column index
+        $columnIndex = isset($config['text_column_index'])
+            ? (int) $config['text_column_index'] - 1
+            : 0;
+
+        return $this->collectRows($data, $columnIndex, null, $config);
+    }
+
+    /**
+     * Ambil teks dan nilai kolom pemisah dari baris data tabel.
+     *
+     * Keduanya dikumpulkan dalam satu lintasan, dan baris berteks kosong
+     * dilewati bersama-sama. Kalau kolom pemisah diambil pada lintasan
+     * terpisah, indeksnya bergeser di setiap baris kosong dan seluruh
+     * pengelompokan hasil menunjuk teks yang salah.
+     *
+     * @param  array  $rows  Baris data, tanpa baris header
+     * @param  array|null  $headers  Nama kolom, null bila berkas tanpa header
+     * @return array{texts: array, total: int, segments: array, segment_columns: array}
+     */
+    private function collectRows(array $rows, int $textColumn, ?array $headers, array $config): array
+    {
+        $segmentColumns = $this->resolveSegmentColumns($headers, $config, $textColumn);
+
+        $texts = [];
+        $segments = [];
+
+        foreach ($rows as $row) {
+            $text = trim((string) ($row[$textColumn] ?? ''));
+
+            if ($text === '') {
+                continue;
             }
 
-        } else {
-            // Use column index
-            $columnIndex = isset($config['text_column_index'])
-                ? (int) $config['text_column_index'] - 1
-                : 0;
+            $texts[] = $text;
 
-            foreach ($data as $row) {
-                $text = $row[$columnIndex] ?? '';
-                $text = trim($text);
-                if (! empty($text)) {
-                    $texts[] = $text;
-                }
+            if (empty($segmentColumns)) {
+                continue;
             }
+
+            $nilai = [];
+
+            foreach ($segmentColumns as $label => $index) {
+                $isi = trim((string) ($row[$index] ?? ''));
+                // Baris tanpa nilai pemisah tetap disimpan sebagai string
+                // kosong supaya jumlah baris segmen selalu sama dengan teks.
+                $nilai[$label] = $isi;
+            }
+
+            $segments[] = $nilai;
         }
 
         return [
             'texts' => $texts,
             'total' => count($texts),
+            'segments' => $segments,
+            'segment_columns' => array_keys($segmentColumns),
         ];
+    }
+
+    /**
+     * Petakan pilihan kolom pemisah pengguna ke indeks kolom.
+     *
+     * Berkas berheader dipilih dengan nama kolom; tanpa header dengan nomor
+     * kolom 1-based. Kolom teks sendiri tidak boleh jadi pemisah - tiap baris
+     * akan menjadi satu segmen sendiri dan hasilnya tidak berarti apa-apa.
+     *
+     * @return array<string, int> label kolom => indeks kolom
+     */
+    private function resolveSegmentColumns(?array $headers, array $config, int $textColumn): array
+    {
+        $pilihan = $config['segment_columns'] ?? [];
+
+        if (! is_array($pilihan) || empty($pilihan)) {
+            return [];
+        }
+
+        $hasil = [];
+
+        foreach ($pilihan as $pilih) {
+            $pilih = is_string($pilih) ? trim($pilih) : $pilih;
+
+            if ($pilih === '' || $pilih === null) {
+                continue;
+            }
+
+            if ($headers !== null) {
+                $index = array_search($pilih, $headers, true);
+
+                if ($index === false) {
+                    continue;
+                }
+
+                $label = (string) $pilih;
+            } else {
+                $index = (int) $pilih - 1;
+
+                if ($index < 0) {
+                    continue;
+                }
+
+                $label = 'Kolom '.((int) $pilih);
+            }
+
+            if ($index === $textColumn) {
+                continue;
+            }
+
+            $hasil[$label] = $index;
+        }
+
+        return $hasil;
     }
 
     /**

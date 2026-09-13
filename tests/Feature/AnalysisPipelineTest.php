@@ -18,6 +18,50 @@ class AnalysisPipelineTest extends TestCase
 {
     use RefreshDatabase;
 
+    private const EMOTIKON = "\u{2764}\u{FE0F}\u{1F44D}\u{1F44D}";
+
+    public function test_baris_tidak_dinilai_tidak_pernah_dibuatkan_data_koreksi(): void
+    {
+        // Baris ini pernah dibuat lalu disembunyikan di halaman koreksi. Itu
+        // gagal diam-diam: baris yang terlanjur dibuat sebelum kolom
+        // `predicted_method` ada bernilai NULL, dan penyaringnya meloloskan NULL
+        // supaya data lama tidak ikut hilang - sehingga 175 baris emotikon tetap
+        // muncul pada studi kasus. Menolaknya di sumber membuat seluruh hitungan
+        // konsisten: halaman koreksi, statistik admin, dan muatan pelatihan.
+        $analysis = \App\Models\TextAnalysis::create([
+            'user_id' => \App\Models\User::factory()->create()->id,
+            'title' => 'Uji baris kosong',
+            'analysis_type' => 'sentiment',
+            'input_type' => 'manual',
+            'status' => 'completed',
+            'raw_data' => ['a'],
+        ]);
+
+        \App\Models\AnalysisResult::create([
+            'text_analysis_id' => $analysis->id,
+            'predictions' => [
+                ['text' => 'Pelayanan di kantor itu memuaskan', 'sentiment' => 'positive', 'confidence' => 0.95, 'method' => 'indobert'],
+                ['text' => self::EMOTIKON, 'sentiment' => 'neutral', 'confidence' => 0, 'method' => 'empty'],
+                ['text' => '.....', 'sentiment' => 'neutral', 'confidence' => 0, 'method' => 'indobert'],
+                ['text' => 'Sistemnya error terus', 'sentiment' => 'negative', 'confidence' => 0.91, 'method' => 'indobert'],
+            ],
+        ]);
+
+        app(\App\Services\TrainingItemService::class)->extractJsonToTable($analysis);
+
+        $teks = $analysis->trainingItems()->pluck('text_content')->all();
+
+        $this->assertCount(2, $teks);
+        $this->assertContains('Pelayanan di kantor itu memuaskan', $teks);
+        $this->assertContains('Sistemnya error terus', $teks);
+
+        // Ditolak lewat dua penanda berbeda: `method` untuk yang pertama, dan
+        // ketiadaan huruf/angka untuk yang kedua - keduanya perlu, karena baris
+        // lama tidak menyimpan `method` sama sekali.
+        $this->assertNotContains(self::EMOTIKON, $teks);
+        $this->assertNotContains('.....', $teks);
+    }
+
     private function makeAnalysis(array $attributes = []): TextAnalysis
     {
         $user = User::factory()->create();

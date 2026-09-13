@@ -8,6 +8,9 @@
     Variabel: $analysis, $section, $judul, $keterangan, $stored (array|null)
 --}}
 @php
+    // $kueri: kueri tambahan pada URL, dipakai bagian 'segment' untuk
+    // menyebut kolom mana yang sedang dibandingkan.
+    $kueri = $kueri ?? '';
     $stored = $stored ?? null;
     $adaNarasi = is_array($stored) && ! empty($stored['narrative']);
 @endphp
@@ -29,7 +32,8 @@
 
         <button type="button"
                 data-ai-interpret="{{ $section }}"
-                data-ai-url="{{ route('analysis.interpret', ['id' => $analysis->id, 'section' => $section]) }}"
+                data-ai-url="{{ route('analysis.interpret', ['id' => $analysis->id, 'section' => $section]).($kueri ?? '') }}"
+                data-ai-url-base="{{ route('analysis.interpret', ['id' => $analysis->id, 'section' => $section]) }}"
                 aria-controls="ai-hasil-{{ $section }}"
                 class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium
                        bg-indigo-50 text-indigo-700 border border-indigo-200
@@ -71,7 +75,7 @@
                 @if(! empty($stored['generated_at']))
                     pada {{ \Carbon\Carbon::parse($stored['generated_at'])->translatedFormat('d M Y, H:i') }}
                 @endif
-                &mdash; angka tetap berasal dari hasil analisis, bukan dari AI.
+                - angka tetap berasal dari hasil analisis, bukan dari AI.
             @endif
         </p>
     </div>

@@ -345,19 +345,13 @@ class ModelEvaluationService
     }
 
     /**
-     * Rambu penafsiran c_v untuk teks pendek/tidak baku seperti komentar.
-     * Sama dengan yang dipakai halaman hasil, supaya satu angka tidak
-     * dilabeli berbeda di dua halaman.
+     * Rambu penafsiran c_v. Ambangnya tinggal di ResultPresenter supaya satu
+     * angka tidak dilabeli berbeda di halaman hasil, halaman feedback, dan
+     * halaman evaluasi.
      */
     private function labelKoherensi(float $score): string
     {
-        return match (true) {
-            $score < 0.30 => 'Tidak koheren',
-            $score < 0.40 => 'Lemah',
-            $score < 0.55 => 'Baik untuk teks pendek',
-            $score < 0.70 => 'Sangat baik',
-            default => 'Patut dicurigai',
-        };
+        return \App\Helpers\ResultPresenter::coherenceLabel($score) ?? '-';
     }
 
     private function resolveCorpusTexts(TextAnalysis $analysis, ?Collection $allItems = null): array

@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
+use App\Support\TextScorability;
+use Illuminate\Support\Facades\Log;
 
 class TrainingItemService
 {
@@ -61,8 +63,25 @@ class TrainingItemService
         $batch = [];
         $now = now();
 
+        $dilewati = 0;
+
         foreach ($rows as $row) {
             if (empty($row['text'])) {
+                continue;
+            }
+
+            // Baris yang tidak bisa dinilai tidak pernah dibuatkan baris koreksi.
+            //
+            // Sebelumnya baris ini tetap dibuat lalu disembunyikan di halaman
+            // koreksi. Itu gagal diam-diam: baris yang sudah terlanjur dibuat
+            // sebelum kolom `predicted_method` ada bernilai NULL, dan
+            // penyaringnya meloloskan NULL supaya data lama tidak ikut hilang -
+            // sehingga 175 baris emotikon tetap muncul. Menolaknya di sumber
+            // membuat seluruh hitungan konsisten: halaman koreksi, statistik
+            // admin, dan muatan pelatihan melihat himpunan yang sama.
+            if (TextScorability::isUnscorable($row['text'], $row['method'] ?? null)) {
+                $dilewati++;
+
                 continue;
             }
 
@@ -95,6 +114,7 @@ class TrainingItemService
                 'text_content' => $row['text'],
                 'predicted_sentiment' => $sentimentLabel ? strtolower($sentimentLabel) : null,
                 'confidence_score' => (float) $confidence,
+                'predicted_method' => $row['method'] ?? null,
                 'detected_aspects' => json_encode(array_values(array_unique($rowAspects))),
                 'is_corrected' => false,
                 'created_at' => $now,
@@ -109,6 +129,10 @@ class TrainingItemService
 
         if (! empty($batch)) {
             TrainingItem::insert($batch);
+        }
+
+        if ($dilewati > 0) {
+            Log::info("Analisis {$analysis->id}: {$dilewati} baris tidak dinilai dilewati saat membuat data koreksi.");
         }
     }
 }

@@ -29,6 +29,8 @@ class LlmService
 
     private const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
+    private string $usedModel = '';
+
     public function isConfigured(): bool
     {
         return ! empty(config('services.gemini.key'));
@@ -36,51 +38,119 @@ class LlmService
 
     public function model(): string
     {
-        return (string) config('services.gemini.model', 'gemini-3.5-flash');
+        if ($this->usedModel) {
+            return $this->usedModel;
+        }
+        $models = explode(',', (string) config('services.gemini.model', 'gemini-3.5-flash'));
+
+        return trim($models[0]);
     }
+
+    /**
+     * Ambang keamanan yang dilonggarkan ke BLOCK_ONLY_HIGH.
+     *
+     * Bawaan Gemini (BLOCK_MEDIUM_AND_ABOVE) dirancang untuk keluaran yang
+     * dilihat banyak orang. Di sini modelnya cuma MERANGKUM ulasan/komentar
+     * warga yang SUDAH ada di database - termasuk kritik keras dan tuduhan
+     * korupsi terhadap lembaga pemerintah/militer pada studi kasus proyek
+     * ini - dan itu berbeda dari model MENGARANG konten berbahaya. Ambang
+     * bawaan pernah memblokir narasi yang sah (finishReason: SAFETY) untuk
+     * kasus semacam ini, terlihat sebagai "AI tidak menghasilkan jawaban"
+     * padahal datanya tidak apa-apa - justru topik yang paling penting
+     * diringkas (kritik tajam) yang paling sering kena.
+     */
+    private const SAFETY_SETTINGS = [
+        ['category' => 'HARM_CATEGORY_HARASSMENT', 'threshold' => 'BLOCK_ONLY_HIGH'],
+        ['category' => 'HARM_CATEGORY_HATE_SPEECH', 'threshold' => 'BLOCK_ONLY_HIGH'],
+        ['category' => 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold' => 'BLOCK_ONLY_HIGH'],
+        ['category' => 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold' => 'BLOCK_ONLY_HIGH'],
+    ];
 
     /**
      * Kirim satu prompt dan kembalikan hasil terstruktur sesuai $schema.
      *
      * @param  array  $schema  Skema OpenAPI subset yang dipahami Gemini
+     * @param  string|null  $systemInstruction  Aturan perilaku yang berlaku
+     *                                          untuk seluruh permintaan (persona,
+     *                                          format, larangan) - dipisah dari
+     *                                          $prompt (tugas + data) supaya
+     *                                          model lebih konsisten
+     *                                          mengikutinya, sesuai panduan
+     *                                          resmi Gemini untuk system
+     *                                          instruction vs. isi giliran user.
      * @return array Hasil ter-decode sesuai skema
      *
      * @throws LlmException
      */
-    public function generate(string $prompt, array $schema, float $temperature = 0.2): array
+    public function generate(string $prompt, array $schema, float $temperature = 0.2, ?string $systemInstruction = null): array
     {
         if (! $this->isConfigured()) {
             throw new LlmException('GEMINI_API_KEY belum diisi pada .env.');
         }
 
-        $url = self::BASE_URL.$this->model().':generateContent';
+        $models = array_map('trim', explode(',', (string) config('services.gemini.model', 'gemini-3.5-flash')));
+        $response = null;
+        $lastStatus = 500;
+        $lastModel = $models[0];
 
-        try {
-            $response = Http::timeout((int) config('services.gemini.timeout', 45))
-                ->retry((int) config('services.gemini.retry', 2), 500, throw: false)
-                ->withHeaders(['Content-Type' => 'application/json'])
-                ->post($url.'?key='.config('services.gemini.key'), [
-                    'contents' => [
-                        ['parts' => [['text' => $prompt]]],
-                    ],
-                    'generationConfig' => [
-                        // Rendah supaya narasi untuk data yang sama tidak
-                        // berubah-ubah setiap kali dibangkitkan ulang.
-                        'temperature' => $temperature,
-                        'response_mime_type' => 'application/json',
-                        'response_schema' => $schema,
-                    ],
-                ]);
-        } catch (\Throwable $e) {
-            Log::error('Gemini tidak dapat dihubungi: '.$e->getMessage());
+        $payload = [
+            'contents' => [
+                ['parts' => [['text' => $prompt]]],
+            ],
+            'safetySettings' => self::SAFETY_SETTINGS,
+            'generationConfig' => [
+                // Rendah supaya narasi untuk data yang sama tidak
+                // berubah-ubah setiap kali dibangkitkan ulang.
+                'temperature' => $temperature,
+                'response_mime_type' => 'application/json',
+                'response_schema' => $schema,
+            ],
+        ];
 
-            throw new LlmException('Layanan AI tidak dapat dihubungi. Coba lagi beberapa saat lagi.');
+        if ($systemInstruction !== null && $systemInstruction !== '') {
+            $payload['systemInstruction'] = ['parts' => [['text' => $systemInstruction]]];
         }
 
-        if ($response->failed()) {
-            Log::error('Gemini membalas '.$response->status().': '.$response->body());
+        foreach ($models as $modelName) {
+            $url = self::BASE_URL.$modelName.':generateContent';
+            $lastModel = $modelName;
 
-            throw new LlmException($this->pesanKegagalan($response->status()));
+            try {
+                $response = Http::timeout((int) config('services.gemini.timeout', 45))
+                    ->retry(
+                        (int) config('services.gemini.retry', 2),
+                        fn (int $attempt) => min(1000 * 2 ** ($attempt - 1), 4000),
+                        // Coba lagi hanya untuk kegagalan yang sifatnya sementara
+                        // (occupied/unavailable atau koneksi putus). 429 di sini
+                        // berarti kuota harian habis dan 400/404 berarti konfigurasi
+                        // salah - mengulangnya hanya membuang jatah waktu tanpa
+                        // pernah berhasil.
+                        fn (\Throwable $e) => $e instanceof \Illuminate\Http\Client\ConnectionException
+                            || ($e instanceof \Illuminate\Http\Client\RequestException && $e->response->status() >= 500),
+                        throw: false
+                    )
+                    ->withHeaders(['Content-Type' => 'application/json'])
+                    ->post($url.'?key='.config('services.gemini.key'), $payload);
+
+                if ($response->successful()) {
+                    $this->usedModel = $modelName;
+                    break;
+                }
+
+                $lastStatus = $response->status();
+                Log::warning("Gemini (model {$modelName}) membalas {$lastStatus}: ".$response->body());
+            } catch (\Throwable $e) {
+                // Direset supaya percobaan model sebelumnya yang gagal tidak
+                // dibaca seolah masih berlaku kalau model TERAKHIR justru
+                // gagal lewat exception (bukan respons HTTP).
+                $response = null;
+                Log::error("Gemini (model {$modelName}) tidak dapat dihubungi: ".$e->getMessage());
+            }
+        }
+
+        if (! $response || $response->failed()) {
+            Log::error('Semua model Gemini gagal memberikan respons yang valid.');
+            throw new LlmException($this->pesanKegagalan($lastStatus, $lastModel));
         }
 
         $text = $response->json('candidates.0.content.parts.0.text');
@@ -135,7 +205,17 @@ class LlmService
             return [];
         }
 
-        $prompt = "Anda ahli linguistik dan data scientist yang merangkum hasil topic modeling teks berbahasa Indonesia.\n\n";
+        // Aturan perilaku dipisah dari isi (topik + kata kunci) lewat
+        // systemInstruction - lihat catatan pada LlmService::generate().
+        $systemInstruction = 'Anda ahli linguistik dan data scientist yang merangkum hasil topic modeling '
+            ."teks berbahasa Indonesia.\n\n"
+            .'Untuk setiap topik berikan satu label singkat (maksimal 4 kata) dan satu kalimat deskripsi '
+            ."yang menjelaskan makna topik itu.\n"
+            ."Gunakan topic_id persis seperti yang tertulis pada data yang diberikan.\n"
+            .'Dasarkan jawaban hanya pada kata kunci yang diberikan; jangan menambahkan informasi '
+            .'yang tidak terlihat di sana.';
+
+        $prompt = '';
 
         if ($konteks) {
             $prompt .= "Konteks korpus: {$konteks}\n\n";
@@ -148,12 +228,6 @@ class LlmService
             $words = $topic['words'] ?? $topic['keywords'] ?? [];
             $prompt .= 'Topik '.$id.': '.implode(', ', array_slice($words, 0, 10))."\n";
         }
-
-        $prompt .= "\nUntuk setiap topik berikan satu label singkat (maksimal 4 kata) dan satu kalimat "
-                 ."deskripsi yang menjelaskan makna topik itu.\n"
-                 ."Gunakan topic_id persis seperti yang tertulis di atas.\n"
-                 .'Dasarkan jawaban hanya pada kata kunci yang diberikan; jangan menambahkan informasi '
-                 .'yang tidak terlihat di sana.';
 
         $schema = [
             'type' => 'object',
@@ -174,7 +248,7 @@ class LlmService
             'required' => ['topics'],
         ];
 
-        $hasil = $this->generate($prompt, $schema);
+        $hasil = $this->generate($prompt, $schema, systemInstruction: $systemInstruction);
 
         // Kunci topik yang sah, dipakai untuk menolak topic_id karangan.
         $idSah = [];
@@ -202,12 +276,12 @@ class LlmService
         return $mapped;
     }
 
-    private function pesanKegagalan(int $status): string
+    private function pesanKegagalan(int $status, ?string $model = null): string
     {
         return match (true) {
             $status === 429 => 'Kuota AI harian sudah habis. Coba lagi besok atau gunakan API key lain.',
             $status === 400 => 'Permintaan ke AI ditolak. Periksa GEMINI_API_KEY dan nama model.',
-            $status === 404 => 'Model AI "'.$this->model().'" tidak tersedia untuk API key ini.',
+            $status === 404 => 'Model AI "'.($model ?? $this->model()).'" tidak tersedia untuk API key ini.',
             $status >= 500 => 'Layanan AI sedang bermasalah. Coba lagi beberapa menit lagi.',
             default => 'Permintaan ke AI gagal (HTTP '.$status.').',
         };

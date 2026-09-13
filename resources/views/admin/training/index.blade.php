@@ -8,7 +8,13 @@
             <p class="mt-1 text-sm text-gray-600">Kelola data training, koreksi hasil analisis, dan konfigurasi model.</p>
         </div>
         
-        <div class="flex gap-3">
+        {{-- Tombol utilitas. Dulu baris ini juga memuat seluruh formulir
+             retrain (dua select + input angka + tombol) dalam satu `flex`
+             tanpa pembungkus, sehingga melewati lebar halaman pada layar yang
+             lebih sempit dari ~1.600px. Formulirnya kini panel tersendiri di
+             bawah - ia butuh ruang untuk keterangan ambang dan centang
+             "paksa", dan itu tidak muat di bilah tombol. --}}
+        <div class="flex flex-wrap items-center gap-3">
             <a href="{{ route('admin.training.export') }}" target="_blank"
             class="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 shadow-sm transition text-sm font-medium">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -17,7 +23,7 @@
 
             <form action="{{ route('admin.training.sync') }}" method="POST">
                 @csrf
-                <button type="submit" onclick="return confirm('Proses ini akan membaca semua hasil analisis lama dan menyiapkannya untuk training. Lanjutkan?')" 
+                <button type="submit" onclick="return confirm('Proses ini akan membaca semua hasil analisis lama dan menyiapkannya untuk training. Lanjutkan?')"
                         class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition text-sm font-medium">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                     Sync Data Lama
@@ -30,23 +36,107 @@
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 Periksa Data Latih
             </button>
+        </div>
+    </div>
 
-            <form action="{{ route('admin.training.trigger') }}" method="POST" class="flex gap-2">
-                @csrf
-                <select name="model_type"
-                        class="rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                    <option value="both">Sentimen + Aspek</option>
-                    <option value="sentiment">Sentimen saja</option>
-                    <option value="aspect">Aspek saja</option>
-                </select>
-                <input type="number" name="epochs" value="3" min="1" max="20" title="Jumlah epoch"
-                       class="w-20 rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                <button type="submit" onclick="return confirm('Kirim data terkoreksi ke NLP API untuk melatih ulang model?')" 
-                        class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition text-sm font-medium">
+    {{-- Panel pelatihan ulang.
+         Tiap putaran melatih dari bobot dasar atas SELURUH kolam koreksi -
+         protokol active learning baku, dan sama dengan yang dipakai layanan
+         (`retrain_from_baseline = true`). Menyaring per analisis akan membuat
+         putaran kedua berangkat dari bobot dasar tetapi hanya melihat lembaga
+         kedua: lembaga pertama terlupakan, dan kurvanya mengukur "ganti
+         korpus" alih-alih "tambah data".
+         Pemilihan lembaga tetap WAJIB, tetapi sebagai PENCATATAN asal putaran -
+         dulu "Semua analisis (gabungan)" adalah opsi pertama sehingga terpilih
+         sendiri, dan kedua pelatihan iterasi 1 tercatat tanpa asal sama sekali. --}}
+    <div class="bg-white rounded-xl shadow-sm border border-indigo-100 p-6">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+            <div>
+                <h3 class="text-lg font-bold text-gray-900">Jalankan Putaran Active Learning</h3>
+                <p class="mt-1 text-sm text-gray-600">
+                    Satu putaran melatih ulang model dari bobot dasar memakai <strong>seluruh kolam koreksi</strong> ({{ number_format($autoStatus['pool']) }} baris) - protokol active learning baku. Ukur hasilnya di halaman evaluasi sebelum menjalankan putaran berikutnya: bobot lama tertimpa, jadi iterasi yang belum diukur tidak bisa diukur belakangan.
+                </p>
+            </div>
+
+            {{-- Statusnya tampil di sini dan bukan di halaman pengguna -
+                 pelatihan ulang adalah urusan internal sistem. --}}
+            <div class="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm shrink-0
+                        {{ $autoStatus['enabled']
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                            : 'border-gray-200 bg-gray-50 text-gray-600' }}">
+                @if(! $autoStatus['enabled'])
+                    <span>Pelatihan otomatis: <strong>mati</strong></span>
+                @elseif($autoStatus['running'])
+                    <span>Pelatihan sedang berjalan</span>
+                @elseif($autoStatus['cooldown_hours_left'] > 0)
+                    <span>{{ 'Otomatis: jeda '.$autoStatus['cooldown_hours_left'].' jam lagi' }}</span>
+                @else
+                    <span>{{ 'Otomatis: '.$autoStatus['new_corrections'].'/'.$autoStatus['threshold'].' koreksi baru' }}</span>
+                @endif
+            </div>
+        </div>
+
+        <form action="{{ route('admin.training.trigger') }}" method="POST"
+              id="form-retrain" class="mt-5 space-y-4">
+            @csrf
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="lg:col-span-2">
+                    <label for="retrain-analysis" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
+                        Lembaga yang baru masuk kolam
+                    </label>
+                    <select name="text_analysis_id" id="retrain-analysis" required
+                            class="w-full rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                        <option value="" disabled selected>Pilih analisis&hellip;</option>
+                        @foreach($perAnalisis as $satu)
+                            <option value="{{ $satu->id }}">#{{ $satu->id }} {{ Str::limit($satu->title, 28) }} (menyumbang {{ $satu->koreksi_count }} koreksi)</option>
+                        @endforeach
+                        {{-- Tetap ada untuk putaran yang tidak berasal dari satu
+                             lembaga tertentu - mis. mengulang pengukuran setelah
+                             beberapa lembaga dikoreksi sekaligus. Sejak kolamnya
+                             tidak lagi disaring, pilihan ini tidak mengubah data
+                             latih sama sekali; hanya barisnya di riwayat. --}}
+                        <option value="gabungan">Tidak spesifik / beberapa lembaga sekaligus</option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500">
+                        Dicatat di riwayat untuk penamaan iterasi. <strong>Bukan penyaring</strong> - data latihnya tetap seluruh kolam.
+                    </p>
+                </div>
+                <div>
+                    <label for="retrain-model" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Model</label>
+                    <select name="model_type" id="retrain-model"
+                            class="w-full rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                        <option value="both">Sentimen + Aspek</option>
+                        <option value="sentiment">Sentimen saja</option>
+                        <option value="aspect">Aspek saja</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="retrain-epochs" class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Epoch</label>
+                    <input type="number" name="epochs" id="retrain-epochs" value="3" min="1" max="20"
+                           class="w-full rounded-lg border-gray-300 text-sm text-gray-700 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                {{-- Setara `--force` pada `php artisan retrain:analysis`. Ambangnya
+                     kini satu angka untuk kedua jalur; sebelumnya UI menerima 10
+                     sampel sementara perintahnya menolak di bawah 50, sehingga
+                     tombol ini bisa memicu pelatihan yang perintahnya sendiri tolak. --}}
+                <label class="flex items-start gap-2 text-sm text-gray-600">
+                    <input type="checkbox" name="paksa" value="1" id="retrain-paksa"
+                           class="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500">
+                    <span>
+                        <strong class="text-gray-800">Paksa</strong> - jalankan walau kolamnya di bawah {{ $ambangLatih }} sampel, atau iterasi sebelumnya belum diukur.
+                        <span class="block text-xs text-gray-500">Di bawah {{ $ambangLatih }} sampel, set validasi 20%-nya tidak sampai 10 baris sehingga keputusan menerima checkpoint tidak lagi bermakna.</span>
+                    </span>
+                </label>
+
+                <button type="submit"
+                        class="inline-flex items-center justify-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-md transition text-sm font-medium shrink-0">
                     Retrain Model
                 </button>
-            </form>
-        </div>
+            </div>
+        </form>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -210,6 +300,19 @@
                 Hasil pengiriman data terkoreksi ke NLP API. Training berjalan di background,
                 jadi pastikan queue worker aktif.
             </p>
+            {{-- Tiga kolom yang menentukan sahnya satu putaran - validasi, delta,
+                 dan suhu kalibrasi - dulu hanya bisa dilihat dengan membuka basis
+                 data. Itu persis bagaimana putaran pertama ketahuan rusak, setelah
+                 bobotnya terlanjur terpasang. --}}
+            <p class="mt-2 text-xs text-gray-500">
+                <strong>Validasi</strong> adalah dasar keputusan menerima checkpoint; di bawah {{ $ambangValidasi }} baris, "tidak memburuk" berhenti berarti apa-apa. <strong>Delta</strong> nol berarti pengukuran tidak membedakan apa pun. <strong>T</strong> yang diwarisi berarti keyakinan model pada iterasi itu belum diukur ulang. <strong>Sidik jari kolam</strong> yang sama dua putaran berturut-turut berarti kolamnya tidak bertambah - keliru menurut protokol kolam.
+                {{-- Keterangan BATAL hanya muncul bila memang ada barisnya.
+                     Legenda untuk keadaan yang tidak ada di layar membuat
+                     pembaca mencarinya, lalu mengira ada yang terlewat. --}}
+                @if($trainings->contains(fn ($satu) => $satu->batal))
+                    Baris <strong>BATAL</strong> tetap ditampilkan sebagai jejak audit, tetapi angkanya tidak dicetak dan tidak ikut ke grafik atau laporan mana pun.
+                @endif
+            </p>
         </div>
 
         <div class="overflow-x-auto">
@@ -218,7 +321,11 @@
                     <tr class="text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
                         <th class="px-6 py-3">Waktu</th>
                         <th class="px-6 py-3">Model</th>
+                        <th class="px-6 py-3">Analisis</th>
+                        <th class="px-6 py-3">Dipicu</th>
                         <th class="px-6 py-3">Sampel</th>
+                        <th class="px-6 py-3">Sidik jari kolam</th>
+                        <th class="px-6 py-3">Validasi</th>
                         <th class="px-6 py-3">Epoch</th>
                         <th class="px-6 py-3">Status</th>
                         <th class="px-6 py-3">Hasil</th>
@@ -234,7 +341,62 @@
                             @endif
                         </td>
                         <td class="px-6 py-3 font-medium text-gray-900 capitalize">{{ $training->model_type }}</td>
+                        <td class="px-6 py-3">
+                            {{-- Gabungan ditandai tegas: putaran yang mencampur
+                                 enam lembaga tidak bisa dilaporkan sebagai
+                                 "iterasi untuk lembaga X", dan kedua pelatihan
+                                 iterasi 1 tercatat begitu tanpa disengaja. --}}
+                            @if($training->text_analysis_id)
+                                <span class="text-gray-700">#{{ $training->text_analysis_id }}
+                                    <span class="block text-xs text-gray-400">{{ Str::limit($training->textAnalysis?->title ?? '-', 22) }}</span>
+                                </span>
+                            @else
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Gabungan</span>
+                            @endif
+                        </td>
+                        <td class="px-6 py-3">
+                            {{-- triggered_by null berarti dipicu sistem: loop
+                                 active learning berjalan tanpa admin. --}}
+                            @if($training->triggered_by)
+                                <span class="text-gray-600">{{ $training->user?->name ?? 'Pengguna' }}</span>
+                            @else
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                    Otomatis
+                                </span>
+                            @endif
+                        </td>
                         <td class="px-6 py-3 text-gray-600">{{ $training->total_samples }}</td>
+                        <td class="px-6 py-3">
+                            {{-- Isi kolam yang benar-benar dilatihkan. Kontaminasi
+                                 checkpoint tidak terlihat dari berkas bobot, dari
+                                 ukurannya, maupun dari /health - ketiganya tampak
+                                 normal. Angka inilah yang membedakannya. --}}
+                            @if($training->sidik_jari_kolam)
+                                <span class="font-mono text-xs text-gray-700">{{ $training->sidik_jari_kolam }}</span>
+                                @if(($sidikBerulang[$training->id] ?? false))
+                                    <span class="block text-xs text-amber-700 font-semibold">sama dengan putaran sebelumnya - kolam tidak bertambah</span>
+                                @endif
+                            @else
+                                <span class="text-gray-400" title="Putaran ini berjalan sebelum sidik jari kolam dicatat">-</span>
+                            @endif
+                        </td>
+                        <td class="px-6 py-3">
+                            {{-- Dasar seluruh keputusan terima/tolak checkpoint.
+                                 Pada beberapa baris, "tidak memburuk" berhenti
+                                 berarti apa-apa - putaran pertama menyimpan
+                                 checkpoint atas val_size 4 dengan delta 0. --}}
+                            @if($training->val_size === null)
+                                <span class="text-gray-400">-</span>
+                            @elseif($training->val_size < 10)
+                                <span class="font-semibold text-red-700">{{ $training->val_size }}</span>
+                                <span class="block text-xs text-red-600">terlalu kecil untuk menolak apa pun</span>
+                            @elseif($training->val_size < $ambangValidasi)
+                                <span class="font-semibold text-amber-700">{{ $training->val_size }}</span>
+                                <span class="block text-xs text-amber-600">di bawah {{ $ambangValidasi }}</span>
+                            @else
+                                <span class="text-gray-700">{{ $training->val_size }}</span>
+                            @endif
+                        </td>
                         <td class="px-6 py-3 text-gray-600">{{ $training->epochs }}</td>
                         <td class="px-6 py-3">
                             @php
@@ -244,36 +406,102 @@
                                     // Ditolak bukan gagal: training berjalan, tapi
                                     // hasilnya lebih buruk sehingga tidak disimpan.
                                     'rejected' => 'bg-amber-100 text-amber-800',
+                                    // Dilewati juga bukan gagal: layanan sedang
+                                    // melatih model yang sama (HTTP 409), jadi
+                                    // pelatihan ini tidak pernah dimulai.
+                                    'skipped' => 'bg-gray-100 text-gray-700',
                                     'running' => 'bg-blue-100 text-blue-800',
                                     default => 'bg-gray-100 text-gray-700',
                                 };
-                                $labelStatus = $training->status === 'rejected' ? 'Ditolak' : ucfirst($training->status);
+                                $labelStatus = match($training->status) {
+                                    'rejected' => 'Ditolak',
+                                    'skipped' => 'Dilewati',
+                                    default => ucfirst($training->status),
+                                };
                             @endphp
                             <span class="px-2 py-1 rounded-full text-xs font-medium {{ $badge }}">
                                 {{ $labelStatus }}
                             </span>
+
+                            {{-- Dibatalkan setelah selesai: angkanya tidak boleh
+                                 dikutip. Barisnya tetap ada - jejak auditnya
+                                 justru yang perlu disimpan - tetapi tidak boleh
+                                 terbaca sebagai putaran yang sah. --}}
+                            @if($training->batal)
+                                <span class="block mt-1 px-2 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 text-center">
+                                    BATAL
+                                </span>
+                            @endif
                         </td>
                         <td class="px-6 py-3 text-gray-600">
                             @php
                                 $hasil = $training->result ?? [];
-                                $f1Sebelum = $hasil['metrics_before']['weighted_f1'] ?? null;
-                                $f1Sesudah = $hasil['metrics_after']['weighted_f1'] ?? null;
+                                // Nama kunci F1 berbeda per modul: sentimen memakai
+                                // weighted_f1, aspek memakai f1. Dibaca berurutan
+                                // supaya satu kolom melayani keduanya.
+                                $f1Sebelum = $hasil['metrics_before']['weighted_f1'] ?? $hasil['metrics_before']['f1'] ?? null;
+                                $f1Sesudah = $hasil['metrics_after']['weighted_f1'] ?? $hasil['metrics_after']['f1'] ?? null;
+                                $delta = $training->f1_delta;
+                                $kalibrasi = $training->calibration;
                             @endphp
 
-                            @if($training->status === 'failed')
+                            @if($training->batal)
+                                {{-- Angkanya sengaja TIDAK dicetak. Training #4
+                                     dibatalkan bukan karena hasilnya jelek -
+                                     aspek 27,14 -> 31,57, naik - melainkan karena
+                                     titik berangkatnya checkpoint yang tercemar,
+                                     sehingga tidak ada seorang pun yang bisa
+                                     menghitung ulang angka itu. Menampilkannya
+                                     apa adanya mengundangnya masuk naskah. --}}
+                                <span class="text-red-700 font-semibold">Dibatalkan - tidak dapat direproduksi.</span>
+                                <span class="block text-xs text-red-600">
+                                    {{ $training->alasan_batal ?? 'Angkanya tidak boleh dikutip; putaran ini perlu diulang.' }}
+                                </span>
+                            @elseif($training->status === 'failed')
                                 <span class="text-red-600">{{ Str::limit($training->error_message, 80) }}</span>
                             @elseif($training->status === 'rejected')
                                 <span class="text-amber-700">{{ Str::limit($training->error_message, 110) }}</span>
                             @elseif($f1Sebelum !== null && $f1Sesudah !== null)
                                 <span class="text-xs">
-                                    Weighted F1
+                                    F1
                                     <span class="font-mono">{{ $f1Sebelum }}</span>
                                     &rarr;
                                     <span class="font-mono font-semibold text-green-700">{{ $f1Sesudah }}</span>
-                                    @isset($hasil['weighted_f1_delta'])
-                                        <span class="text-green-700">({{ sprintf('%+.4f', $hasil['weighted_f1_delta']) }})</span>
-                                    @endisset
                                 </span>
+
+                                {{-- Delta selalu ditampilkan, termasuk ketika nol.
+                                     Nol adalah tanda putaran yang tidak sah - itu
+                                     yang terjadi pada putaran pertama, dan
+                                     checkpoint tetap disimpan karena "tidak
+                                     memburuk" secara teknis benar pada n=4. --}}
+                                @if($delta !== null)
+                                    <span class="block text-xs {{ $delta > 0 ? 'text-green-700' : ($delta < 0 ? 'text-red-700' : 'text-amber-700 font-semibold') }}">
+                                        {{ sprintf('%+.4f', $delta) }}{{ $delta == 0.0 ? ' - pengukuran tidak membedakan apa pun' : '' }}
+                                    </span>
+                                @endif
+
+                                {{-- Titik berangkat. Membaca `trained_from_baseline`,
+                                     BUKAN `baseline_swapped`: yang kedua hanya menyala
+                                     ketika bobot ditukar, sehingga putaran yang memang
+                                     berangkat dari bobot dasar karena checkpoint-nya
+                                     belum ada tercatat false - kebalikan dari yang
+                                     terjadi. Protokol kolam menuntut SELALU dari dasar,
+                                     jadi yang tidak, ditandai. --}}
+                                @if($training->dari_bobot_dasar === false)
+                                    <span class="block text-xs text-amber-700">melanjutkan checkpoint sebelumnya - bukan dari bobot dasar</span>
+                                @elseif($training->dari_bobot_dasar === true)
+                                    <span class="block text-xs text-gray-400">berangkat dari bobot dasar</span>
+                                @endif
+
+                                {{-- Suhu kalibrasi. Diwarisi berarti keyakinan pada
+                                     iterasi ini belum diukur ulang; angkanya datang
+                                     dari bobot sebelumnya. --}}
+                                @if($kalibrasi)
+                                    <span class="block text-xs {{ $kalibrasi['inherited'] || $kalibrasi['unknown'] ? 'text-amber-700' : 'text-gray-400' }}">
+                                        T = {{ rtrim(rtrim(number_format($kalibrasi['temperature'], 4, ',', ''), '0'), ',') }} - {{ $kalibrasi['label'] }}
+                                    </span>
+                                @endif
+
                                 @isset($hasil['samples_skipped'])
                                     @if($hasil['samples_skipped'] > 0)
                                     <span class="block text-xs text-gray-400">{{ $hasil['samples_skipped'] }} sampel dilewati</span>
@@ -282,13 +510,13 @@
                             @elseif($training->result)
                                 <span class="font-mono text-xs">{{ Str::limit(json_encode($training->result), 90) }}</span>
                             @else
-                                <span class="text-gray-400">&mdash;</span>
+                                <span class="text-gray-400">-</span>
                             @endif
                         </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="6" class="px-6 py-8 text-center text-gray-500">
+                        <td colspan="10" class="px-6 py-8 text-center text-gray-500">
                             Belum ada training yang dijalankan.
                         </td>
                     </tr>
@@ -301,11 +529,22 @@
     {{-- Perkembangan metrik antar-iterasi active learning --}}
     <div class="bg-white rounded-xl shadow-sm border border-gray-100">
         <div class="p-6 border-b border-gray-100">
-            <h2 class="text-lg font-semibold text-gray-900">Perkembangan Evaluasi Model</h2>
+            <h2 class="text-lg font-semibold text-gray-900">Perkembangan pada Data Koreksi</h2>
             <p class="mt-1 text-sm text-gray-600">
-                Metrik direkam setiap kali retraining dipicu, sehingga perbaikan model
-                antar-iterasi bisa ditelusuri.
+                Metrik direkam setiap kali retraining dipicu, sebagai pantauan proses koreksi.
             </p>
+
+            {{-- Peringatan ini wajib ada di sini. Angka di bawah dihitung atas baris
+                 yang persis sama dengan yang dikirim ke pelatihan, jadi kenaikannya
+                 sebagian berasal dari model menghafal data latihnya sendiri. Tanpa
+                 keterangan ini, grafiknya mudah dikira bukti perbaikan model. --}}
+            <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Angka di bawah dihitung <strong>atas data koreksi yang ikut dilatihkan</strong>,
+                jadi tidak boleh dikutip sebagai kinerja model - kenaikannya sebagian hanyalah
+                model menghafal data latihnya sendiri. Kinerja model yang sah diukur di
+                <a href="{{ route('admin.evaluation.index') }}" class="font-semibold underline">halaman Evaluasi Model</a>,
+                atas golden dataset yang tidak pernah dilatihkan.
+            </div>
         </div>
 
         @php $chronological = $snapshots->reverse()->values(); @endphp
@@ -339,13 +578,13 @@
                             <td class="px-6 py-3 text-gray-600 whitespace-nowrap">{{ $snapshot->created_at->format('d M Y H:i') }}</td>
                             <td class="px-6 py-3 text-gray-600">{{ $snapshot->corrected_total }}</td>
                             <td class="px-6 py-3 text-gray-900 font-medium">
-                                {{ $snapshot->sentiment_accuracy !== null ? $snapshot->sentiment_accuracy . '%' : '—' }}
+                                {{ $snapshot->sentiment_accuracy !== null ? $snapshot->sentiment_accuracy . '%' : '-' }}
                             </td>
                             <td class="px-6 py-3 text-gray-600">
-                                {{ $snapshot->sentiment_weighted_f1 !== null ? $snapshot->sentiment_weighted_f1 . '%' : '—' }}
+                                {{ $snapshot->sentiment_weighted_f1 !== null ? $snapshot->sentiment_weighted_f1 . '%' : '-' }}
                             </td>
                             <td class="px-6 py-3 text-gray-600">
-                                {{ $snapshot->aspect_f1 !== null ? $snapshot->aspect_f1 . '%' : '—' }}
+                                {{ $snapshot->aspect_f1 !== null ? $snapshot->aspect_f1 . '%' : '-' }}
                             </td>
                             <td class="px-6 py-3 text-gray-500">{{ $snapshot->note }}</td>
                         </tr>
@@ -359,6 +598,58 @@
 @endsection
 
 @push('scripts')
+<script>
+// Konfirmasi pelatihan ulang.
+//
+// Tiga kalimat berbeda, karena tiga keputusan yang berbeda beratnya. Satu
+// konfirmasi umum "yakin?" untuk ketiganya sama saja dengan tidak ada
+// konfirmasi - yang membacanya tidak tahu apa yang sedang disetujuinya.
+document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('form-retrain');
+    if (!form) return;
+
+    form.addEventListener('submit', function (e) {
+        const analisis = document.getElementById('retrain-analysis');
+        const paksa = document.getElementById('retrain-paksa');
+
+        if (analisis && analisis.value === 'gabungan') {
+            // Bukan lagi soal mencampur korpus - kolamnya memang selalu utuh.
+            // Yang hilang hanya kemampuan menamai iterasi ini di riwayat.
+            const setuju = confirm(
+                'Putaran ini akan tercatat TANPA lembaga asal.\n\n'
+                + 'Data latihnya sama saja (seluruh kolam), tetapi riwayat tidak bisa '
+                + 'menjawab "lembaga mana yang baru ditambahkan pada iterasi ini" - '
+                + 'dan itu yang dipakai untuk menamai iterasi di naskah.\n\n'
+                + 'Lanjutkan tanpa lembaga asal?'
+            );
+
+            if (!setuju) {
+                e.preventDefault();
+                return;
+            }
+        }
+
+        if (paksa && paksa.checked) {
+            const setuju = confirm(
+                'Mode PAKSA melewati penjaga kelayakan: pelatihan tetap berjalan walau '
+                + 'sampelnya di bawah {{ $ambangLatih }}, atau walau iterasi sebelumnya belum diukur '
+                + '(bobotnya akan tertimpa dan tidak bisa diukur belakangan).\n\n'
+                + 'Lanjutkan dengan paksa?'
+            );
+
+            if (!setuju) {
+                e.preventDefault();
+                return;
+            }
+        }
+
+        if (!confirm('Kirim data terkoreksi ke NLP API untuk melatih ulang model?')) {
+            e.preventDefault();
+        }
+    });
+});
+</script>
+
 @if($snapshots->isNotEmpty())
 <script>
 document.addEventListener('DOMContentLoaded', function () {

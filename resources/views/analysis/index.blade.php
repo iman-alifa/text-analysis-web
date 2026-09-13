@@ -19,16 +19,22 @@
     </div>
 
     <!-- Filters & Search -->
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+    {{-- Form GET biasa: penyaringan dikerjakan di server, dan hasilnya bisa
+         ditandai serta dibagikan lewat URL. --}}
+    <form method="GET" action="{{ route('analysis.index') }}" id="filter-form"
+          class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <!-- Search -->
             <div class="md:col-span-2">
+                <label for="search" class="sr-only">Cari analisis</label>
                 <div class="relative">
-                    <input type="text" 
+                    <input type="search"
                            id="search"
-                           placeholder="Cari berdasarkan judul..."
+                           name="q"
+                           value="{{ $filter['q'] }}"
+                           placeholder="Cari berdasarkan judul atau keterangan..."
                            class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                    <svg class="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg class="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                     </svg>
                 </div>
@@ -36,27 +42,52 @@
 
             <!-- Filter by Type -->
             <div>
-                <select id="filter-type" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <label for="filter-type" class="sr-only">Saring menurut jenis analisis</label>
+                <select id="filter-type" name="type" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="">Semua Tipe</option>
-                    <option value="sentiment">Sentimen</option>
-                    <option value="aspect">Aspek</option>
-                    <option value="topic">Topik</option>
-                    <option value="combined">Lengkap</option>
+                    <option value="sentiment" @selected($filter['type'] === 'sentiment')>Sentimen</option>
+                    <option value="aspect" @selected($filter['type'] === 'aspect')>Aspek</option>
+                    <option value="topic" @selected($filter['type'] === 'topic')>Topik</option>
+                    <option value="combined" @selected($filter['type'] === 'combined')>Lengkap</option>
                 </select>
             </div>
 
             <!-- Filter by Status -->
             <div>
-                <select id="filter-status" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                <label for="filter-status" class="sr-only">Saring menurut status</label>
+                <select id="filter-status" name="status" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                     <option value="">Semua Status</option>
-                    <option value="completed">Selesai</option>
-                    <option value="processing">Proses</option>
-                    <option value="failed">Gagal</option>
-                    <option value="pending">Pending</option>
+                    <option value="completed" @selected($filter['status'] === 'completed')>Selesai</option>
+                    <option value="processing" @selected($filter['status'] === 'processing')>Proses</option>
+                    <option value="failed" @selected($filter['status'] === 'failed')>Gagal</option>
+                    <option value="pending" @selected($filter['status'] === 'pending')>Pending</option>
                 </select>
             </div>
         </div>
-    </div>
+
+        <div class="mt-3 flex items-center justify-between gap-3 flex-wrap">
+            <p class="text-sm text-gray-500" aria-live="polite">
+                {{ number_format($analyses->total()) }} analisis
+                @if($filter['q'] !== '' || $filter['type'] !== '' || $filter['status'] !== '')
+                    cocok dengan penyaring
+                @endif
+            </p>
+
+            <div class="flex items-center gap-2">
+                @if($filter['q'] !== '' || $filter['type'] !== '' || $filter['status'] !== '')
+                    <a href="{{ route('analysis.index') }}" class="text-sm text-gray-600 hover:text-gray-900 underline">
+                        Bersihkan
+                    </a>
+                @endif
+                {{-- Tombolnya disembunyikan bila JavaScript aktif; tanpa
+                     JavaScript inilah satu-satunya cara mengirim penyaring. --}}
+                <button type="submit" id="filter-submit"
+                        class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
+                    Terapkan
+                </button>
+            </div>
+        </div>
+    </form>
 
     <!-- Analysis List -->
     @if($analyses->count() > 0)
@@ -233,26 +264,25 @@
 
 @push('scripts')
 <script>
-    // Search & Filter functionality
-    const searchInput = document.getElementById('search');
-    const filterType = document.getElementById('filter-type');
-    const filterStatus = document.getElementById('filter-status');
+    // Penyaring dikirim ke server. JavaScript hanya mempercepat: mengirim
+    // formulir otomatis saat pilihan berubah, dan menunda kiriman saat
+    // mengetik supaya tidak satu permintaan per huruf.
+    const filterForm = document.getElementById('filter-form');
 
-    function filterAnalyses() {
-        const searchTerm = searchInput.value.toLowerCase();
-        const selectedType = filterType.value;
-        const selectedStatus = filterStatus.value;
-        
-        // This is a simple client-side filter
-        // For production, implement server-side filtering with query params
-        console.log('Filter:', { searchTerm, selectedType, selectedStatus });
-        
-        // TODO: Implement AJAX filtering or redirect with query params
+    if (filterForm) {
+        document.getElementById('filter-submit').classList.add('hidden');
+
+        let tundaan = null;
+
+        document.getElementById('search').addEventListener('input', function () {
+            clearTimeout(tundaan);
+            tundaan = setTimeout(() => filterForm.submit(), 400);
+        });
+
+        ['filter-type', 'filter-status'].forEach(function (id) {
+            document.getElementById(id).addEventListener('change', () => filterForm.submit());
+        });
     }
-
-    searchInput.addEventListener('input', filterAnalyses);
-    filterType.addEventListener('change', filterAnalyses);
-    filterStatus.addEventListener('change', filterAnalyses);
 </script>
 @endpush
 @endsection

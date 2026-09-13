@@ -10,7 +10,7 @@
     @param int   $reviewRank  Peringkat antrean tinjauan, -1 bila tidak masuk
 --}}
 @php
-    $sentiment = $prediction['sentiment'] ?? 'neutral';
+    $sentiment = $prediction['sentiment'] ?? null;
     $method = $prediction['method'] ?? null;
     $processed = $prediction['processed_text'] ?? null;
     $punyaProcessed = filled($processed) && $processed !== ($prediction['text'] ?? null);
@@ -31,12 +31,16 @@
             <p class="text-gray-800 leading-relaxed mb-2">{{ $prediction['text'] ?? '' }}</p>
 
             <div class="flex flex-wrap items-center gap-3">
+                {{-- Analisis aspek murni tidak punya sentimen per baris - lencana
+                     ini hanya tampil kalau field-nya memang tersimpan. --}}
+                @if($sentiment)
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ $warnaSentimen }}">
                     <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
                         <use href="#ikon-sentimen-{{ $sentiment }}"></use>
                     </svg>
                     {{ ucfirst($sentiment) }}
                 </span>
+                @endif
 
                 @isset($prediction['confidence'])
                 <span class="text-xs text-gray-500">
@@ -86,7 +90,7 @@
                 <p class="text-xs text-gray-500 font-semibold mb-2">Skor detail</p>
                 @foreach($prediction['scores'] as $label => $score)
                 <div class="flex items-center gap-2">
-                    <span class="text-xs text-gray-600 w-20 capitalize">{{ $label }}</span>
+                    <span class="text-xs text-gray-600 w-20">{{ \App\Helpers\ResultPresenter::sentimentLabel($label) }}</span>
                     <div class="flex-1 bg-gray-200 rounded-full h-2">
                         <div class="h-2 rounded-full
                             @if($label === 'positive') bg-green-500

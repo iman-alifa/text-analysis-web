@@ -121,4 +121,33 @@ class RetrainRegressionTest extends TestCase
         // scopeRunning hanya mencakup pending/running
         $this->assertFalse(ModelTraining::running()->exists());
     }
+
+    public function test_layanan_yang_sedang_melatih_dicatat_dilewati_bukan_gagal(): void
+    {
+        // Sejak nlp-api-service menambahkan lock per model, permintaan kedua
+        // dibalas 409. Itu berarti "sedang berjalan", bukan "rusak" - mencatatnya
+        // sebagai gagal akan membuat riwayat training menyiratkan masalah yang
+        // tidak ada.
+        Http::fake([
+            '*/api/retrain/sentiment' => Http::response([
+                'detail' => 'Pelatihan model sentiment sedang berjalan; coba lagi nanti',
+            ], 409),
+        ]);
+
+        $training = ModelTraining::create([
+            'model_type' => 'sentiment',
+            'status' => 'pending',
+            'total_samples' => 12,
+            'epochs' => 3,
+            'learning_rate' => 0.00002,
+        ]);
+
+        (new RetrainModel($training, $this->sampleData()))->handle(app(NLPApiService::class));
+
+        $training->refresh();
+
+        $this->assertSame('skipped', $training->status);
+        $this->assertStringContainsString('sedang melatih', $training->error_message);
+        $this->assertNotNull($training->completed_at);
+    }
 }

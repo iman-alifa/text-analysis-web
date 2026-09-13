@@ -30,7 +30,24 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
      */
     public const PIPELINE_VERSION = 2;
 
-    public $timeout = 1800; // 30 menit untuk data besar
+    /**
+     * Batas waktu satu analisis.
+     *
+     * Dinaikkan dari 1800 untuk skala studi kasus. Terukur pada pipeline ini:
+     * analisis gabungan memakan sekitar 0,27 detik per teks (885 teks = 235
+     * detik). Berkas terbesar studi kasus berisi 3.548 komentar, jadi sekitar
+     * 950 detik - masih di bawah 1800, tetapi tanpa margin bila model sedang
+     * dimuat dingin atau ada retraining yang memegang lock.
+     *
+     * Menggabungkan keenam lembaga menjadi satu analisis (8.393 komentar)
+     * memerlukan sekitar 2.230 detik dan akan MELEWATI batas lama - job-nya
+     * dibunuh di tengah jalan, lalu `retry_after` melepasnya kembali ke antrean
+     * dan analisis yang sama berjalan dua kali.
+     *
+     * Hierarkinya harus tetap: HTTP ke NLP (600) < job (3600) < retry_after
+     * (4200) di config/queue.php.
+     */
+    public $timeout = 3600;
 
     public $tries = 3;
 
@@ -46,12 +63,15 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
      * Terukur, analisis nyata memakan 95-235 detik, jadi praktis semuanya
      * terduplikasi.
      *
+     * Nilainya mengikuti retry_after supaya kunci tidak pernah kedaluwarsa
+     * lebih dulu daripada job yang masih berjalan.
+     *
      * retry_after sudah diperbaiki, tetapi kunci ini membuat kelas kesalahan
      * itu tidak bisa terulang lewat jalan lain: dispatch ganda dari controller,
      * pengguna menekan tombol dua kali, atau worker tambahan yang dijalankan
      * bersamaan.
      */
-    public $uniqueFor = 2100;
+    public $uniqueFor = 4200;
 
     protected $analysis;
 

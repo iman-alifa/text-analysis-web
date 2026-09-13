@@ -54,18 +54,25 @@ class RetrainTriggerTest extends TestCase
     public function test_data_terkoreksi_dikirim_sebagai_job_retraining(): void
     {
         Queue::fake();
-        $this->seedCorrectedItems(12);
+        // 60, bukan 12: ambang kelayakan RetrainingService::MIN_LAYAK berlaku
+        // untuk jalur tombol admin ini juga, bukan hanya untuk perintah.
+        $analysis = $this->seedCorrectedItems(60);
 
         $response = $this->actingAs($this->admin())
-            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment', 'epochs' => 4]);
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'epochs' => 4,
+                'text_analysis_id' => (string) $analysis->id,
+            ]);
 
         $response->assertRedirect();
         $response->assertSessionHas('success');
 
         $training = ModelTraining::firstOrFail();
         $this->assertSame('sentiment', $training->model_type);
-        $this->assertSame(12, $training->total_samples);
+        $this->assertSame(60, $training->total_samples);
         $this->assertSame(4, $training->epochs);
+        $this->assertSame($analysis->id, $training->text_analysis_id);
 
         Queue::assertPushed(RetrainModel::class);
     }
@@ -73,22 +80,25 @@ class RetrainTriggerTest extends TestCase
     public function test_memicu_training_merekam_snapshot_evaluasi(): void
     {
         Queue::fake();
-        $analysis = $this->seedCorrectedItems(12);
+        $analysis = $this->seedCorrectedItems(60);
 
         // Buat sebagian prediksi salah supaya akurasi tidak bulat 100%
         TrainingItem::where('text_analysis_id', $analysis->id)
-            ->limit(3)
+            ->limit(15)
             ->update(['predicted_sentiment' => 'positive']);
 
         $this->actingAs($this->admin())
-            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $analysis->id,
+            ])
             ->assertSessionHas('success');
 
         $snapshot = EvaluationSnapshot::firstOrFail();
 
-        $this->assertSame(12, $snapshot->corrected_total);
-        $this->assertSame(25.0, $snapshot->sentiment_accuracy); // 3 dari 12 benar
-        $this->assertSame(12, $snapshot->sentiment_rows);
+        $this->assertSame(60, $snapshot->corrected_total);
+        $this->assertSame(25.0, $snapshot->sentiment_accuracy); // 15 dari 60 benar
+        $this->assertSame(60, $snapshot->sentiment_rows);
         $this->assertSame(ModelTraining::first()->id, $snapshot->model_training_id);
         $this->assertStringContainsString('Sebelum retraining', $snapshot->note);
     }
@@ -96,31 +106,106 @@ class RetrainTriggerTest extends TestCase
     public function test_ditolak_kalau_sampel_kurang_dari_minimum(): void
     {
         Queue::fake();
-        $this->seedCorrectedItems(3);
+        $analysis = $this->seedCorrectedItems(3);
 
         $this->actingAs($this->admin())
-            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $analysis->id,
+            ])
             ->assertSessionHas('error');
 
         $this->assertSame(0, ModelTraining::count());
         Queue::assertNothingPushed();
     }
 
+    public function test_tombol_admin_menolak_di_bawah_ambang_kelayakan(): void
+    {
+        // Inti titipan bagian 2: sebelum ini UI meneruskan apa pun di atas 10
+        // sampel, sementara `retrain:analysis` menolak di bawah 50 - sehingga
+        // tombol bisa memicu pelatihan yang perintahnya sendiri tolak.
+        Queue::fake();
+        $analysis = $this->seedCorrectedItems(21);
+
+        $this->actingAs($this->admin())
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $analysis->id,
+            ])
+            ->assertRedirect()
+            ->assertSessionHas('error', fn ($pesan) => str_contains($pesan, '21')
+                && str_contains($pesan, (string) \App\Services\RetrainingService::MIN_LAYAK));
+
+        $this->assertSame(0, ModelTraining::count());
+        Queue::assertNothingPushed();
+    }
+
+    public function test_centang_paksa_melewati_ambang_kelayakan(): void
+    {
+        // Memaksa tetap mungkin, tetapi harus disengaja - setara `--force`.
+        Queue::fake();
+        $analysis = $this->seedCorrectedItems(21);
+
+        $this->actingAs($this->admin())
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $analysis->id,
+                'paksa' => '1',
+            ])
+            ->assertSessionHas('success');
+
+        $this->assertSame(21, ModelTraining::firstOrFail()->total_samples);
+        Queue::assertPushed(RetrainModel::class);
+    }
+
+    public function test_analisis_wajib_dipilih(): void
+    {
+        // Dulu opsi pertama dropdown adalah "Semua analisis (gabungan)" dengan
+        // value kosong, jadi ia terpilih sendiri dan kedua pelatihan iterasi 1
+        // tercatat tanpa analisis. Kini medan kosong ditolak validasi.
+        Queue::fake();
+        $this->seedCorrectedItems(60);
+
+        $this->actingAs($this->admin())
+            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->assertSessionHasErrors('text_analysis_id');
+
+        Queue::assertNothingPushed();
+    }
+
+    public function test_gabungan_masih_bisa_dipilih_secara_sadar(): void
+    {
+        Queue::fake();
+        $this->seedCorrectedItems(60);
+
+        $this->actingAs($this->admin())
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => 'gabungan',
+            ])
+            ->assertSessionHas('success');
+
+        $this->assertNull(ModelTraining::firstOrFail()->text_analysis_id);
+    }
+
     public function test_training_yang_sedang_berjalan_tidak_bisa_ditumpuk(): void
     {
         Queue::fake();
-        $this->seedCorrectedItems(12);
+        $analysis = $this->seedCorrectedItems(60);
 
         ModelTraining::create([
             'model_type' => 'sentiment',
             'status' => 'running',
-            'total_samples' => 12,
+            'total_samples' => 60,
             'epochs' => 3,
             'learning_rate' => 0.00002,
         ]);
 
         $this->actingAs($this->admin())
-            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $analysis->id,
+            ])
             ->assertSessionHas('error');
 
         Queue::assertNothingPushed();
@@ -129,10 +214,13 @@ class RetrainTriggerTest extends TestCase
     public function test_user_biasa_tidak_boleh_memicu_retraining(): void
     {
         Queue::fake();
-        $this->seedCorrectedItems(12);
+        $analysis = $this->seedCorrectedItems(60);
 
         $this->actingAs(User::factory()->create(['role' => 'user']))
-            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $analysis->id,
+            ])
             ->assertForbidden();
 
         Queue::assertNothingPushed();

@@ -23,9 +23,12 @@ use App\Models\TextAnalysis;
  */
 class AnalysisInterpretationService
 {
-    public const SECTIONS = ['overview', 'sentiment', 'aspect', 'topic', 'association'];
+    public const SECTIONS = ['overview', 'sentiment', 'aspect', 'topic', 'association', 'segment'];
 
-    public function __construct(private LlmService $llm) {}
+    public function __construct(
+        private LlmService $llm,
+        private SegmentAnalysisService $segmenter
+    ) {}
 
     /**
      * Bagian mana saja yang datanya tersedia untuk analisis ini.
@@ -81,8 +84,12 @@ class AnalysisInterpretationService
      *
      * @throws LlmException
      */
-    public function generate(TextAnalysis $analysis, string $section, bool $regenerate = false): array
-    {
+    public function generate(
+        TextAnalysis $analysis,
+        string $section,
+        bool $regenerate = false,
+        ?string $column = null
+    ): array {
         if (! in_array($section, self::SECTIONS, true)) {
             throw new LlmException("Bagian '{$section}' tidak dikenal.");
         }
@@ -93,8 +100,17 @@ class AnalysisInterpretationService
             throw new LlmException('Analisis ini belum memiliki hasil.');
         }
 
+        // Narasi segmen terikat pada satu kolom pemisah, jadi disimpan
+        // per kolom. Kalau semuanya berbagi satu kunci, berpindah kolom akan
+        // menampilkan narasi tentang kolom yang lain.
+        $kunci = $section === 'segment' ? 'segment:'.$column : $section;
+
+        if ($section === 'segment' && ($column === null || $column === '')) {
+            throw new LlmException('Kolom pemisah belum dipilih.');
+        }
+
         if (! $regenerate) {
-            $tersimpan = $this->stored($result, $section);
+            $tersimpan = $this->stored($result, $kunci);
 
             if ($tersimpan !== null) {
                 return $tersimpan;
@@ -103,9 +119,9 @@ class AnalysisInterpretationService
 
         $narasi = $section === 'topic'
             ? $this->generateTopic($analysis, $result)
-            : $this->generateNarrative($analysis, $result, $section);
+            : $this->generateNarrative($analysis, $result, $section, $column);
 
-        $this->store($result, $section, $narasi);
+        $this->store($result, $kunci, $narasi);
 
         return $narasi;
     }
@@ -140,15 +156,19 @@ class AnalysisInterpretationService
         ]);
     }
 
-    private function generateNarrative(TextAnalysis $analysis, AnalysisResult $result, string $section): array
-    {
-        $fakta = $this->facts($analysis, $result, $section);
+    private function generateNarrative(
+        TextAnalysis $analysis,
+        AnalysisResult $result,
+        string $section,
+        ?string $column = null
+    ): array {
+        $fakta = $this->facts($analysis, $result, $section, $column);
 
         if ($fakta === null) {
             throw new LlmException('Data untuk bagian ini belum tersedia.');
         }
 
-        $prompt = $this->prompt($analysis, $section, $fakta);
+        $prompt = $this->prompt($analysis, $fakta);
 
         $schema = [
             'type' => 'object',
@@ -162,7 +182,7 @@ class AnalysisInterpretationService
             'required' => ['narrative', 'highlights'],
         ];
 
-        $hasil = $this->llm->generate($prompt, $schema);
+        $hasil = $this->llm->generate($prompt, $schema, systemInstruction: $this->systemInstruction($section));
 
         $narrative = trim((string) ($hasil['narrative'] ?? ''));
 
@@ -195,15 +215,54 @@ class AnalysisInterpretationService
      * Kumpulkan angka yang boleh dilihat model. Sengaja dibatasi: makin sedikit
      * yang dikirim, makin kecil peluang model mengarang di luar data.
      */
-    private function facts(TextAnalysis $analysis, AnalysisResult $result, string $section): ?array
-    {
+    private function facts(
+        TextAnalysis $analysis,
+        AnalysisResult $result,
+        string $section,
+        ?string $column = null
+    ): ?array {
         return match ($section) {
             'sentiment' => $this->sentimentFacts($result),
             'aspect' => $this->aspectFacts($result),
             'association' => $this->associationFacts($result),
             'overview' => $this->overviewFacts($analysis, $result),
+            'segment' => $this->segmentFacts($analysis, $column),
             default => null,
         };
+    }
+
+    /**
+     * Rincian per segmen, ditambah distribusi keseluruhan sebagai pembanding.
+     * Tanpa pembanding itu model tidak bisa menyebut segmen mana yang
+     * menyimpang - hanya bisa membacakan ulang angkanya satu per satu.
+     */
+    private function segmentFacts(TextAnalysis $analysis, ?string $column): ?array
+    {
+        if (! $column) {
+            return null;
+        }
+
+        $breakdown = $this->segmenter->breakdown($analysis, $column);
+
+        if ($breakdown === null) {
+            return null;
+        }
+
+        return [
+            'kolom_pemisah' => $column,
+            'distribusi_keseluruhan_persen' => $analysis->result->sentiment_distribution,
+            'jumlah_segmen' => $breakdown['total_segments'],
+            'segmen' => array_map(fn ($segmen) => [
+                'nilai' => $segmen['label'],
+                'jumlah_teks' => $segmen['count'],
+                'distribusi_persen' => $segmen['distribution'],
+                'aspek_teratas' => $segmen['top_aspects'],
+                // Kosong untuk analisis tanpa topic modeling; dikirim apa
+                // adanya, bukan dihilangkan, supaya modelnya sendiri yang
+                // memutuskan tidak ada yang bisa dikatakan soal topik.
+                'topik_dominan' => array_map(fn ($t) => $t['label'], $segmen['top_topics']),
+            ], array_slice($breakdown['segments'], 0, 15)),
+        ];
     }
 
     private function sentimentFacts(AnalysisResult $result): ?array
@@ -245,11 +304,65 @@ class AnalysisInterpretationService
             return null;
         }
 
-        return [
+        // Aspek dengan penyebutan terbanyak dulu - konsisten dengan urutan
+        // yang dilihat pengguna di grafik dan kartu Detail Aspek.
+        usort($aspek, fn ($a, $b) => $b['count'] <=> $a['count']);
+
+        $fakta = [
             'jumlah_aspek' => count($aspek),
             // Sepuluh teratas sudah cukup; sisanya menambah token tanpa menambah makna.
             'aspek' => array_slice($aspek, 0, 10),
         ];
+
+        // Contoh kalimat untuk aspek paling negatif, sama seperti sentimen -
+        // tanpa ini model hanya bisa melaporkan persentase, tidak bisa
+        // menunjuk isi keluhannya. Diabaikan kalau penyebutannya terlalu
+        // sedikit (persentase dari 1-2 baris tidak berarti apa-apa).
+        $palingBermasalah = collect($aspek)
+            ->filter(fn ($a) => $a['count'] >= 3)
+            ->sortByDesc(fn ($a) => $a['sentiments']['negative'] ?? 0)
+            ->first();
+
+        if ($palingBermasalah) {
+            $contoh = $this->contohAspek($result, $palingBermasalah['aspect'], 3);
+
+            if (! empty($contoh)) {
+                $fakta['contoh_aspek_paling_negatif'] = [
+                    'aspek' => $palingBermasalah['aspect'],
+                    'kalimat' => $contoh,
+                ];
+            }
+        }
+
+        return $fakta;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function contohAspek(AnalysisResult $result, string $aspectName, int $jumlah): array
+    {
+        $contoh = [];
+
+        foreach ($result->predictions ?? [] as $prediksi) {
+            if (count($contoh) >= $jumlah) {
+                break;
+            }
+
+            $aspek = $prediksi['aspects'] ?? [];
+
+            if (! in_array($aspectName, is_array($aspek) ? $aspek : [], true)) {
+                continue;
+            }
+
+            $teks = trim((string) ($prediksi['original_text'] ?? $prediksi['text'] ?? ''));
+
+            if ($teks !== '') {
+                $contoh[] = mb_substr($teks, 0, 200);
+            }
+        }
+
+        return $contoh;
     }
 
     private function associationFacts(AnalysisResult $result): ?array
@@ -339,37 +452,58 @@ class AnalysisInterpretationService
         );
     }
 
-    private function prompt(TextAnalysis $analysis, string $section, array $fakta): string
+    /**
+     * Aturan perilaku yang berlaku sama untuk setiap permintaan pada satu
+     * bagian - persona, larangan mengarang angka, format keluaran. Dikirim
+     * lewat `systemInstruction`, terpisah dari tugas dan data pada giliran
+     * user di {@see prompt()}, karena Gemini lebih konsisten mematuhi aturan
+     * perilaku ketika ditaruh di systemInstruction daripada ditumpuk jadi
+     * satu blok teks bersama data yang berubah-ubah tiap permintaan.
+     */
+    private function systemInstruction(string $section): string
     {
         $tugas = match ($section) {
             'sentiment' => 'Jelaskan apa yang ditunjukkan distribusi sentimen ini: kecenderungan utamanya, '
                 .'seberapa terbelah opininya, dan apa artinya bagi pihak yang membaca hasil ini.',
             'aspect' => 'Jelaskan aspek mana yang paling banyak dibicarakan, aspek mana yang sentimennya '
-                .'paling bermasalah, dan aspek mana yang paling baik diterima.',
+                .'paling bermasalah, dan aspek mana yang paling baik diterima. Kalau ada contoh kalimat '
+                .'pada data, boleh disinggung sebagai ilustrasi - jangan mengarang kalimat baru.',
             'association' => 'Jelaskan aspek dan topik mana yang paling erat berkaitan menurut nilai PMI, '
                 .'serta apa makna keterkaitan itu. PMI positif berarti pasangan itu muncul bersama lebih '
                 .'sering daripada yang diharapkan secara kebetulan.',
             'overview' => 'Tulis ringkasan eksekutif yang menyatukan seluruh hasil analisis di bawah ini '
                 .'menjadi satu gambaran utuh.',
+            'segment' => 'Bandingkan segmen-segmen di bawah ini. Sebutkan segmen mana yang paling '
+                .'menyimpang dari distribusi keseluruhan, ke arah mana penyimpangannya, dan aspek serta '
+                .'topik apa yang menyertainya (kalau field topik_dominan tersedia dan berisi). Perhatikan '
+                .'jumlah teks tiap segmen: segmen dengan sedikit teks tidak cukup kuat untuk disimpulkan.',
             default => 'Jelaskan hasil analisis di bawah ini.',
         };
 
         return 'Anda seorang analis data yang menjelaskan hasil analisis teks berbahasa Indonesia '
             ."kepada pembaca non-teknis.\n\n"
-            ."Konteks: {$this->konteks($analysis)}\n\n"
             ."Tugas: {$tugas}\n\n"
-            ."Data hasil analisis (format JSON):\n"
-            .json_encode($fakta, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)."\n\n"
             ."Aturan yang wajib dipatuhi:\n"
             ."- Tulis dalam bahasa Indonesia yang lugas, tanpa istilah teknis yang tidak dijelaskan.\n"
-            .'- Gunakan hanya angka yang ada pada data di atas. Jangan menghitung ulang, menaksir, '
-            ."atau menyebut angka yang tidak tertulis di sana.\n"
+            .'- Gunakan hanya angka yang ada pada data yang diberikan pengguna. Jangan menghitung ulang, '
+            ."menaksir, atau menyebut angka yang tidak tertulis di sana.\n"
             ."- Jangan menyimpulkan sebab-akibat; data ini hanya menunjukkan pola, bukan sebab.\n"
             // Judul analisis sering berupa catatan teknis ("Final combined
             // 15:17:59") dan terbaca janggal kalau dikutip di dalam narasi.
             ."- Jangan mengutip judul analisis di dalam kalimat.\n"
             ."- 'narrative' berisi 2 sampai 4 kalimat dalam satu paragraf, tanpa markdown.\n"
             .'- \'highlights\' berisi maksimal 4 poin temuan, masing-masing satu kalimat pendek.';
+    }
+
+    /**
+     * Konteks dan data numerik untuk SATU permintaan - bagian yang berubah
+     * setiap kali, ditaruh pada giliran user, bukan systemInstruction.
+     */
+    private function prompt(TextAnalysis $analysis, array $fakta): string
+    {
+        return "Konteks: {$this->konteks($analysis)}\n\n"
+            ."Data hasil analisis (format JSON):\n"
+            .json_encode($fakta, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     }
 
     private function konteks(TextAnalysis $analysis): string

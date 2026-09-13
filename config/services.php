@@ -49,11 +49,25 @@ return [
         // Jangan otomatis mengejar versi terbaru. Diuji 3 Sep 2026 dengan API
         // key proyek ini: gemini-3.5-flash membalas 200, gemini-3.8-flash
         // membalas 503.
+        //
+        // Boleh diisi lebih dari satu model dipisah koma ("gemini-3.5-flash,
+        // gemini-3.0-flash") - LlmService mencobanya berurutan dan berhenti
+        // pada yang pertama berhasil. Ini BUKAN mengejar versi terbaru: tiap
+        // kandidat tetap dipatok eksplisit, dan model yang benar-benar
+        // menjawab tersimpan apa adanya di provenance narasi (bukan selalu
+        // kandidat pertama), jadi setiap narasi tetap bisa disebut model
+        // persisnya. Gunanya menghindari layanan mengulang model yang sama
+        // yang sedang padat (503) alih-alih menunggunya lebih lama.
         'model' => env('GEMINI_MODEL', 'gemini-3.5-flash'),
 
         // Narasi hasil analisis lebih panjang daripada label topik, jadi
         // batas 30 detik yang lama kadang terpotong.
         'timeout' => (int) env('GEMINI_TIMEOUT', 45),
+
+        // Percobaan ulang PER MODEL sebelum pindah ke kandidat berikutnya di
+        // atas. Sengaja kecil (bukan mengulang lama pada satu model padat) -
+        // daftar model itu sendiri yang jadi strategi utama menghadapi 503,
+        // bukan retry panjang pada model yang sama.
         'retry' => (int) env('GEMINI_RETRY', 2),
     ],
 

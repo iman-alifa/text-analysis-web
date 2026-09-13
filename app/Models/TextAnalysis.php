@@ -19,6 +19,7 @@ class TextAnalysis extends Model
         'description',
         'input_type',
         'raw_data',
+        'segment_data',
         'file_path',
         'file_name',
         'total_records',
@@ -35,6 +36,7 @@ class TextAnalysis extends Model
 
     protected $casts = [
         'raw_data' => 'array',
+        'segment_data' => 'array',
         'metadata' => 'array',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',

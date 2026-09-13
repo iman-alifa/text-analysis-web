@@ -55,18 +55,18 @@ class OrphanTrainingItemTest extends TestCase
     public function test_statistik_tidak_menghitung_baris_analisis_terhapus(): void
     {
         $admin = $this->admin();
-        $this->analysisWithItems($admin, 12, 'aktif');
+        $this->analysisWithItems($admin, 60, 'aktif');
         $terhapus = $this->analysisWithItems($admin, 30, 'terhapus');
 
         $terhapus->delete(); // soft delete
 
-        $this->assertSame(42, TrainingItem::count(), 'baris yatim memang masih ada di tabel');
+        $this->assertSame(90, TrainingItem::count(), 'baris yatim memang masih ada di tabel');
 
         $html = $this->actingAs($admin)->get(route('admin.training.index'))->assertOk()->getContent();
 
-        // Yang tampil hanya 12, bukan 42
-        $this->assertStringContainsString('>12<', $html);
-        $this->assertStringNotContainsString('>42<', $html);
+        // Yang tampil hanya 60, bukan 90
+        $this->assertStringContainsString('>60<', $html);
+        $this->assertStringNotContainsString('>90<', $html);
     }
 
     public function test_data_latih_tidak_menyertakan_baris_analisis_terhapus(): void
@@ -74,18 +74,21 @@ class OrphanTrainingItemTest extends TestCase
         Queue::fake();
 
         $admin = $this->admin();
-        $this->analysisWithItems($admin, 12, 'aktif');
+        $aktif = $this->analysisWithItems($admin, 60, 'aktif');
         $terhapus = $this->analysisWithItems($admin, 30, 'terhapus');
         $terhapus->delete();
 
         $this->actingAs($admin)
-            ->post(route('admin.training.trigger'), ['model_type' => 'sentiment'])
+            ->post(route('admin.training.trigger'), [
+                'model_type' => 'sentiment',
+                'text_analysis_id' => (string) $aktif->id,
+            ])
             ->assertSessionHas('success');
 
         $training = \App\Models\ModelTraining::firstOrFail();
 
-        // 12, bukan 42
-        $this->assertSame(12, $training->total_samples);
+        // 60, bukan 90
+        $this->assertSame(60, $training->total_samples);
     }
 
     public function test_pemeriksaan_data_juga_mengabaikan_baris_yatim(): void

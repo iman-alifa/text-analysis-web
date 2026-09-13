@@ -2,9 +2,11 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\RetrainBusyException;
 use App\Models\AnalysisLog;
 use App\Models\ModelTraining;
 use App\Services\NLPApiService;
+use App\Support\PoolFingerprint;
 use Exception;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -71,6 +73,20 @@ class RetrainModel implements ShouldQueue
             $ditolak = ($result['rejected_for_regression'] ?? false) === true
                     || ($result['saved'] ?? true) === false;
 
+            // Sidik jari isi kolam. Dihitung di sini dari muatan yang BENAR-BENAR
+            // dikirim, bukan dibaca dari respons: layanan menuliskannya ke
+            // `provenance.json` di sebelah checkpoint, tetapi belum
+            // mengembalikannya di badan respons `/api/retrain/*`. Kalau suatu
+            // saat dikembalikan, nilainya yang dipakai - dan selisih antara
+            // keduanya justru temuan yang layak dilihat.
+            //
+            // Gunanya membaca dua putaran berturut-turut: sidik jari yang SAMA
+            // berarti kolamnya tidak bertambah (keliru menurut protokol kolam),
+            // dan sidik jari yang berbeda pada putaran yang seharusnya
+            // mengulang hal yang sama berarti kolamnya berubah diam-diam.
+            $result['sidik_jari_sumber'] = isset($result['sidik_jari_kolam']) ? 'layanan' : 'laravel';
+            $result['sidik_jari_kolam'] ??= PoolFingerprint::ofPayload($this->trainingData);
+
             $this->training->update([
                 'status' => $ditolak ? 'rejected' : 'completed',
                 'result' => $result,
@@ -98,6 +114,17 @@ class RetrainModel implements ShouldQueue
                 'result' => $result,
             ]);
 
+        } catch (RetrainBusyException $e) {
+            // Bukan kegagalan: layanan sedang melatih model yang sama, jadi
+            // pelatihan ini dilewati. Koreksinya tetap tersimpan dan akan
+            // ikut pada putaran berikutnya.
+            Log::info("Retraining {$type} dilewati: ".$e->getMessage());
+
+            $this->training->update([
+                'status' => 'skipped',
+                'error_message' => $e->getMessage(),
+                'completed_at' => now(),
+            ]);
         } catch (Exception $e) {
             $this->markFailed($e->getMessage());
             throw $e;
@@ -132,6 +159,19 @@ class RetrainModel implements ShouldQueue
 
         return $pesan;
     }
+
+    /*
+     * Catatan: pelatihan ulang TIDAK memicu evaluasi hold-out.
+     *
+     * Sempat dibuat otomatis, lalu dilepas atas permintaan pemilik proyek:
+     * evaluasi di sini murni alat penyusunan skripsi, dan kapan sebuah iterasi
+     * diukur adalah keputusan penelitinya - bukan efek samping antrean.
+     *
+     * Konsekuensinya perlu diingat: bobot lama tertimpa begitu checkpoint
+     * diterima, jadi iterasi yang belum diukur tidak bisa diukur ulang
+     * belakangan. Jalankan `php artisan evaluation:run <dataset>` atau tombol
+     * di /admin/evaluation setelah setiap pelatihan yang ingin dicatat.
+     */
 
     private function markFailed(string $message): void
     {

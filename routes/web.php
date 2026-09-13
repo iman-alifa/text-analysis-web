@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\EvaluationController;
 use App\Http\Controllers\Admin\TrainingController;
 use App\Http\Controllers\AnalysisController;
 use App\Http\Controllers\AnalysisFeedbackController;
@@ -55,6 +56,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/{id}/export-pdf', [AnalysisController::class, 'exportPdf'])->name('export-pdf');
         Route::get('/{id}/export-csv', [AnalysisController::class, 'exportCsv'])->name('export-csv');
 
+        // Rincian hasil per kolom pemisah. Murni membaca ulang data tersimpan,
+        // jadi throttle-nya sama longgarnya dengan daftar prediksi.
+        Route::get('/{id}/segments', [AnalysisController::class, 'segments'])
+            ->name('segments')
+            ->whereNumber('id')
+            ->middleware('throttle:60,1');
+
         // Interpretasi AI per bagian hasil. Throttle-nya ketat karena tiap
         // permintaan memanggil Gemini dan memotong kuota harian.
         Route::post('/{id}/interpret/{section}', [AnalysisController::class, 'interpret'])
@@ -104,9 +112,6 @@ Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.'
     // 4. Action: Update Single Item
     Route::post('/training/update/{itemId}', [TrainingController::class, 'update'])->name('training.update');
 
-    // 5. Action: Bulk Update
-    Route::post('/training/bulk-update', [TrainingController::class, 'bulkCorrect'])->name('training.bulk');
-
     // 6. Action: Stopwords Management
     Route::post('/training/stopword', [TrainingController::class, 'storeStopword'])->name('training.stopword');
     Route::delete('/training/stopword/{id}', [TrainingController::class, 'destroyStopword'])->name('training.stopword.delete');
@@ -118,6 +123,23 @@ Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.'
     Route::post('/training/trigger-retrain', [TrainingController::class, 'triggerTraining'])->name('training.trigger'); // Pastikan ini POST
 
     Route::post('/training/sync-all', [TrainingController::class, 'syncAll'])->name('training.sync');
+
+    // 8. Evaluasi hold-out (golden dataset)
+    // whereNumber pada tiap {id} dengan alasan yang sama seperti di atas.
+    Route::get('/evaluation', [EvaluationController::class, 'index'])->name('evaluation.index');
+    Route::post('/evaluation', [EvaluationController::class, 'store'])->name('evaluation.store');
+    // Terdaftar sebelum /evaluation/{id} - kalau tidak, {id} menelannya.
+    Route::get('/evaluation/sampling', [EvaluationController::class, 'sampling'])->name('evaluation.sampling');
+    Route::post('/evaluation/sampling', [EvaluationController::class, 'storeSample'])->name('evaluation.sample');
+    Route::get('/evaluation/{id}', [EvaluationController::class, 'show'])->whereNumber('id')->name('evaluation.show');
+    Route::post('/evaluation/{id}/freeze', [EvaluationController::class, 'freeze'])->whereNumber('id')->name('evaluation.freeze');
+    Route::post('/evaluation/{id}/unfreeze', [EvaluationController::class, 'unfreeze'])->whereNumber('id')->name('evaluation.unfreeze');
+    Route::post('/evaluation/{id}/run', [EvaluationController::class, 'run'])->whereNumber('id')->name('evaluation.run');
+    Route::delete('/evaluation/{id}', [EvaluationController::class, 'destroy'])->whereNumber('id')->name('evaluation.destroy');
+    Route::get('/evaluation/{id}/annotation', [EvaluationController::class, 'downloadAnnotation'])->whereNumber('id')->name('evaluation.annotation');
+    Route::post('/evaluation/{id}/annotation', [EvaluationController::class, 'uploadAnnotation'])->whereNumber('id')->name('evaluation.annotation.upload');
+    Route::post('/evaluation/{id}/drop-unlabeled', [EvaluationController::class, 'dropUnlabeled'])->whereNumber('id')->name('evaluation.drop-unlabeled');
+    Route::get('/evaluation/run/{runId}/errors', [EvaluationController::class, 'exportErrors'])->whereNumber('runId')->name('evaluation.errors');
 });
 
 require __DIR__.'/auth.php';

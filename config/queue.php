@@ -53,7 +53,7 @@ return [
             // mengantre dan membuat semuanya makin lambat, hasil saling timpa,
             // dan job akhirnya ditandai gagal setelah 3 percobaan. Inilah sebab
             // "analisis gagal / timeout" yang tampak acak.
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 2100),
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 4200),
             'after_commit' => false,
         ],
 

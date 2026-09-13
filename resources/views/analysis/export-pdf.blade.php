@@ -65,7 +65,7 @@
                     @if(! empty($narasi['generated_at']))
                         pada {{ \Carbon\Carbon::parse($narasi['generated_at'])->translatedFormat('d M Y, H:i') }}
                     @endif
-                    &mdash; seluruh angka berasal dari hasil analisis, bukan dari AI.
+                    - seluruh angka berasal dari hasil analisis, bukan dari AI.
                 </p>
             </div>
         @endif
@@ -125,7 +125,7 @@
     @endif
 
     @if($result->association_results && !empty($result->association_results['pmi_top_associations']))
-        <h2>Asosiasi Aspek &ndash; Topik (PMI)</h2>
+        <h2>Asosiasi Aspek - Topik (PMI)</h2>
         <table>
             <thead><tr><th>Aspek</th><th>Topik</th><th>PMI</th><th>Ko-okurensi</th></tr></thead>
             <tbody>

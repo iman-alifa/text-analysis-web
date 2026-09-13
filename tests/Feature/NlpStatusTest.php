@@ -113,4 +113,43 @@ class NlpStatusTest extends TestCase
     {
         $this->getJson(route('analysis.nlp-status'))->assertUnauthorized();
     }
+
+    public function test_membaca_info_model_dari_blok_models_bukan_tingkat_atas(): void
+    {
+        // Bentuk sebenarnya /health adalah {"models": {...}}. Kode lama
+        // membacanya di tingkat atas sehingga seluruh kolom panel kesiapan
+        // model selalu kosong - terverifikasi terhadap layanan yang berjalan.
+        Http::fake(['*/health' => Http::response([
+            'status' => 'healthy',
+            'models' => [
+                'sentiment_source' => 'crypter70/IndoBERT-Sentiment-Analysis',
+                'sentiment_base' => 'indobenchmark/indobert-base-p1',
+                'sentiment_temperature' => 2.7748,
+                'sentiment_review_threshold' => 0.94,
+            ],
+            'weights_loaded' => ['sentiment' => true, 'aspect' => true, 'topic' => true],
+        ])]);
+
+        $this->actingAs(User::factory()->create())
+            ->getJson(route('analysis.nlp-status'))
+            ->assertOk()
+            ->assertJsonPath('model.sentiment_source', 'crypter70/IndoBERT-Sentiment-Analysis')
+            ->assertJsonPath('model.sentiment_review_threshold', 0.94)
+            ->assertJsonPath('all_ready', true);
+    }
+
+    public function test_bentuk_lama_tingkat_atas_tetap_terbaca(): void
+    {
+        // Cadangan supaya versi layanan yang lebih tua tidak ikut rusak.
+        Http::fake(['*/health' => Http::response([
+            'status' => 'healthy',
+            'sentiment_review_threshold' => 0.90,
+            'weights_loaded' => ['sentiment' => true],
+        ])]);
+
+        $this->actingAs(User::factory()->create())
+            ->getJson(route('analysis.nlp-status'))
+            ->assertOk()
+            ->assertJsonPath('model.sentiment_review_threshold', 0.9);
+    }
 }

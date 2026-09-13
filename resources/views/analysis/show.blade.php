@@ -121,7 +121,7 @@
                         @elseif($analysis->analysis_type == 'topic') bg-green-100 text-green-800
                         @else bg-gradient-to-r from-blue-100 to-purple-100 text-blue-800
                         @endif">
-                        {{ ucfirst($analysis->analysis_type) }}
+                        {{ \App\Helpers\ResultPresenter::analysisTypeLabel($analysis->analysis_type) }}
                     </span>
                     @if($analysis->status == 'completed' && $analysis->duration)
                     <span class="flex items-center">
@@ -252,9 +252,54 @@
             $result = $analysis->result;
         @endphp
 
+        {{-- Navigasi dalam halaman. Laporan gabungan memuat belasan blok
+             sehingga menggulir dari atas ke bawah adalah satu-satunya cara
+             berpindah tanpa ini. Hanya bagian yang benar-benar dirender yang
+             ditawarkan, supaya tidak ada tautan menuju jangkar kosong. --}}
+        @php
+            $gabungan = $analysis->analysis_type === 'combined';
+            $punyaSentimen = in_array($analysis->analysis_type, ['sentiment', 'combined'], true)
+                && ! empty($result->sentiment_distribution);
+            $punyaAspek = in_array($analysis->analysis_type, ['aspect', 'combined'], true)
+                && ! empty($chartData['aspects'] ?? []);
+
+            $navBagian = array_filter([
+                $result->summary ? ['id' => 'bagian-ringkasan', 'label' => 'Ringkasan'] : null,
+                $confidence ? ['id' => 'bagian-keyakinan', 'label' => 'Keyakinan'] : null,
+                $punyaSentimen ? ['id' => 'bagian-sentimen', 'label' => 'Sentimen'] : null,
+                ($punyaSentimen && ! empty($result->predictions)) ? ['id' => 'bagian-prediksi', 'label' => 'Prediksi'] : null,
+                $punyaAspek ? ['id' => 'bagian-aspek', 'label' => 'Aspek'] : null,
+                (in_array($analysis->analysis_type, ['topic', 'combined'], true) && ! empty($result->topic_results))
+                    ? ['id' => 'bagian-topik', 'label' => 'Topik'] : null,
+                ($gabungan && $punyaAspek && ! empty($result->topic_results))
+                    ? ['id' => 'bagian-asosiasi', 'label' => 'Asosiasi'] : null,
+                ! empty($segmentColumns)
+                    ? ['id' => 'bagian-segmen', 'label' => 'Rincian'] : null,
+            ]);
+        @endphp
+
+        @if(count($navBagian) > 2)
+        <nav aria-label="Bagian hasil analisis"
+             class="sticky top-0 z-30 -mx-4 px-4 py-2.5 bg-white/95 backdrop-blur shadow-sm border-b-2 border-indigo-100">
+            <ul class="flex gap-1.5 overflow-x-auto">
+                @foreach($navBagian as $bagian)
+                <li>
+                    <a href="#{{ $bagian['id'] }}"
+                       data-nav-bagian="{{ $bagian['id'] }}"
+                       class="inline-block whitespace-nowrap px-3.5 py-2 rounded-lg text-sm font-semibold
+                              text-gray-600 hover:text-indigo-700 hover:bg-indigo-50
+                              focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                        {{ $bagian['label'] }}
+                    </a>
+                </li>
+                @endforeach
+            </ul>
+        </nav>
+        @endif
+
         <!-- Summary Card -->
         @if($result->summary)
-        <div class="bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl shadow-lg p-6 text-white">
+        <div id="bagian-ringkasan" class="scroll-mt-24 bg-gradient-to-br from-blue-500 to-cyan-500 rounded-xl shadow-lg p-6 text-white">
             <div class="flex items-start">
                 <svg class="w-8 h-8 mr-4 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -267,6 +312,10 @@
         </div>
         @endif
 
+        @if($confidence)
+            @include('analysis.partials.confidence-panel', ['confidence' => $confidence])
+        @endif
+
         @include('analysis.partials.ai-interpretation', [
             'section' => 'overview',
             'judul' => 'Ringkasan Eksekutif AI',
@@ -276,44 +325,70 @@
 
         <!-- Metrics Cards -->
         @php
-            // Hanya nilai tunggal yang layak jadi kartu. metrics juga memuat
-            // nilai bersarang seperti review_queue dan failed_batches, dan
-            // mencetak array lewat {{ }} membuat seluruh halaman gagal render.
-            $metricCards = collect($result->metrics ?? [])->filter(fn ($value) => is_scalar($value));
+            // `use` tidak boleh berada di dalam blok @php - Blade
+            // mengompilasinya ke dalam badan fungsi.
+            $presenter = \App\Helpers\ResultPresenter::class;
+
+            // Format ditentukan per nama metrik di ResultPresenter, bukan
+            // ditebak dari tipe datanya. Versi sebelumnya mengalikan setiap
+            // float dengan 100, sehingga negative_percentage = 88.58 tampil
+            // sebagai "8858%".
+            $metricCards = $presenter::metricCards($result->metrics);
+            $metricTeknis = $presenter::technicalMetrics($result->metrics);
         @endphp
-        @if($metricCards->isNotEmpty())
+
+        @if(! empty($metricCards))
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            @foreach($metricCards as $key => $value)
+            @foreach($metricCards as $kartu)
             <div class="metric-card bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                 <div class="flex items-center justify-between mb-2">
-                    <p class="text-sm font-medium text-gray-600">{{ ucfirst(str_replace('_', ' ', $key)) }}</p>
-                    @if(strpos($key, 'accuracy') !== false || strpos($key, 'confidence') !== false)
-                        <svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <p class="text-sm font-medium text-gray-600">{{ $kartu['label'] }}</p>
+                    @if(str_contains($kartu['key'], 'confidence'))
+                        <svg class="w-5 h-5 text-green-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
                             <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                         </svg>
                     @endif
                 </div>
-                <p class="text-3xl font-bold text-gray-900">
-                    @if(is_numeric($value))
-                        {{ is_float($value) ? round($value * 100, 1) . '%' : $value }}
-                    @else
-                        {{ $value }}
-                    @endif
-                </p>
+                <p class="text-3xl font-bold text-gray-900">{{ $kartu['value'] }}</p>
             </div>
             @endforeach
         </div>
         @endif
 
+        @if(! empty($metricTeknis))
+        {{-- Catatan internal dan angka yang sudah tampil lebih baik di panel
+             lain. Dilipat, bukan dibuang: menyembunyikan angka dari pemilik
+             datanya bukan keputusan lapisan tampilan. --}}
+        <details class="bg-white rounded-xl shadow-sm border border-gray-100">
+            <summary class="px-6 py-4 cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900 select-none">
+                Detail teknis ({{ count($metricTeknis) }} nilai)
+            </summary>
+            <dl class="px-6 pb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 border-t border-gray-100 pt-4">
+                @foreach($metricTeknis as $baris)
+                <div class="flex items-baseline justify-between gap-3 text-sm">
+                    <dt class="text-gray-600">{{ $baris['label'] }}</dt>
+                    <dd class="font-medium text-gray-900">{{ $baris['value'] }}</dd>
+                </div>
+                @endforeach
+            </dl>
+        </details>
+        @endif
+
         <!-- Sentiment Analysis Results -->
         @if($analysis->analysis_type == 'sentiment' || $analysis->analysis_type == 'combined')
             @if($result->sentiment_distribution)
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div id="bagian-sentimen" class="scroll-mt-24 grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <!-- Sentiment Distribution Chart -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                     <h3 class="text-lg font-semibold text-gray-900 mb-4">Distribusi Sentimen</h3>
                     <div class="chart-container">
-                        <canvas id="sentimentChart"></canvas>
+                        @php
+                            $ringkasSentimen = collect($result->sentiment_distribution)
+                                ->map(fn ($persen, $label) => \App\Helpers\ResultPresenter::sentimentLabel($label).' '.$persen.' persen')
+                                ->implode(', ');
+                        @endphp
+                        <canvas id="sentimentChart" role="img"
+                                aria-label="Diagram distribusi sentimen: {{ $ringkasSentimen }}."></canvas>
                     </div>
                 </div>
 
@@ -324,7 +399,7 @@
                         @foreach($result->sentiment_distribution as $sentiment => $percentage)
                         <div>
                             <div class="flex items-center justify-between mb-2">
-                                <span class="text-sm font-medium text-gray-700 capitalize">{{ $sentiment }}</span>
+                                <span class="text-sm font-medium text-gray-700">{{ \App\Helpers\ResultPresenter::sentimentLabel($sentiment) }}</span>
                                 <span class="text-sm font-bold text-gray-900">{{ $percentage }}%</span>
                             </div>
                             <div class="w-full bg-gray-200 rounded-full h-3">
@@ -359,7 +434,7 @@
                     'total_failed' => ['label' => 'baris gagal dinilai', 'note' => 'model tidak berhasil menilai'],
                 ])->filter(fn ($meta, $key) => ($result->metrics[$key] ?? 0) > 0);
             @endphp
-            <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+            <div id="bagian-prediksi" class="scroll-mt-24 bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="px-6 py-4 border-b border-gray-200">
                     <div class="flex items-center justify-between flex-wrap gap-3">
                         <div>
@@ -400,7 +475,7 @@
                     </p>
                     <p class="mt-1 text-xs text-amber-800">
                         Catatan: antrean ini sengaja berisi baris yang model paling ragu, jadi
-                        <strong>jangan memakainya untuk mengukur akurasi</strong> &mdash; untuk pengukuran, ambil sampel acak.
+                        <strong>jangan memakainya untuk mengukur akurasi</strong> - untuk pengukuran, ambil sampel acak.
                     </p>
                 </div>
                 @endif
@@ -410,7 +485,7 @@
                     <p class="text-sm font-medium text-blue-900 mb-1">Catatan mutu data</p>
                     <ul class="text-xs text-blue-800 space-y-0.5">
                         @foreach($qualityCounters as $key => $meta)
-                        <li>&bull; {{ $result->metrics[$key] }} {{ $meta['label'] }} &mdash; {{ $meta['note'] }}</li>
+                        <li>&bull; {{ $result->metrics[$key] }} {{ $meta['label'] }} - {{ $meta['note'] }}</li>
                         @endforeach
                     </ul>
                 </div>
@@ -456,7 +531,7 @@
                     {{-- Kontrol halaman --}}
                     <div id="predictions-pagination" class="mt-4 flex items-center justify-between gap-4 flex-wrap">
                         <p class="text-sm text-gray-500" id="predictions-count">
-                            Menampilkan {{ $predictionPage['meta']['from'] }}&ndash;{{ $predictionPage['meta']['to'] }}
+                            Menampilkan {{ $predictionPage['meta']['from'] }}-{{ $predictionPage['meta']['to'] }}
                             dari {{ $predictionPage['meta']['filtered'] }} prediksi
                         </p>
 
@@ -607,24 +682,58 @@
         <!-- Aspect Analysis Results -->
         @php $aspectRows = $chartData['aspects'] ?? []; @endphp
         @if(($analysis->analysis_type == 'aspect' || $analysis->analysis_type == 'combined') && !empty($aspectRows))
-        <div class="space-y-6">
+        <div id="bagian-aspek" class="scroll-mt-24 space-y-6">
             <!-- Aspect Chart -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-4">Analisis Aspek</h3>
-                <div class="chart-container" style="height: 400px;">
-                    <canvas id="aspectChart"></canvas>
+                <h3 class="text-lg font-semibold text-gray-900 mb-1">Analisis Aspek</h3>
+                @if($chartData['aspect_chart_truncated'] ?? false)
+                {{-- Kalimatnya harus dalam satu ekspresi Blade, bukan dipecah
+                     ke beberapa baris - spasi dan barisnya ikut terender
+                     sehingga assertSee/assertStringContainsString yang utuh
+                     tidak akan pernah cocok. --}}
+                <p class="text-xs text-gray-500 mb-3">{{ 'Menampilkan '.count($chartData['aspect']['labels']).' aspek dengan penyebutan terbanyak dari '.count($aspectRows).' - grafik untuk semuanya akan penuh sesak dan sulit dibaca. Aspek selebihnya tetap ada di Detail Aspek di bawah.' }}</p>
+                @endif
+                <div class="chart-container mt-3" style="height: 400px;">
+                    @php
+                        $ringkasAspek = collect($aspectRows)->take(5)
+                            ->map(fn ($a) => $a['aspect'].' '.$a['count'].' penyebutan')
+                            ->implode(', ');
+                    @endphp
+                    <canvas id="aspectChart" role="img"
+                            aria-label="Diagram sentimen per aspek. Aspek terbanyak: {{ $ringkasAspek }}."></canvas>
                 </div>
             </div>
 
             <!-- Aspect Details -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-4">Detail Aspek</h3>
-                <div class="space-y-4">
-                    @foreach($aspectRows as $aspect)
-                    <div class="border border-gray-200 rounded-lg p-4">
-                        <div class="flex items-center justify-between mb-3">
+                <h3 class="text-lg font-semibold text-gray-900 mb-1">Detail Aspek</h3>
+                {{-- Sentimen per aspek berasal dari pasca-pemrosesan di sisi layanan
+                     (pemenggalan klausa dan penyelesaian keyakinan rendah) yang belum
+                     pernah diukur harness mana pun. Akurasi sentimen tingkat dokumen
+                     tidak berlaku untuk angka-angka di bawah, dan pembaca akan
+                     mengiranya berlaku kalau tidak dikatakan. --}}
+                <p class="text-xs text-gray-500 mb-4">
+                    Persentase di bawah berasal dari sentimen tingkat klausa per aspek, bukan dari sentimen
+                    tingkat dokumen - akurasi model yang dilaporkan di halaman evaluasi tidak berlaku untuknya.
+                </p>
+                <div class="space-y-4" id="aspect-cards-container">
+                    @foreach($aspectRows as $i => $aspect)
+                    <div class="aspect-card border border-gray-200 rounded-lg p-4" data-aspect-page="{{ intdiv($i, 6) }}">
+                        <div class="flex items-center justify-between mb-3 gap-3">
                             <h4 class="font-semibold text-gray-900 capitalize">{{ $aspect['aspect'] }}</h4>
-                            <span class="text-sm text-gray-500">{{ $aspect['count'] }} mentions</span>
+                            <div class="flex items-center gap-2 flex-shrink-0">
+                                <span class="text-sm text-gray-500">{{ number_format($aspect['count']) }} penyebutan</span>
+                                <button type="button"
+                                        data-aspect-penyebutan="{{ $aspect['aspect'] }}"
+                                        aria-label="Lihat penyebutan aspek {{ $aspect['aspect'] }}"
+                                        title="Lihat penyebutan"
+                                        class="p-1.5 rounded-lg text-gray-500 hover:text-indigo-700 hover:bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-3 gap-2">
                             @foreach($aspect['sentiments'] as $sentiment => $percentage)
@@ -633,7 +742,7 @@
                                 @elseif($sentiment == 'negative') bg-red-50
                                 @else bg-gray-50
                                 @endif">
-                                <p class="text-xs font-medium text-gray-600 capitalize">{{ $sentiment }}</p>
+                                <p class="text-xs font-medium text-gray-600">{{ \App\Helpers\ResultPresenter::sentimentLabel($sentiment) }}</p>
                                 <p class="text-lg font-bold
                                     @if($sentiment == 'positive') text-green-600
                                     @elseif($sentiment == 'negative') text-red-600
@@ -647,6 +756,23 @@
                     </div>
                     @endforeach
                 </div>
+
+                @if(count($aspectRows) > 6)
+                <div class="mt-4 flex items-center justify-between gap-4 flex-wrap">
+                    <p class="text-sm text-gray-500" id="aspect-pager-count"></p>
+                    <div class="flex items-center gap-2">
+                        <button type="button" id="aspect-pager-prev"
+                                class="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                            Sebelumnya
+                        </button>
+                        <span class="text-sm text-gray-600" id="aspect-pager-label"></span>
+                        <button type="button" id="aspect-pager-next"
+                                class="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                            Berikutnya
+                        </button>
+                    </div>
+                </div>
+                @endif
             </div>
 
             @include('analysis.partials.ai-interpretation', [
@@ -656,23 +782,173 @@
                 'stored' => $aiSections['aspect'] ?? null,
             ])
         </div>
+
+        {{-- Modal penyebutan aspek: dipakai tombol mata pada tiap kartu Detail
+             Aspek. Memuat ulang lewat endpoint prediksi yang sama dengan
+             Detail Prediksi (disaring per aspek di server), bukan menyisipkan
+             seluruh prediksi ke JavaScript - itu justru masalah berat halaman
+             yang sudah pernah diperbaiki di bagian prediksi. --}}
+        <div id="aspect-penyebutan-modal" class="hidden fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="aspect-penyebutan-title">
+            <div class="fixed inset-0 bg-gray-900/50" data-aspect-modal-backdrop></div>
+            <div class="flex min-h-full items-start justify-center p-4 sm:p-8">
+                <div class="relative bg-white rounded-xl shadow-xl w-full max-w-2xl mt-8">
+                    <div class="flex items-start justify-between gap-4 px-6 py-4 border-b border-gray-200">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900 capitalize" id="aspect-penyebutan-title">Penyebutan</h3>
+                            <p class="text-sm text-gray-500 mt-0.5" id="aspect-penyebutan-count"></p>
+                        </div>
+                        <button type="button" data-aspect-modal-close aria-label="Tutup"
+                                class="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-400">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="p-6 max-h-[60vh] overflow-y-auto">
+                        <div id="aspect-penyebutan-container" class="space-y-3" aria-live="polite" aria-busy="false"></div>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 flex-wrap px-6 py-4 border-t border-gray-200">
+                        <span class="text-sm text-gray-600" id="aspect-penyebutan-page-label"></span>
+                        <div class="flex items-center gap-2">
+                            <button type="button" id="aspect-penyebutan-prev"
+                                    class="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                                Sebelumnya
+                            </button>
+                            <button type="button" id="aspect-penyebutan-next"
+                                    class="px-3 py-1.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                                Berikutnya
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @push('scripts')
+        <script>
+        (function () {
+            // ---------------------------------------------------- paginasi kartu aspek
+            const cards = Array.from(document.querySelectorAll('.aspect-card'));
+            const perPageEl = document.getElementById('aspect-pager-count');
+            const pagerLabel = document.getElementById('aspect-pager-label');
+            const prevBtn = document.getElementById('aspect-pager-prev');
+            const nextBtn = document.getElementById('aspect-pager-next');
+
+            if (cards.length && prevBtn && nextBtn) {
+                const totalPages = Math.max(...cards.map(c => parseInt(c.dataset.aspectPage, 10))) + 1;
+                let page = 0;
+
+                function render() {
+                    cards.forEach(card => {
+                        card.hidden = parseInt(card.dataset.aspectPage, 10) !== page;
+                    });
+                    const shown = cards.filter(c => parseInt(c.dataset.aspectPage, 10) === page).length;
+                    perPageEl.textContent = `Menampilkan ${shown} dari ${cards.length} aspek`;
+                    pagerLabel.textContent = `Halaman ${page + 1} dari ${totalPages}`;
+                    prevBtn.disabled = page <= 0;
+                    nextBtn.disabled = page >= totalPages - 1;
+                }
+
+                prevBtn.addEventListener('click', () => { if (page > 0) { page--; render(); } });
+                nextBtn.addEventListener('click', () => { if (page < totalPages - 1) { page++; render(); } });
+
+                render();
+            }
+
+            // -------------------------------------------------- modal penyebutan aspek
+            const modal = document.getElementById('aspect-penyebutan-modal');
+            if (!modal) return;
+
+            const titleEl = document.getElementById('aspect-penyebutan-title');
+            const countEl = document.getElementById('aspect-penyebutan-count');
+            const container = document.getElementById('aspect-penyebutan-container');
+            const pageLabel = document.getElementById('aspect-penyebutan-page-label');
+            const prevPenyebutanBtn = document.getElementById('aspect-penyebutan-prev');
+            const nextPenyebutanBtn = document.getElementById('aspect-penyebutan-next');
+            const endpoint = @json(route('analysis.predictions', $analysis->id));
+
+            let state = { aspect: null, page: 1, lastPage: 1 };
+            let pending = null;
+
+            function muatPenyebutan() {
+                if (pending) pending.abort();
+                pending = new AbortController();
+
+                container.setAttribute('aria-busy', 'true');
+                container.innerHTML = '<p class="py-6 text-center text-gray-400 text-sm">Memuat...</p>';
+
+                const params = new URLSearchParams({ filter: 'all', page: state.page, aspect: state.aspect });
+
+                fetch(`${endpoint}?${params}`, {
+                    headers: { 'Accept': 'application/json' },
+                    signal: pending.signal,
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) return;
+
+                    container.innerHTML = data.html;
+                    state.lastPage = data.meta.last_page;
+
+                    countEl.textContent = data.meta.filtered === 0
+                        ? 'Tidak ada penyebutan tersimpan untuk aspek ini'
+                        : `${data.meta.filtered} penyebutan`;
+                    pageLabel.textContent = `Halaman ${data.meta.page} dari ${data.meta.last_page}`;
+                    prevPenyebutanBtn.disabled = data.meta.page <= 1;
+                    nextPenyebutanBtn.disabled = data.meta.page >= data.meta.last_page;
+                })
+                .catch(error => {
+                    if (error.name === 'AbortError') return;
+                    container.innerHTML = '<p class="py-6 text-center text-red-600 text-sm">Gagal memuat penyebutan.</p>';
+                })
+                .finally(() => container.setAttribute('aria-busy', 'false'));
+            }
+
+            function bukaModal(aspectName) {
+                state = { aspect: aspectName, page: 1, lastPage: 1 };
+                titleEl.textContent = aspectName;
+                modal.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+                muatPenyebutan();
+            }
+
+            function tutupModal() {
+                modal.classList.add('hidden');
+                document.body.classList.remove('overflow-hidden');
+                if (pending) pending.abort();
+            }
+
+            document.querySelectorAll('[data-aspect-penyebutan]').forEach(btn => {
+                btn.addEventListener('click', () => bukaModal(btn.dataset.aspectPenyebutan));
+            });
+
+            modal.querySelectorAll('[data-aspect-modal-close], [data-aspect-modal-backdrop]').forEach(el => {
+                el.addEventListener('click', tutupModal);
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !modal.classList.contains('hidden')) tutupModal();
+            });
+
+            prevPenyebutanBtn.addEventListener('click', () => {
+                if (state.page > 1) { state.page--; muatPenyebutan(); }
+            });
+            nextPenyebutanBtn.addEventListener('click', () => {
+                if (state.page < state.lastPage) { state.page++; muatPenyebutan(); }
+            });
+        })();
+        </script>
+        @endpush
         @endif
 
         <!-- Topic Modeling Results -->
         @if(($analysis->analysis_type == 'topic' || $analysis->analysis_type == 'combined') && $result->topic_results)
-        <div class="space-y-6">
+        <div id="bagian-topik" class="scroll-mt-24 space-y-6">
             @php
                 $topicQuality = $result->topic_results['quality'] ?? null;
                 // Rambu penafsiran c_v untuk teks pendek/tidak baku seperti komentar.
-                $cv = $topicQuality['c_v'] ?? null;
-                $cvBand = match(true) {
-                    $cv === null => null,
-                    $cv < 0.30 => ['label' => 'Tidak koheren', 'class' => 'text-red-700 bg-red-50 border-red-200'],
-                    $cv < 0.40 => ['label' => 'Lemah', 'class' => 'text-orange-700 bg-orange-50 border-orange-200'],
-                    $cv < 0.55 => ['label' => 'Baik untuk teks pendek', 'class' => 'text-green-700 bg-green-50 border-green-200'],
-                    $cv < 0.70 => ['label' => 'Sangat baik', 'class' => 'text-green-800 bg-green-100 border-green-300'],
-                    default => ['label' => 'Patut dicurigai', 'class' => 'text-amber-800 bg-amber-50 border-amber-200'],
-                };
+                $cv = isset($topicQuality['c_v']) ? (float) $topicQuality['c_v'] : null;
+                $cvBand = \App\Helpers\ResultPresenter::coherenceBand($cv);
             @endphp
 
             @if($topicQuality)
@@ -703,7 +979,7 @@
                     <div class="rounded-lg border border-gray-200 p-4">
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Dokumen di luar topik</p>
                         <p class="mt-1 text-2xl font-bold text-gray-900">{{ round($topicQuality['outlier_rate'] * 100, 1) }}%</p>
-                        <p class="text-xs mt-1 text-gray-500">Wajar pada kisaran 5&ndash;20%</p>
+                        <p class="text-xs mt-1 text-gray-500">Wajar pada kisaran 5-20%</p>
                     </div>
                     @endisset
 
@@ -711,15 +987,20 @@
                     <div class="rounded-lg border border-gray-200 p-4">
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500">c<sub>NPMI</sub></p>
                         <p class="mt-1 text-2xl font-bold text-gray-900">{{ number_format($topicQuality['c_npmi'], 4) }}</p>
-                        <p class="text-xs mt-1 text-gray-500">Ukuran pembanding, rentang &minus;1 sampai 1</p>
+                        <p class="text-xs mt-1 text-gray-500">
+                            Ukuran pembanding, rentang &minus;1 sampai 1.
+                            Bernilai negatif itu wajar pada korpus komentar.
+                        </p>
                     </div>
                     @endisset
                 </div>
 
                 <p class="mt-4 text-xs text-gray-500">
                     Nilai c<sub>v</sub> <strong>tidak sebanding antar korpus</strong>, jadi jangan dibandingkan
-                    langsung dengan angka dari penelitian lain &mdash; gunakan untuk membandingkan
-                    konfigurasi pada data yang sama.
+                    langsung dengan angka dari penelitian lain - gunakan untuk membandingkan
+                    konfigurasi pada data yang sama. <strong>Jumlah topik bergantung pada seed</strong>
+                    (terukur 13,6 &plusmn; 4,98 pada lima seed) walaupun koherensinya stabil, jadi sertakan
+                    seed dan rentangnya bila angkanya dikutip.
                 </p>
             </div>
             @endif
@@ -730,7 +1011,18 @@
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                     <h3 class="text-lg font-semibold text-gray-900 mb-4">Distribusi Topik</h3>
                     <div class="chart-container">
-                        <canvas id="topicChart"></canvas>
+                        @php
+                            $ringkasTopik = collect($result->topic_results['topics'] ?? [])->take(5)
+                                ->map(function ($t) use ($result) {
+                                    $id = $t['topic_id'] ?? 0;
+                                    $label = $result->topic_results['interpretation'][$id]['label'] ?? ('Topik '.$id);
+
+                                    return $label.' '.round(($t['proportion'] ?? 0) * 100, 1).' persen';
+                                })
+                                ->implode(', ');
+                        @endphp
+                        <canvas id="topicChart" role="img"
+                                aria-label="Diagram proporsi topik: {{ $ringkasTopik }}."></canvas>
                     </div>
                 </div>
 
@@ -741,7 +1033,8 @@
                         <span class="text-xs text-gray-400">{{ count($result->topic_results['word_frequencies'] ?? []) }} kata</span>
                     </div>
                     <div id="wordCloudCanvas" class="w-full" style="height: 360px;">
-                        <canvas id="wordCloudCanvasEl" style="width:100%; height:100%;"></canvas>
+                        <canvas id="wordCloudCanvasEl" style="width:100%; height:100%;" role="img"
+                                aria-label="Awan kata dari kata yang paling sering muncul. Daftar lengkapnya ada pada tabel kata kunci tiap topik di bawah."></canvas>
                     </div>
                     @if(isset($result->topic_results['word_frequencies']) && count($result->topic_results['word_frequencies']) > 0)
                         @php
@@ -836,7 +1129,7 @@
 
         <!-- Aspect-Topic Association Results -->
         @if($analysis->analysis_type == 'combined' && !empty($aspectRows) && $result->topic_results)
-        <div class="space-y-6 mt-10">
+        <div id="bagian-asosiasi" class="scroll-mt-24 space-y-6 mt-10">
             <div class="flex items-center justify-between mb-2">
                 <h3 class="text-2xl font-bold text-gray-900 flex items-center gap-2">
                     <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
@@ -863,7 +1156,7 @@
 
             @if(!$associationData)
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center">
-                <p class="text-gray-600">Data asosiasi aspek&ndash;topik belum tersedia untuk analisis ini.</p>
+                <p class="text-gray-600">Data asosiasi aspek-topik belum tersedia untuk analisis ini.</p>
                 <p class="mt-2 text-sm text-gray-500">
                     PMI hanya dihitung saat analisis gabungan menghasilkan aspek dan topik sekaligus.
                     Jalankan ulang analisis agar asosiasi ikut tersimpan.
@@ -912,7 +1205,7 @@
                             <thead>
                                 <tr>
                                     <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200">Aspek</th>
-                                    <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200 text-center">Mentions</th>
+                                    <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200 text-center">Penyebutan</th>
                                     @foreach($associationData['topics_label'] as $label)
                                     <th class="py-3 px-4 font-semibold text-xs text-gray-500 uppercase tracking-wider border-b border-gray-200 text-center whitespace-nowrap">{{ $label }}</th>
                                     @endforeach
@@ -939,36 +1232,46 @@
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 flex flex-col">
                     <h4 class="text-base font-semibold text-gray-900 mb-1">Kekuatan Asosiasi Statistik (Heatmap PMI)</h4>
                     <p class="text-xs text-gray-500 mb-4">PMI (Pointwise Mutual Information) > 0 menandakan asosiasi kuat.</p>
-                    
-                    <div class="flex-1 flex flex-col justify-center overflow-x-auto">
-                        <div class="min-w-[360px]">
-                            <!-- Header Grid -->
-                            <div class="grid grid-cols-[80px_repeat(3,1fr)] gap-2 mb-2">
-                                <div></div>
-                                @foreach($associationData['topics_label'] as $index => $label)
-                                <div class="text-center flex flex-col justify-end">
-                                    <span class="text-xs font-semibold text-gray-600">{{ $label }}</span>
-                                    @if(!empty($associationData['topics_desc'][$index]))
-                                    <span class="text-[10px] text-gray-400 font-normal leading-tight mt-1">{{ $associationData['topics_desc'][$index] }}</span>
-                                    @endif
-                                </div>
-                                @endforeach
-                            </div>
-                            
-                            <!-- Body Grid -->
-                            <div class="grid grid-cols-[80px_repeat(3,1fr)] gap-2">
+
+                    {{-- Sebelumnya CSS grid dengan kolom dipatok "repeat(3,1fr)" -
+                         cocok kalau kebetulan 3 topik, tetapi begitu jumlah topik
+                         berbeda (num_topics bisa 2-20, atau berapa pun hasil mode
+                         otomatis) baris header dan skor tidak lagi sebaris dengan
+                         label topiknya. Tabel biasa menangani jumlah kolom berapa
+                         pun dan tetap terbaca lewat scroll horizontal, seperti
+                         tabel distribusi di sebelahnya. --}}
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse" style="min-width: {{ 140 + count($associationData['topics_label']) * 110 }}px">
+                            <thead>
+                                <tr>
+                                    <th class="py-2 px-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-200"></th>
+                                    @foreach($associationData['topics_label'] as $index => $label)
+                                    <th class="py-2 px-2 text-center border-b border-gray-200">
+                                        <span class="block text-xs font-semibold text-gray-600">{{ $label }}</span>
+                                        @if(!empty($associationData['topics_desc'][$index]))
+                                        <span class="block text-[10px] text-gray-400 font-normal leading-tight mt-1">{{ $associationData['topics_desc'][$index] }}</span>
+                                        @endif
+                                    </th>
+                                    @endforeach
+                                </tr>
+                            </thead>
+                            <tbody>
                                 @foreach($associationData['pmi'] as $row)
-                                <div class="flex items-center text-sm font-medium text-gray-900">{{ $row['aspect'] }}</div>
-                                @foreach($row['scores'] as $score)
-                                <div class="text-center rounded-lg py-2 text-sm font-medium transition-transform hover:scale-105 {{ $warnaPmi($score) }}">
-                                    {{ $score > 0 ? '+'.$score : $score }}
-                                </div>
+                                <tr>
+                                    <td class="py-1.5 px-2 text-sm font-medium text-gray-900 whitespace-nowrap">{{ $row['aspect'] }}</td>
+                                    @foreach($row['scores'] as $score)
+                                    <td class="py-1.5 px-2">
+                                        <div class="text-center rounded-lg py-2 text-sm font-medium transition-transform hover:scale-105 {{ $warnaPmi($score) }}">
+                                            {{ $score > 0 ? '+'.$score : $score }}
+                                        </div>
+                                    </td>
+                                    @endforeach
+                                </tr>
                                 @endforeach
-                                @endforeach
-                            </div>
-                        </div>
+                            </tbody>
+                        </table>
                     </div>
-                    
+
                     <!-- Legend -->
                     <div class="mt-6 flex flex-wrap gap-4 pt-4 border-t border-gray-100">
                         <div class="flex items-center gap-2 text-xs text-gray-600">
@@ -1007,6 +1310,72 @@
         </div>
         @endif
 
+        <!-- Rincian per Kolom Pemisah -->
+        @if(! empty($segmentColumns))
+        <div id="bagian-segmen" class="scroll-mt-24 space-y-6 mt-10">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-gray-900">Rincian per Pemisah</h3>
+                        <p class="text-sm text-gray-500 mt-1">
+                            Hasil di atas adalah gambaran keseluruhan. Bila perlu, hasil yang sama bisa
+                            dipecah menurut kolom pemisah yang Anda pilih saat mengunggah berkas -
+                            dihitung ulang dari prediksi yang sudah ada, tanpa menjalankan analisis baru.
+                        </p>
+                    </div>
+
+                    {{-- Form GET, bukan sekadar penangan JavaScript: pilihannya
+                         jadi bisa ditandai/dibagikan lewat URL dan halaman tetap
+                         berfungsi tanpa JavaScript. --}}
+                    <form method="GET" action="{{ route('analysis.show', $analysis->id) }}"
+                          id="segment-form" class="flex items-center gap-2">
+                        <label for="segment-column" class="sr-only">Pisahkan hasil menurut kolom</label>
+                        <select name="segment" id="segment-column"
+                                data-segment-url="{{ route('analysis.segments', $analysis->id) }}"
+                                class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                            <option value="">Tidak dipisah (keseluruhan)</option>
+                            @foreach($segmentColumns as $kolom)
+                                <option value="{{ $kolom }}" @selected($segmentActive === $kolom)>
+                                    Pisahkan menurut: {{ $kolom }}
+                                </option>
+                            @endforeach
+                        </select>
+                        <button type="submit" id="segment-submit"
+                                class="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">
+                            Tampilkan
+                        </button>
+                    </form>
+                </div>
+
+                <p class="hidden text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3"
+                   id="segment-error" role="alert"></p>
+
+                <div id="segment-hasil" aria-live="polite" aria-busy="false">
+                    @if($segmentBreakdown)
+                        @include('analysis.partials.segment-breakdown', ['breakdown' => $segmentBreakdown])
+                    @else
+                        <p class="text-sm text-gray-500 py-8 text-center border border-dashed border-gray-200 rounded-lg">
+                            Pilih salah satu kolom di atas untuk melihat rinciannya.
+                        </p>
+                    @endif
+                </div>
+            </div>
+
+            {{-- Selalu dirender tetapi tersembunyi saat belum ada rincian:
+                 blok ini dipasang ulang oleh JavaScript ketika pengguna memilih
+                 kolom, jadi harus sudah ada di DOM. --}}
+            <div class="{{ $segmentBreakdown ? '' : 'hidden' }}" data-ai-wrapper="segment">
+                @include('analysis.partials.ai-interpretation', [
+                    'section' => 'segment',
+                    'judul' => 'Interpretasi AI: Perbandingan Antar Segmen',
+                    'keterangan' => 'Membandingkan segmen pada kolom yang sedang ditampilkan.',
+                    'stored' => $segmentActive ? ($aiSections['segment:'.$segmentActive] ?? null) : null,
+                    'kueri' => $segmentActive ? '?column='.urlencode($segmentActive) : '',
+                ])
+            </div>
+        </div>
+        @endif
+
     @endif
 
 {{-- ✅ POLLING SCRIPT - Updated with Progress Tracking --}}
@@ -1018,32 +1387,22 @@ document.addEventListener('DOMContentLoaded', function() {
     const currentStatus = '{{ $analysis->status }}';
     
     let pollingInterval = null;
-    let pollCount = 0;
-    const maxPolls = 200; // Maximum 200 polls (10 minutes at 3s interval)
-    
+
     console.log('Starting polling for analysis ID:', analysisId);
-    
+
     // ✅ Start polling
     startPolling();
-    
+
     function startPolling() {
         // Poll immediately
         pollStatus();
-        
-        // Then poll every 3 seconds
-        pollingInterval = setInterval(() => {
-            pollCount++;
-            
-            // Safety: stop after max polls
-            if (pollCount >= maxPolls) {
-                console.warn('Max poll count reached, stopping polling');
-                stopPolling();
-                showTimeoutMessage();
-                return;
-            }
-            
-            pollStatus();
-        }, 3000); // Poll every 3 seconds
+
+        // Analisis pada korpus besar (studi kasus ribuan komentar) bisa
+        // berjalan puluhan menit secara sah (batas job 3600 detik) - itu
+        // bukan kegagalan, jadi polling tidak dihentikan paksa dengan pesan
+        // "kemungkinan error". Ia berhenti sendiri saat status berubah jadi
+        // completed/failed.
+        pollingInterval = setInterval(pollStatus, 3000); // Poll every 3 seconds
     }
     
     function pollStatus() {
@@ -1197,31 +1556,6 @@ document.addEventListener('DOMContentLoaded', function() {
                                 Coba Lagi
                             </a>
                         </div>
-                    </div>
-                </div>
-            `;
-        }
-    }
-    
-    function showTimeoutMessage() {
-        const alertBox = document.querySelector('.bg-yellow-50');
-        if (alertBox) {
-            alertBox.classList.remove('bg-yellow-50', 'border-yellow-200');
-            alertBox.classList.add('bg-orange-50', 'border-orange-200');
-            alertBox.innerHTML = `
-                <div class="flex items-start">
-                    <svg class="w-6 h-6 text-orange-600 mt-0.5 mr-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
-                    </svg>
-                    <div>
-                        <h3 class="text-lg font-semibold text-orange-900">Proses Memakan Waktu Lama</h3>
-                        <p class="text-sm text-orange-700 mt-1">Analisis masih berjalan tetapi memakan waktu lebih lama dari biasanya. Anda dapat refresh halaman secara manual.</p>
-                        <button onclick="location.reload()" class="mt-3 inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">
-                            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-                            </svg>
-                            Refresh Halaman
-                        </button>
                     </div>
                 </div>
             `;
@@ -1390,44 +1724,20 @@ document.addEventListener('DOMContentLoaded', function() {
     // ==========================================
     // Aspect Chart
     // ==========================================
-    @if(!empty($chartData['aspects']))
-    const aspectData = @json($chartData['aspects'] ?? []);
-    
+    {{-- Sebelumnya JS ini membangun ulang chart dari $chartData['aspects']
+         (daftar mentah, TIDAK dibatasi) alih-alih memakai
+         ChartHelper::prepareAspectChartData() yang sudah disiapkan PHP
+         ($chartData['aspect'], tunggal) - dua jalur yang seharusnya sama
+         persis. Akibatnya batas jumlah aspek di grafik tidak pernah berlaku:
+         mode otomatis pada korpus besar bisa menghasilkan 40+ aspek dan
+         semuanya tetap disodorkan ke Chart.js sebagai sumbu-X yang penuh
+         sesak. Kini memakai data yang sama dengan yang sudah dibatasi PHP. --}}
+    @if(!empty($chartData['aspect']))
     const aspectCtx = document.getElementById('aspectChart');
     if (aspectCtx) {
-        const aspectLabels = aspectData.map(a => a.aspect.charAt(0).toUpperCase() + a.aspect.slice(1));
-        const positiveData = aspectData.map(a => a.sentiments.positive || 0);
-        const neutralData = aspectData.map(a => a.sentiments.neutral || 0);
-        const negativeData = aspectData.map(a => a.sentiments.negative || 0);
-        
         new Chart(aspectCtx, {
             type: 'bar',
-            data: {
-                labels: aspectLabels,
-                datasets: [
-                    {
-                        label: 'Positif',
-                        data: positiveData,
-                        backgroundColor: 'rgba(16, 185, 129, 0.8)',
-                        borderColor: 'rgb(16, 185, 129)',
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'Netral',
-                        data: neutralData,
-                        backgroundColor: 'rgba(107, 114, 128, 0.8)',
-                        borderColor: 'rgb(107, 114, 128)',
-                        borderWidth: 1
-                    },
-                    {
-                        label: 'Negatif',
-                        data: negativeData,
-                        backgroundColor: 'rgba(239, 68, 68, 0.8)',
-                        borderColor: 'rgb(239, 68, 68)',
-                        borderWidth: 1
-                    }
-                ]
-            },
+            data: @json($chartData['aspect']),
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -1633,6 +1943,168 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // ------------------------------------------------------- navigasi aktif
+    // Menandai bagian yang sedang dibaca. IntersectionObserver dipakai supaya
+    // tidak ada penangan scroll yang berjalan tiap frame.
+    const tautanNav = document.querySelectorAll('[data-nav-bagian]');
+
+    if (tautanNav.length && 'IntersectionObserver' in window) {
+        const kelasAktif = ['bg-indigo-600', 'text-white'];
+
+        const pengamat = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+
+                tautanNav.forEach((tautan) => {
+                    const aktif = tautan.dataset.navBagian === entry.target.id;
+                    tautan.classList.toggle(kelasAktif[0], aktif);
+                    tautan.classList.toggle(kelasAktif[1], aktif);
+
+                    if (aktif) {
+                        tautan.setAttribute('aria-current', 'true');
+                    } else {
+                        tautan.removeAttribute('aria-current');
+                    }
+                });
+            });
+        }, {
+            // Bagian dianggap "sedang dibaca" saat menyentuh sepertiga atas
+            // layar, bukan saat seluruhnya terlihat - blok hasil jauh lebih
+            // tinggi daripada viewport.
+            rootMargin: '-10% 0px -70% 0px',
+        });
+
+        tautanNav.forEach((tautan) => {
+            const bagian = document.getElementById(tautan.dataset.navBagian);
+
+            if (bagian) {
+                pengamat.observe(bagian);
+            }
+        });
+    }
+
+    // ------------------------------------------------------- rincian segmen
+    const formSegmen = document.getElementById('segment-form');
+
+    if (formSegmen) {
+        const pemilihSegmen = document.getElementById('segment-column');
+        const hasilSegmen = document.getElementById('segment-hasil');
+        const errorSegmen = document.getElementById('segment-error');
+        const tombolSegmen = document.getElementById('segment-submit');
+        let permintaanSegmen = null;
+
+        // Tombolnya hanya diperlukan tanpa JavaScript; dengan JavaScript
+        // rinciannya dimuat begitu kolom dipilih.
+        tombolSegmen.classList.add('hidden');
+
+        function muatSegmen(kolom) {
+            if (permintaanSegmen) {
+                // Permintaan yang tertinggal dibatalkan supaya hasil kolom lama
+                // tidak menimpa kolom yang baru dipilih.
+                permintaanSegmen.abort();
+            }
+
+            // Kembali ke keadaan awal: gambaran keseluruhan, tanpa rincian.
+            if (!kolom) {
+                hasilSegmen.innerHTML = '<p class="text-sm text-gray-500 py-8 text-center '
+                    + 'border border-dashed border-gray-200 rounded-lg">'
+                    + 'Pilih salah satu kolom di atas untuk melihat rinciannya.</p>';
+                perbaruiUrlSegmen('');
+                sembunyikanNarasiSegmen();
+                return;
+            }
+
+            permintaanSegmen = new AbortController();
+            errorSegmen.classList.add('hidden');
+            hasilSegmen.setAttribute('aria-busy', 'true');
+
+            fetch(pemilihSegmen.dataset.segmentUrl + '?column=' + encodeURIComponent(kolom), {
+                headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                credentials: 'same-origin',
+                signal: permintaanSegmen.signal,
+            })
+                .then(async (response) => {
+                    const data = await response.json().catch(() => ({}));
+
+                    if (!response.ok || !data.success) {
+                        throw new Error(data.message || 'Gagal memuat rincian.');
+                    }
+
+                    return data;
+                })
+                .then((data) => {
+                    hasilSegmen.innerHTML = data.html;
+                    perbaruiUrlSegmen(kolom);
+                    siapkanNarasiSegmen(kolom);
+                })
+                .catch((error) => {
+                    if (error.name === 'AbortError') {
+                        return;
+                    }
+
+                    errorSegmen.textContent = error.message;
+                    errorSegmen.classList.remove('hidden');
+                })
+                .finally(() => {
+                    hasilSegmen.setAttribute('aria-busy', 'false');
+                });
+        }
+
+        // URL ikut diperbarui supaya menyegarkan halaman atau menyalin
+        // tautannya menampilkan rincian yang sama.
+        function perbaruiUrlSegmen(kolom) {
+            const url = new URL(window.location.href);
+
+            if (kolom) {
+                url.searchParams.set('segment', kolom);
+            } else {
+                url.searchParams.delete('segment');
+            }
+
+            window.history.replaceState({}, '', url);
+        }
+
+        // Narasi AI terikat pada satu kolom, jadi yang sedang tampil harus
+        // dikosongkan begitu kolomnya berganti.
+        function siapkanNarasiSegmen(kolom) {
+            const blokAi = document.querySelector('[data-ai-block="segment"]');
+            const pembungkus = document.querySelector('[data-ai-wrapper="segment"]');
+
+            if (!blokAi) {
+                return;
+            }
+
+            if (pembungkus) {
+                pembungkus.classList.remove('hidden');
+            }
+
+            const tombol = blokAi.querySelector('[data-ai-interpret]');
+            tombol.dataset.aiUrl = tombol.dataset.aiUrlBase + '?column=' + encodeURIComponent(kolom);
+
+            blokAi.querySelector('[data-ai-hasil]').classList.add('hidden');
+            blokAi.querySelector('[data-ai-label]').textContent = 'Jelaskan dengan AI';
+        }
+
+        function sembunyikanNarasiSegmen() {
+            const pembungkus = document.querySelector('[data-ai-wrapper="segment"]');
+
+            if (pembungkus) {
+                pembungkus.classList.add('hidden');
+            }
+        }
+
+        formSegmen.addEventListener('submit', function (event) {
+            event.preventDefault();
+            muatSegmen(pemilihSegmen.value);
+        });
+
+        pemilihSegmen.addEventListener('change', function () {
+            muatSegmen(pemilihSegmen.value);
+        });
+    }
+
     // ---------------------------------------------------------------- AI
     // Satu penangan untuk semua tombol interpretasi. Bagian "topic" memakai
     // markup lamanya sendiri karena keluarannya label per topik, bukan paragraf.

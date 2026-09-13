@@ -521,8 +521,32 @@ class YouTubeScraperController extends Controller
             $processedVideos = 0;
             $failedVideos = [];
             $usedFallback = false;
+            $videoTitles = [];
+
+            if (! $useYtDlp && $apiKey) {
+                // Fetch video titles in chunks of 50
+                $chunks = array_chunk($request->video_ids, 50);
+                foreach ($chunks as $chunk) {
+                    try {
+                        $response = Http::timeout(30)->get('https://www.googleapis.com/youtube/v3/videos', [
+                            'part' => 'snippet',
+                            'id' => implode(',', $chunk),
+                            'key' => $apiKey,
+                        ]);
+                        if ($response->successful()) {
+                            $data = $response->json();
+                            foreach ($data['items'] ?? [] as $item) {
+                                $videoTitles[$item['id']] = $item['snippet']['title'] ?? 'Unknown';
+                            }
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning('Failed to fetch video titles for chunk: '.$e->getMessage());
+                    }
+                }
+            }
 
             foreach ($request->video_ids as $videoId) {
+                $videoTitle = $videoTitles[$videoId] ?? 'Unknown';
                 try {
                     $comments = [];
 
@@ -539,6 +563,7 @@ class YouTubeScraperController extends Controller
                         try {
                             $comments = $this->getVideoComments(
                                 $videoId,
+                                $videoTitle,
                                 $request->comment_limit,
                                 $request->custom_limit,
                                 $request->include_replies ?? false,
@@ -627,7 +652,7 @@ class YouTubeScraperController extends Controller
     /**
      * Get comments dari single video via API
      */
-    private function getVideoComments($videoId, $limitType, $customLimit, $includeReplies, $apiKey)
+    private function getVideoComments($videoId, $videoTitle, $limitType, $customLimit, $includeReplies, $apiKey)
     {
         $comments = [];
         $pageToken = null;
@@ -694,6 +719,7 @@ class YouTubeScraperController extends Controller
 
                     $comments[] = [
                         'video_id' => $videoId,
+                        'video_title' => $videoTitle,
                         'comment_id' => $item['id'] ?? '',
                         'author' => $topComment['authorDisplayName'] ?? 'Unknown',
                         'author_channel_url' => $topComment['authorChannelUrl'] ?? '',
@@ -706,7 +732,7 @@ class YouTubeScraperController extends Controller
 
                     // Get replies if needed
                     if ($includeReplies && ($item['snippet']['totalReplyCount'] ?? 0) > 0) {
-                        $replies = $this->getCommentReplies($item['id'], $apiKey);
+                        $replies = $this->getCommentReplies($item['id'], $videoId, $videoTitle, $apiKey);
                         $comments = array_merge($comments, $replies);
                     }
                 }
@@ -741,7 +767,7 @@ class YouTubeScraperController extends Controller
     /**
      * Get replies untuk comment tertentu
      */
-    private function getCommentReplies($commentId, $apiKey)
+    private function getCommentReplies($commentId, $videoId, $videoTitle, $apiKey)
     {
         $replies = [];
 
@@ -761,7 +787,8 @@ class YouTubeScraperController extends Controller
                     $snippet = $item['snippet'] ?? [];
 
                     $replies[] = [
-                        'video_id' => $snippet['videoId'] ?? '',
+                        'video_id' => $snippet['videoId'] ?? $videoId,
+                        'video_title' => $videoTitle,
                         'comment_id' => $item['id'] ?? '',
                         'parent_id' => $commentId,
                         'author' => $snippet['authorDisplayName'] ?? 'Unknown',
@@ -878,10 +905,12 @@ class YouTubeScraperController extends Controller
             throw new \Exception("Gagal mem-parse output yt-dlp untuk video {$videoId}");
         }
 
+        $videoTitle = $data['title'] ?? 'Unknown';
         $comments = [];
         foreach ($data['comments'] as $comment) {
             $comments[] = [
                 'video_id' => $videoId,
+                'video_title' => $videoTitle,
                 'comment_id' => $comment['id'] ?? '',
                 'author' => $comment['author'] ?? 'Unknown',
                 'author_channel_url' => isset($comment['author_id'])
@@ -986,6 +1015,7 @@ class YouTubeScraperController extends Controller
         fputcsv($file, [
             'No',
             'Video ID',
+            'Video Title',
             'Comment ID',
             'Author',
             'Comment',
@@ -1000,6 +1030,7 @@ class YouTubeScraperController extends Controller
             fputcsv($file, [
                 $index + 1,
                 $comment['video_id'] ?? '',
+                $comment['video_title'] ?? '',
                 $comment['comment_id'] ?? '',
                 $comment['author'] ?? '',
                 $comment['text'] ?? '',
@@ -1023,6 +1054,7 @@ class YouTubeScraperController extends Controller
         $headers = [
             'No',
             'Video ID',
+            'Video Title',
             'Comment ID',
             'Author',
             'Comment',
@@ -1035,7 +1067,7 @@ class YouTubeScraperController extends Controller
         $sheet->fromArray($headers, null, 'A1');
 
         // Styling header
-        $sheet->getStyle('A1:I1')->applyFromArray([
+        $sheet->getStyle('A1:J1')->applyFromArray([
             'font' => [
                 'bold' => true,
                 'color' => ['rgb' => 'FFFFFF'],
@@ -1059,19 +1091,22 @@ class YouTubeScraperController extends Controller
         foreach ($comments as $index => $comment) {
             $sheet->setCellValue("A{$row}", $index + 1);
             $sheet->setCellValue("B{$row}", $comment['video_id'] ?? '');
-            $sheet->setCellValue("C{$row}", $comment['comment_id'] ?? '');
-            $sheet->setCellValue("D{$row}", $comment['author'] ?? '');
-            $sheet->setCellValue("E{$row}", $comment['text'] ?? '');
-            $sheet->setCellValue("F{$row}", $comment['like_count'] ?? 0);
-            $sheet->setCellValue("G{$row}", $comment['published_at'] ?? '');
-            $sheet->setCellValue("H{$row}", $comment['updated_at'] ?? '');
-            $sheet->setCellValue("I{$row}", $comment['reply_count'] ?? 0);
+            $sheet->setCellValue("C{$row}", $comment['video_title'] ?? '');
+            $sheet->setCellValue("D{$row}", $comment['comment_id'] ?? '');
+            $sheet->setCellValue("E{$row}", $comment['author'] ?? '');
+            $sheet->setCellValue("F{$row}", $comment['text'] ?? '');
+            $sheet->setCellValue("G{$row}", $comment['like_count'] ?? 0);
+            $sheet->setCellValue("H{$row}", $comment['published_at'] ?? '');
+            $sheet->setCellValue("I{$row}", $comment['updated_at'] ?? '');
+            $sheet->setCellValue("J{$row}", $comment['reply_count'] ?? 0);
             $row++;
         }
 
         // Auto size kolom
-        foreach (range('A', 'I') as $col) {
-            if ($col === 'E') {
+        foreach (range('A', 'J') as $col) {
+            if ($col === 'C') {
+                $sheet->getColumnDimension($col)->setWidth(40);
+            } elseif ($col === 'F') {
                 // Kolom comment diberi width fixed yang lebih lebar
                 $sheet->getColumnDimension($col)->setWidth(60);
             } else {
@@ -1079,21 +1114,20 @@ class YouTubeScraperController extends Controller
             }
         }
 
-        // Wrap text untuk kolom komentar
-        $sheet->getStyle("E2:E{$row}")
-            ->getAlignment()
-            ->setWrapText(true);
+        // Wrap text untuk kolom komentar dan judul
+        $sheet->getStyle("C2:C{$row}")->getAlignment()->setWrapText(true);
+        $sheet->getStyle("F2:F{$row}")->getAlignment()->setWrapText(true);
 
         // Center alignment untuk kolom angka
         $sheet->getStyle("A2:A{$row}")
             ->getAlignment()
             ->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("F2:F{$row}")
+        $sheet->getStyle("G2:G{$row}")
             ->getAlignment()
             ->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
-        $sheet->getStyle("I2:I{$row}")
+        $sheet->getStyle("J2:J{$row}")
             ->getAlignment()
             ->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
@@ -1118,6 +1152,7 @@ class YouTubeScraperController extends Controller
             $content .= 'Comment #'.($index + 1)."\n";
             $content .= str_repeat('-', 80)."\n";
             $content .= 'Video ID    : '.($comment['video_id'] ?? '')."\n";
+            $content .= 'Video Title : '.($comment['video_title'] ?? '')."\n";
             $content .= 'Author      : '.($comment['author'] ?? '')."\n";
             $content .= 'Likes       : '.($comment['like_count'] ?? 0)."\n";
             $content .= 'Published   : '.($comment['published_at'] ?? '')."\n";

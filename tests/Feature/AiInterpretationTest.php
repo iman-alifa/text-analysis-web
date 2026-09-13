@@ -155,12 +155,61 @@ class AiInterpretationTest extends TestCase
 
         Http::assertSent(function ($request) {
             $prompt = $request['contents'][0]['parts'][0]['text'];
+            $aturan = $request['systemInstruction']['parts'][0]['text'];
 
             // Model merangkai kalimat dari angka yang dikirim; ia tidak
-            // diminta menghitung apa pun sendiri.
+            // diminta menghitung apa pun sendiri. Datanya di giliran user,
+            // larangan mengarang angka ada di systemInstruction.
             return str_contains($prompt, 'distribusi_persen')
                 && str_contains($prompt, 'Opini warga soal tarif')
-                && str_contains($prompt, 'Jangan menghitung ulang');
+                && str_contains($aturan, 'Jangan menghitung ulang');
+        });
+    }
+
+    public function test_contoh_kalimat_aspek_paling_negatif_ikut_dikirim(): void
+    {
+        $analysis = TextAnalysis::create([
+            'user_id' => User::factory()->create()->id,
+            'title' => 'Analisis aspek',
+            'input_type' => 'manual',
+            'analysis_type' => 'combined',
+            'raw_data' => ['a', 'b', 'c', 'd'],
+            'total_records' => 4,
+            'status' => 'completed',
+        ]);
+
+        AnalysisResult::create([
+            'text_analysis_id' => $analysis->id,
+            'predictions' => [
+                ['original_text' => 'pelayanannya lambat sekali', 'sentiment' => 'negative', 'aspects' => ['pelayanan']],
+                ['original_text' => 'petugas kurang ramah', 'sentiment' => 'negative', 'aspects' => ['pelayanan']],
+                ['original_text' => 'antre lama di loket', 'sentiment' => 'negative', 'aspects' => ['pelayanan']],
+                // Aspek ini cuma disebut sekali - tidak boleh terpilih jadi
+                // "paling bermasalah" walau persentase negatifnya 100%, sama
+                // seperti "pelayanan", karena satu baris tidak berarti apa-apa.
+                ['original_text' => 'wifi kantornya mati', 'sentiment' => 'negative', 'aspects' => ['wifi']],
+            ],
+            'sentiment_distribution' => ['positive' => 0, 'neutral' => 0, 'negative' => 100],
+            'aspect_results' => [
+                ['aspect' => 'pelayanan', 'count' => 3, 'sentiments' => ['positive' => 0, 'neutral' => 0, 'negative' => 100]],
+                ['aspect' => 'wifi', 'count' => 1, 'sentiments' => ['positive' => 0, 'neutral' => 0, 'negative' => 100]],
+            ],
+        ]);
+
+        $analysis = $analysis->fresh('result');
+
+        $this->fakeGemini(['narrative' => 'x', 'highlights' => []]);
+
+        $this->actingAs($analysis->user)
+            ->postJson(route('analysis.interpret', ['id' => $analysis->id, 'section' => 'aspect']))
+            ->assertOk();
+
+        Http::assertSent(function ($request) {
+            $prompt = $request['contents'][0]['parts'][0]['text'];
+
+            return str_contains($prompt, 'contoh_aspek_paling_negatif')
+                && str_contains($prompt, 'pelayanannya lambat sekali')
+                && ! str_contains($prompt, 'wifi kantornya mati');
         });
     }
 

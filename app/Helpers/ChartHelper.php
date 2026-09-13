@@ -58,16 +58,22 @@ class ChartHelper
                     'label' => 'Positif',
                     'data' => $positive,
                     'backgroundColor' => 'rgba(16, 185, 129, 0.8)',
+                    'borderColor' => 'rgb(16, 185, 129)',
+                    'borderWidth' => 1,
                 ],
                 [
                     'label' => 'Netral',
                     'data' => $neutral,
                     'backgroundColor' => 'rgba(107, 114, 128, 0.8)',
+                    'borderColor' => 'rgb(107, 114, 128)',
+                    'borderWidth' => 1,
                 ],
                 [
                     'label' => 'Negatif',
                     'data' => $negative,
                     'backgroundColor' => 'rgba(239, 68, 68, 0.8)',
+                    'borderColor' => 'rgb(239, 68, 68)',
+                    'borderWidth' => 1,
                 ],
             ],
         ];

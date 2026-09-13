@@ -15,6 +15,10 @@ class TrainingItem extends Model
         'predicted_sentiment',
         'detected_aspects',     // JSON array dari AI
         'confidence_score',
+        // 'indobert'/'rule-based'/'empty'/'error' dari prediksi asli - dipakai
+        // menyaring baris berisi emotikon/kosong (method 'empty') dari
+        // halaman koreksi, karena baris itu tidak pernah dinilai model.
+        'predicted_method',
 
         // Bagian Koreksi Admin
         'corrected_sentiment',

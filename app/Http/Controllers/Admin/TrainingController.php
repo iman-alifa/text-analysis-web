@@ -3,14 +3,15 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\RetrainModel;
 use App\Models\CustomStopword;
 use App\Models\EvaluationSnapshot;
 use App\Models\ModelTraining;
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
+use App\Services\AutoRetrainService;
 use App\Services\ModelEvaluationService;
 use App\Services\NLPApiService;
+use App\Services\RetrainingService;
 use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
 
@@ -24,7 +25,7 @@ class TrainingController extends Controller
     /**
      * HALAMAN 1: INDEX (DASHBOARD)
      */
-    public function index()
+    public function index(AutoRetrainService $autoRetrain)
     {
         // 1. Hitung Statistik Global dari TrainingItem
         // Hanya baris yang analisisnya masih ada. TextAnalysis memakai soft
@@ -61,12 +62,61 @@ class TrainingController extends Controller
         $stopwords = CustomStopword::latest()->get();
 
         // 4. Riwayat retraining model (loop active learning)
-        $trainings = ModelTraining::with('user')->latest()->limit(10)->get();
+        // textAnalysis ikut dimuat: riwayat menampilkan analisis mana yang
+        // dilatih, dan tanpa eager load itu satu query per baris.
+        $trainings = ModelTraining::with(['user', 'textAnalysis'])->latest()->limit(10)->get();
+
+        // Sidik jari kolam yang sama dengan putaran SEBELUMNYA pada modul yang
+        // sama berarti kolamnya tidak bertambah - keliru menurut protokol kolam,
+        // dan tidak terlihat dari angka mana pun yang lain. Dibandingkan per
+        // modul karena sentimen dan aspek punya muatan yang berbeda: keduanya
+        // hampir tidak pernah bersidik jari sama, dan membandingkannya silang
+        // hanya akan menghasilkan peringatan yang tidak berarti.
+        $sidikBerulang = [];
+        $sidikTerakhir = [];
+
+        foreach ($trainings->sortBy('id') as $satu) {
+            $sidik = $satu->sidik_jari_kolam;
+
+            if ($sidik) {
+                $sidikBerulang[$satu->id] = ($sidikTerakhir[$satu->model_type] ?? null) === $sidik;
+                $sidikTerakhir[$satu->model_type] = $sidik;
+            }
+        }
 
         // 5. Riwayat metrik evaluasi antar-iterasi
         $snapshots = EvaluationSnapshot::latest()->limit(20)->get();
 
-        return view('admin.training.index', compact('stats', 'batches', 'stopwords', 'trainings', 'snapshots'));
+        // Ringkasan pelatihan otomatis. Ditampilkan di sini, bukan kepada
+        // pengguna: pelatihan ulang adalah urusan internal sistem, dan
+        // halaman ini memang permukaan pengawasannya.
+        $autoStatus = $autoRetrain->status();
+
+        // Koreksi per analisis, supaya pelatihan bisa dipicu per lembaga.
+        // Putaran pertama studi kasus melatih gabungan dan hanya 19 dari 218
+        // koreksi yang sampai - angka per analisis di sini membuat selisih
+        // semacam itu terlihat sebelum tombol ditekan, bukan sesudahnya.
+        // whereHas, bukan having: `having` atas kolom subquery jalan di MySQL
+        // tetapi ditolak SQLite ("HAVING clause on a non-aggregate query"), dan
+        // tes berjalan di SQLite. Perbedaan dialek semacam ini hanya ketahuan
+        // kalau jalurnya benar-benar dirender - di sini tesnya yang menangkap.
+        $perAnalisis = \App\Models\TextAnalysis::withCount([
+            'trainingItems as koreksi_count' => fn ($q) => $q->where('is_corrected', true),
+        ])
+            ->whereHas('trainingItems', fn ($q) => $q->where('is_corrected', true))
+            ->orderByDesc('koreksi_count')
+            ->get();
+
+        // Satu angka untuk kedua jalur. Dibaca dari konstanta, bukan ditulis
+        // ulang di Blade: ambang yang ditampilkan harus persis ambang yang
+        // ditegakkan, kalau tidak keterangannya berbohong.
+        $ambangLatih = RetrainingService::MIN_LAYAK;
+
+        // Ambang kalibrasi milik layanan, dipakai hanya untuk menandai baris
+        // riwayat yang suhunya diwarisi alih-alih diukur ulang.
+        $ambangValidasi = (int) config('analysis.auto_retrain.calibration_min_val', 50);
+
+        return view('admin.training.index', compact('stats', 'batches', 'stopwords', 'trainings', 'snapshots', 'autoStatus', 'perAnalisis', 'ambangLatih', 'ambangValidasi', 'sidikBerulang'));
     }
 
     /**
@@ -171,23 +221,6 @@ class TrainingController extends Controller
     }
 
     /**
-     * ACTION: BULK UPDATE
-     */
-    public function bulkCorrect(Request $request)
-    {
-        $request->validate(['text_ids' => 'required|array', 'corrected_sentiment' => 'required']);
-
-        TrainingItem::whereIn('id', $request->text_ids)->update([
-            'corrected_sentiment' => $request->corrected_sentiment,
-            'is_corrected' => true,
-            'verified_at' => now(),
-            'verified_by' => auth()->id(),
-        ]);
-
-        return response()->json(['success' => true]);
-    }
-
-    /**
      * ACTION: EXPORT CSV
      */
     public function export()
@@ -248,83 +281,57 @@ class TrainingController extends Controller
      * Sebelumnya method ini hanya menampilkan flash message tanpa melakukan
      * apa pun, sehingga loop active learning tidak pernah benar-benar tertutup.
      */
-    public function triggerTraining(Request $request)
+    public function triggerTraining(Request $request, RetrainingService $retraining)
     {
+        // `text_analysis_id` WAJIB, dan "gabungan" adalah nilai tersendiri -
+        // bukan medan kosong. Selama gabungan diwakili string kosong, ia juga
+        // mewakili "tidak memilih apa-apa", dan kedua pelatihan iterasi 1
+        // tercatat `text_analysis_id = NULL` justru karena itu. Kini keduanya
+        // tidak bisa tertukar: yang tidak memilih ditolak validasi.
         $validated = $request->validate([
             'model_type' => 'nullable|in:sentiment,aspect,both',
             'epochs' => 'nullable|integer|min:1|max:20',
+            'text_analysis_id' => 'required|string',
+            'paksa' => 'nullable|boolean',
         ]);
 
-        $modelType = $validated['model_type'] ?? 'both';
-        $epochs = (int) ($validated['epochs'] ?? 3);
+        $pilihan = $validated['text_analysis_id'];
 
-        if (ModelTraining::running()->exists()) {
-            return back()->with('error', 'Masih ada proses training yang berjalan. Tunggu sampai selesai.');
-        }
-
-        // whereHas: koreksi milik analisis yang sudah dihapus tidak ikut dilatih,
-        // supaya data yang dilatih sama persis dengan yang dilaporkan dashboard.
-        $items = TrainingItem::whereHas('textAnalysis')->where('is_corrected', true)->get();
-
-        if ($items->isEmpty()) {
-            return back()->with('error', 'Belum ada data terkoreksi untuk dilatih.');
-        }
-
-        $payloads = [
-            'sentiment' => $this->buildSentimentTrainingData($items),
-            'aspect' => $this->buildAspectTrainingData($items),
-        ];
-
-        $dispatched = [];
-        $skipped = [];
-        $trainings = [];
-
-        foreach ($payloads as $type => $data) {
-            if ($modelType !== 'both' && $modelType !== $type) {
-                continue;
+        if ($pilihan !== 'gabungan') {
+            if (! TextAnalysis::whereKey($pilihan)->exists()) {
+                return back()->with('error', 'Analisis yang dipilih tidak ditemukan.');
             }
 
-            if (count($data) < NLPApiService::MIN_RETRAIN_SAMPLES) {
-                $skipped[] = sprintf(
-                    '%s (%d dari minimal %d sampel)',
-                    $type,
-                    count($data),
-                    NLPApiService::MIN_RETRAIN_SAMPLES
-                );
-
-                continue;
-            }
-
-            $training = ModelTraining::create([
-                'model_type' => $type,
-                'status' => 'pending',
-                'total_samples' => count($data),
-                'epochs' => $epochs,
-                'learning_rate' => 0.00002,
-                'triggered_by' => auth()->id(),
-            ]);
-
-            RetrainModel::dispatch($training, $data);
-            $trainings[] = $training;
-            $dispatched[] = sprintf('%s (%d sampel)', $type, count($data));
+            $analysisId = (int) $pilihan;
+        } else {
+            $analysisId = null;
         }
 
-        if (empty($dispatched)) {
-            return back()->with('error', 'Data belum cukup untuk training: '.implode(', ', $skipped));
-        }
-
-        // Potret metrik sebelum model dilatih ulang. Snapshot berikutnya (saat
-        // retraining dipicu lagi) menjadi pembanding untuk melihat perbaikan.
-        $this->modelEvaluationService->captureSnapshot(
-            $trainings[0] ?? null,
-            'Sebelum retraining: '.implode(', ', $dispatched)
+        // Logikanya tinggal di RetrainingService supaya jalur otomatis, perintah
+        // `retrain:analysis`, dan tombol admin ini menjalankan - dan menolak -
+        // hal yang persis sama. Penjaga ambang 50 sampel dulu hanya ada di
+        // perintah, sehingga tombol ini bisa memicu pelatihan yang perintahnya
+        // sendiri tolak.
+        //
+        // `$analysisId` diteruskan sebagai PENCATATAN asal putaran, bukan
+        // penyaring: yang dilatih selalu seluruh kolam koreksi.
+        $hasil = $retraining->dispatch(
+            $validated['model_type'] ?? 'both',
+            (int) ($validated['epochs'] ?? 3),
+            auth()->id(),
+            $analysisId,
+            (bool) ($validated['paksa'] ?? false),
         );
 
-        $message = 'Training dikirim ke NLP API: '.implode(', ', $dispatched)
+        if (! empty($hasil['error'])) {
+            return back()->with('error', $hasil['error']);
+        }
+
+        $message = 'Training dikirim ke NLP API: '.implode(', ', $hasil['dispatched'])
                  .'. Pantau statusnya di tabel Riwayat Training.';
 
-        if (! empty($skipped)) {
-            $message .= ' Dilewati: '.implode(', ', $skipped).'.';
+        if (! empty($hasil['skipped'])) {
+            $message .= ' Dilewati: '.implode(', ', $hasil['skipped']).'.';
         }
 
         return back()->with('success', $message);
@@ -337,7 +344,7 @@ class TrainingController extends Controller
      * kelas mayoritas, dan akurasinya justru terlihat naik. Laporan ini membuat
      * kondisi itu terlihat sebelum tombol Latih Ulang ditekan.
      */
-    public function previewTraining(NLPApiService $nlpService)
+    public function previewTraining(NLPApiService $nlpService, RetrainingService $retraining)
     {
         // whereHas: koreksi milik analisis yang sudah dihapus tidak ikut dilatih,
         // supaya data yang dilatih sama persis dengan yang dilaporkan dashboard.
@@ -351,8 +358,8 @@ class TrainingController extends Controller
         }
 
         $payloads = [
-            'sentiment' => $this->buildSentimentTrainingData($items),
-            'aspect' => $this->buildAspectTrainingData($items),
+            'sentiment' => $retraining->payloads($items)['sentiment'],
+            'aspect' => $retraining->payloads($items)['aspect'],
         ];
 
         $reports = [];
@@ -384,43 +391,6 @@ class TrainingController extends Controller
             'minimum_samples' => NLPApiService::MIN_RETRAIN_SAMPLES,
             'reports' => $reports,
         ]);
-    }
-
-    /**
-     * Format sesuai SentimentRetrainRequest di NLP API: [{text, label}].
-     */
-    private function buildSentimentTrainingData($items): array
-    {
-        $validLabels = ['positive', 'neutral', 'negative'];
-
-        return $items
-            ->filter(fn ($item) => in_array(strtolower((string) $item->corrected_sentiment), $validLabels, true))
-            ->filter(fn ($item) => filled($item->text_content))
-            ->map(fn ($item) => [
-                'text' => $item->text_content,
-                'label' => strtolower($item->corrected_sentiment),
-            ])
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Format sesuai AspectRetrainRequest di NLP API: [{text, aspects: []}].
-     */
-    private function buildAspectTrainingData($items): array
-    {
-        return $items
-            ->filter(fn ($item) => ! empty($item->corrected_aspects) && filled($item->text_content))
-            ->map(fn ($item) => [
-                'text' => $item->text_content,
-                'aspects' => array_values(array_filter(array_map(
-                    fn ($aspect) => trim((string) $aspect),
-                    (array) $item->corrected_aspects
-                ))),
-            ])
-            ->filter(fn ($row) => ! empty($row['aspects']))
-            ->values()
-            ->all();
     }
 
     /**

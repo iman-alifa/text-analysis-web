@@ -26,7 +26,8 @@ class PredictionQueryService
         string $filter = 'all',
         string $search = '',
         int $page = 1,
-        int $perPage = self::PER_PAGE
+        int $perPage = self::PER_PAGE,
+        ?string $aspect = null
     ): array {
         $predictions = is_array($result->predictions) ? $result->predictions : [];
         $reviewRanks = $this->reviewRanks($result);
@@ -51,6 +52,7 @@ class PredictionQueryService
         }
 
         $total = count($rows);
+        $rows = $this->applyAspect($rows, $aspect);
         $rows = $this->applyFilter($rows, $filter);
         $rows = $this->applySearch($rows, $search);
 
@@ -79,8 +81,26 @@ class PredictionQueryService
                 'to' => $offset + count($items),
                 'filter' => $filter,
                 'search' => $search,
+                'aspect' => $aspect,
             ],
         ];
+    }
+
+    /**
+     * Baris yang menyebut aspek tertentu (dipakai tombol mata pada kartu
+     * Detail Aspek), dicocokkan lewat field 'aspects' yang sudah tersimpan
+     * per baris - tidak menganalisis ulang apa pun.
+     */
+    private function applyAspect(array $rows, ?string $aspect): array
+    {
+        if ($aspect === null || $aspect === '') {
+            return $rows;
+        }
+
+        return array_values(array_filter(
+            $rows,
+            fn ($row) => in_array($aspect, $row['prediction']['aspects'] ?? [], true)
+        ));
     }
 
     /**
