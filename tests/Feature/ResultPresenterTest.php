@@ -108,7 +108,7 @@ class ResultPresenterTest extends TestCase
         $this->assertSame('Positif', ResultPresenter::sentimentLabel('positive'));
         $this->assertSame('Netral', ResultPresenter::sentimentLabel('neutral'));
         $this->assertSame('Analisis Gabungan', ResultPresenter::analysisTypeLabel('combined'));
-        $this->assertSame('Pemodelan Topik', ResultPresenter::analysisTypeLabel('topic'));
+        $this->assertSame('Topic Modeling', ResultPresenter::analysisTypeLabel('topic'));
     }
 
     // ------------------------------------------------------------- tampilan

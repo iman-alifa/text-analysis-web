@@ -2217,3 +2217,935 @@ pada split validasinya masing-masing), sementara pelatihan #4 yang dibatalkan
    di sisi layanan tidak mengembalikannya di badan respons.
 
 Tes: **446**.
+
+## Persiapan deployment (22 Sep 2026)
+
+Satu putaran menyeluruh menyiapkan aplikasi untuk dipasang, sekaligus
+membereskan beberapa hal yang tidak layak ikut ter-deploy.
+
+### Dokumen penelitian keluar dari folder aplikasi
+
+Dipindah ke `../dokumen-skripsi/`: `SYSTEM_ARCHITECTURE*.md` (3 berkas),
+`docs/` (PANDUAN_EVALUASI, PEDOMAN_ANOTASI), `scratch/`, dan
+`hasil-uji-php.txt`. Yang tersisa di akar hanya `README.md` dan `CLAUDE.md`.
+`resources/views/welcome.blade.php` dan `dashboard.blade.php` dihapus: tidak ada
+satu pun controller yang mengembalikannya.
+
+### Halaman depan memuat testimoni karangan
+
+Temuan paling serius di putaran ini. `LandingController` memuat **tiga testimoni
+lengkap dengan nama, jabatan, dan foto** ("Dr. Ahmad Fauzi, Peneliti BPS"),
+ditambah "99% Akurasi Model" dan "500+ Pengguna Aktif". Semuanya karangan, dan
+angka akurasinya bahkan **bertentangan dengan hasil ukur sendiri** (85,67%).
+Satu klaim lagi tersembunyi di kartu melayang: "< 5 detik", padahal terukur
+0,27 detik per teks sehingga korpus ribuan baris justru memakan menit.
+
+Seluruhnya diganti blok **Hasil Pengukuran** yang tiap barisnya menyebut
+dasarnya sendiri (n, selang kepercayaan, himpunan uji), plus catatan batasan
+bahwa angka itu berlaku untuk korpus komentar YouTube berbahasa Indonesia.
+
+### Tombol "Jelaskan dengan AI" menjawab tiga pertanyaan, bukan satu
+
+Skema keluaran bertambah dari dua medan menjadi empat: `narrative`,
+`highlights`, **`why`** (mengapa bagian ini penting, dikaitkan dengan datanya
+sendiri), dan **`how`** (2-4 langkah konkret yang mengacu pada angka atau nama
+yang benar-benar muncul di data). `PROMPT_VERSION` naik ke 3.
+
+Kegunaan tiap jenis analisis ditulis di sisi kode (`kegunaanBagian()`), bukan
+diserahkan sepenuhnya ke model: kegunaan sebuah metode adalah pengetahuan tetap
+yang tidak berubah mengikuti data, dan membiarkan model mengarangnya tiap kali
+membuka peluang penjelasan yang keliru tentang alat yang dipakai.
+
+Narasi lama (versi 2) tidak punya kedua medan baru, jadi partial-nya membaca
+defensif dan halaman tetap terbuka tanpa perlu dibangkitkan ulang. Ada tesnya.
+
+### Alur scraper ke analisis tersambung
+
+`App\Support\ScraperExport` menjadi **satu-satunya** penjawab "nama berkas ini
+sah atau tidak", dipakai bersama tombol unduh dan jalur analisis. Berkasnya
+dibungkus `UploadedFile` sehingga melewati pemrosesan yang persis sama dengan
+unggahan manual; menyalin logika pemrosesan ke jalur kedua akan membuat kedua
+jalur berselisih pada berkas yang isinya sama.
+
+`download()` **tidak lagi memakai `deleteFileAfterSend()`**. Alur "ambil data
+lalu analisis" mustahil dengan itu: menekan Unduh menghapus berkas yang beberapa
+detik kemudian dipakai tombol "Analisis Sekarang".
+
+Penjaga sisi klien ikut disesuaikan: dua tempat menuntut `<input type=file>`
+terisi, padahal berkas scraper tidak pernah mengisinya. `adaBerkasMasukan()`
+memakai aturan yang sama dengan `berkasMasukan()` di server, jadi penjaga klien
+tidak pernah menolak kiriman yang sebenarnya akan diterima.
+
+### Keterangan angka mendefinisikan, bukan menilai
+
+`coherenceMeaning()` menggantikan label pita ("Baik untuk teks pendek") pada
+kartu koherensi. Label yang menilai tidak memberi tahu apa yang diukur, sehingga
+pembaca tidak bisa menimbang sendiri apakah penilaian itu masuk akal untuk
+datanya. Pitanya tinggal dipakai untuk warna. Kartu `outlier_rate` dan `c_npmi`
+ikut diperlakukan sama.
+
+Paragraf rambu c_v dan ketergantungan seed dihapus dari halaman hasil atas
+permintaan pemilik proyek. **Masih ada di `/admin/evaluation`**, dan sengaja:
+di sanalah angka untuk naskah dibaca.
+
+### Lainnya
+
+- **Ringkasan Eksekutif AI** naik ke bawah Ringkasan Analisis. Keduanya menjawab
+  pertanyaan yang sama, dan panel keyakinan di antaranya memutus bacaan.
+- **Panel "Kesiapan Model" dibuang** dari formulir analisis beserta skripnya.
+  Isinya urusan internal layanan dan tidak menuntun pengguna melakukan apa pun.
+- **Menu Pengaturan jadi nyata**: kolom baru `users.preprocessing_config_id`
+  (nullOnDelete) plus kartu "Preferensi Analisis" yang menentukan konfigurasi
+  terpilih saat membuat analisis baru. `old()` tetap menang atas preferensi.
+- **Halaman galat** 403/404/419/429/500/503 dengan layout sendiri yang tidak
+  membaca `Auth::user()`: halaman ini juga dirender saat sesi kedaluwarsa.
+- **Halaman auth** dirombak menjadi dua kolom berbahasa Indonesia, dengan judul
+  tab per halaman (dulu semuanya berbunyi "Laravel").
+- **`APP_LOCALE=id`** supaya `Carbon::translatedFormat()` merender tanggal dalam
+  bahasa Indonesia. `fallback_locale` tetap `en` karena `lang/id` belum ada.
+- **README.md** diganti dari bawaan Laravel menjadi petunjuk pemasangan,
+  konfigurasi, dan langkah produksi yang sebenarnya.
+- **Tanda pisah**: 59 kalimat yang dibangun di sekitar em dash lalu ditukar tanda
+  hubung begitu saja **diparafrase**, bukan ditukar lagi. Sisa " - " pada berkas
+  tampilan seluruhnya aritmetika (`$a - $b`), bukan prosa.
+
+### Diverifikasi
+
+68 rute GET dirender sebagai admin dan pengguna biasa: seluruhnya
+200/302/403/404 sesuai harapan. `config:cache`, `route:cache`, dan `view:cache`
+berhasil, artinya tidak ada `env()` liar di luar config.
+
+### Halaman Pengaturan tidak pernah menampilkan isinya
+
+Ditemukan saat memverifikasi menu Pengaturan. `profile/edit.blade.php` memakai
+`<x-app-layout>`, sementara `layouts/app.blade.php` menaruh isi lewat
+`@yield('content')` dan **bukan** `{{ $slot }}`. Akibatnya seluruh formulir
+dibuang diam-diam: halaman tetap membalas 200 dan kerangkanya tampil lengkap,
+tetapi tidak ada satu pun kolom yang bisa diisi. Halaman profil karena itu tidak
+pernah benar-benar berfungsi sejak dipasang.
+
+Tidak ada tes yang menangkapnya karena penyisiran rute sebelumnya hanya
+memeriksa **kode status**, dan 200 memang yang dikembalikan. `SettingsPageTest`
+kini memeriksa keempat kartunya benar-benar dirender.
+
+Diperbaiki dengan `@extends('layouts.app')`, mengikuti seluruh halaman lain.
+Ketiga partial bawaan Breeze (data akun, kata sandi, hapus akun) sekalian
+dialihbahasakan; teksnya diganti langsung, bukan lewat `lang/id`, karena menambah
+berkas terjemahan untuk tiga halaman justru menyebarkan kalimatnya ke dua tempat.
+
+### Berkas keluaran yang menumpuk di akar
+
+`hasil-uji-php.xml` (141 KB laporan PHPUnit), `metrik-*.json` (3 berkas, 544 KB
+potret metrik penelitian), `test_api.php`, dan `test_output.json` ikut dipindah:
+metriknya ke `../dokumen-skripsi/metrik/`, sisanya ke `scratch/`. Polanya
+ditambahkan ke `.gitignore` supaya tidak kembali.
+
+Tes: **462**. Yang baru: `ScraperToAnalysisTest` (8, termasuk penolakan path
+traversal dalam empat bentuk), `SettingsPageTest` (5), 3 di
+`AiInterpretationTest`.
+
+## Pedoman penggunaan dalam aplikasi (22 Sep 2026)
+
+Halaman `/panduan` yang mengajarkan alur utama aplikasi, dipakai juga sebagai
+bahan bacaan peserta sebelum mengisi kuesioner CSUQ.
+
+### Dua sifat yang dijaga tes
+
+1. **Bisa dibuka tanpa masuk.** Peserta uji coba biasanya membacanya sebelum
+   punya akun, dan pedoman yang menuntut login untuk menjelaskan cara login
+   tidak berguna. Halamannya karena itu **tidak memakai `layouts.app`**, yang
+   membaca `Auth::user()->name` pada bilah sisinya dan akan gagal untuk tamu.
+2. **Tautannya benar-benar ada di layar**: bilah menu aplikasi (membuka tab
+   baru, supaya pekerjaan yang sedang berjalan tidak ditinggalkan), menu dan
+   footer halaman depan. Pedoman yang hanya bisa dicapai dengan mengetik alamat
+   sama saja dengan tidak ada.
+
+### Tangkapan layar ditambahkan belakangan
+
+`<x-panduan-gambar>` merender **tempat kosong bernama** ketika berkasnya belum
+ada: kotak putus-putus yang menyebut `public/panduan/<nama>.png` dan isi yang
+diharapkan. Tata letaknya sudah benar sejak pedoman ditulis, jadi menambahkan
+gambar cukup menaruh berkas dan tidak menuntut penataan ulang. Tanpa itu, gambar
+yang belum ada tampil sebagai ikon rusak dan halamannya harus ditata ulang
+setiap kali satu gambar ditambahkan.
+
+Enam nama berkas yang ditunggu didokumentasikan di `public/panduan/README.txt`.
+
+### Isinya di controller, bukan di Blade
+
+Sebagian besar pedoman berbentuk daftar berpola (langkah, istilah, skenario,
+masalah umum). Disimpan sebagai larik di `PanduanController` supaya menambah
+atau menukar urutan satu butir cukup menyentuh satu baris.
+
+Konsekuensinya: daftar isi dibangun dari larik itu sementara jangkarnya ditulis
+tangan di Blade, dan keduanya mudah berselisih. Ada tes yang memindai setiap
+`href="#..."` lalu memastikan `id`-nya benar-benar ada, karena tautan menuju
+jangkar kosong hanya ketahuan kalau diklik.
+
+### Bagian khusus CSUQ
+
+Bagian 10 memuat **enam tugas berurutan** yang menyentuh seluruh alur pokok:
+masuk, menjalankan analisis, membaca hasil, memakai penjelasan AI, mengoreksi,
+dan mengekspor. Tiap tugas menyebut kriteria "selesai bila", supaya penilaian
+antar peserta dibandingkan atas dasar pekerjaan yang sama. Halamannya bisa
+dicetak (`@media print` membuang navigasi, menjaga isinya utuh).
+
+Tes: **469**. Yang baru: `PanduanTest` (7).
+
+## Kesiapan deploy & jebakan `public/hot` (22 Sep 2026)
+
+### Kenapa `/panduan` "tidak bisa diakses"
+
+Rutenya terdaftar dan halamannya membalas 200. Yang rusak adalah **asetnya**:
+berkas `public/hot` tertinggal di folder proyek, berisi `http://[::1]:5173`.
+Berkas itu ditulis `npm run dev`, dan selama ia ada `@vite` mengarahkan seluruh
+CSS serta JavaScript ke server pengembangan Vite. Server itu sudah mati, jadi
+**setiap halaman** dirender tanpa gaya sama sekali dan terbaca seperti halaman
+yang gagal dimuat.
+
+Halaman baru terasa "paling rusak" hanya karena ia yang paling bergantung pada
+tata letak; halaman lama pun sebenarnya ikut kehilangan gayanya.
+
+`public/hot` sudah ada di `.gitignore`, jadi ia tidak akan ikut ter-commit.
+Tetapi ia **tetap bisa ikut** bila folder proyek disalin apa adanya ke server,
+dan gejalanya persis sama di sana. Karena itu `DEPLOYMENT.md` menyebutnya dua
+kali: pada langkah membangun aset, dan pada daftar periksa.
+
+Perbaikannya: `rm -f public/hot` lalu `npm run build`.
+
+### Yang disiapkan untuk deploy
+
+- **`DEPLOYMENT.md`** - panduan lengkap: spesifikasi server, MySQL, Nginx,
+  Supervisor, systemd untuk layanan NLP, HTTPS, optimasi, dan daftar periksa.
+- **`.env.production.example`** - hanya kunci yang berbeda dari `.env.example`
+  atau yang wajib diperiksa ulang, masing-masing dengan alasannya.
+- **`robots.txt`** - halaman depan dan `/panduan` boleh diindeks; area kerja
+  pengguna tidak, karena toh menuntut login.
+- **README** menunjuk `DEPLOYMENT.md` alih-alih menggandakan langkahnya.
+
+### Kendala hosting yang menentukan pilihan server
+
+Ini **dua aplikasi**, dan yang kedua berat: `nlp-api-service` memerlukan PyTorch
+(sekitar 2 GB RAM saat memuat model) ditambah **1,4 GB bobot model** di disk
+(`aspect_baseline.pt` 473 MB, `aspect_retrained.pt` 473 MB,
+`sentiment_retrained/` 476 MB; berkas `*.bak_*` tidak perlu ikut).
+
+Akibatnya **shared hosting dan cPanel biasa tidak cukup**. Minimum yang masuk
+akal: VPS 4 GB RAM, 20 GB disk, 2 vCPU.
+
+Tiga hal yang paling sering membuat pemasangan gagal, dan ketiganya masuk daftar
+periksa:
+
+1. **Worker antrean tidak berjalan** - setiap analisis berhenti selamanya di
+   "sedang diproses". `--tries=1`, `--timeout=3700`, dan `numprocs=1` ketiganya
+   punya alasan yang ditulis di panduan.
+2. **Document root menunjuk akar proyek**, bukan `public/`. Itu membuat `.env`
+   bisa diunduh siapa pun lewat peramban.
+3. **Port 8001 terbuka ke internet.** Layanan NLP tidak punya autentikasi sama
+   sekali, jadi siapa pun yang menjangkaunya bisa memicu pelatihan ulang.
+
+Tes: **469**.
+
+## Folder di `public/` bisa menelan rute (22 Sep 2026)
+
+Halaman `/panduan` membalas **404** di peramban walaupun `route:list`
+menampilkannya dengan normal dan seluruh tesnya lulus. Penyebabnya bikinan
+sendiri: tangkapan layar pedoman ditaruh di **`public/panduan/`**, persis sama
+dengan alamat rutenya.
+
+Web server selalu memeriksa berkas dan folder **lebih dulu** sebelum menyerahkan
+permintaan ke Laravel, jadi foldernya menelan rutenya sendiri. Gejalanya berbeda
+di tiap server, dan tidak satu pun menyebut Laravel:
+
+| Server | Gejala |
+|---|---|
+| Server bawaan PHP (`artisan serve`) | `404 The requested resource /panduan was not found on this server` |
+| Apache | Rewrite dilewati oleh `RewriteCond %{REQUEST_FILENAME} !-d` |
+| nginx | `403`, karena `try_files $uri $uri/` cocok ke foldernya |
+
+Tesnya lulus justru karena `$this->get(route('panduan'))` memanggil kernel
+Laravel langsung dan **tidak pernah menyentuh lapisan berkas** - persis lapisan
+tempat kerusakannya berada. Itu kelas kesalahan yang sama dengan penyisiran rute
+yang dulu hanya memeriksa kode status: keduanya menguji lapisan yang salah.
+
+Dipindah ke **`public/img/panduan/`**, dan `PanduanTest` mendapat penjaga baru
+yang memindai seluruh rute lalu memastikan segmen pertamanya tidak berupa folder
+di `public/`. `storage` dikecualikan dan itu benar: `public/storage` adalah
+symlink `storage:link`, dan menaunginya rute `storage/{path}` memang yang
+diinginkan karena melayani berkas langsung jauh lebih murah.
+
+Diverifikasi lewat HTTP sungguhan, bukan hanya kernel: `php artisan serve` pada
+port terpisah, lalu `curl` ke `/`, `/panduan`, `/login`, dan berkas di
+`/img/panduan/`. Seluruhnya 200.
+
+### Catatan `public/hot` yang menyusul
+
+Saat memverifikasi, `public/hot` sempat muncul lagi dan menunjuk
+`http://[::1]:5173`. Kali ini **benar**: pemilik proyek sedang menjalankan
+`composer dev`, jadi Vite memang melayani asetnya (diverifikasi
+`/@vite/client` dan `/resources/css/app.css` membalas 200). Berkas itu sengaja
+tidak dihapus.
+
+Yang perlu diingat: berkas yang sama menjadi masalah begitu server Vite mati,
+dan gejalanya adalah **seluruh halaman tanpa gaya** - bukan hanya halaman baru.
+
+Tes: **470**.
+
+## Mekanisme deploy (22 Sep 2026)
+
+Tiga berkas, masing-masing menjawab satu pertanyaan yang berbeda.
+
+### `php artisan deploy:check`
+
+Gerbang kesiapan, dan dipakai `deploy.sh` sebagai penentu berhasil atau
+tidaknya sebuah deploy. Dibuat karena tiga kesalahan pemasangan yang paling
+sering terjadi semuanya **tidak menjatuhkan aplikasi**: halamannya tetap
+membalas 200, dan baru ketahuan setelah ada yang mencoba memakainya.
+
+Memeriksa APP_KEY, APP_DEBUG, `retry_after` versus timeout job, aset terbangun,
+symlink storage, izin tulis, tabrakan folder dengan rute, folder `.git` di dalam
+`public/`, koneksi dan migrasi basis data, antrean, serta layanan NLP.
+
+Sudah menemukan tiga hal nyata saat pertama dijalankan:
+
+1. **`public/anotasi/.git/`** - klon repositori `anotasi-web` di dalam direktori
+   yang dilayani web. Selama dotfile tidak diblokir, `/anotasi/.git/config` bisa
+   diambil siapa pun dan isi repositorinya disusun ulang. Peringatan di lokal,
+   **kegagalan** dengan `--produksi`; `build-release.sh` mengecualikannya dari
+   paket.
+2. **`.pytest_cache/`** di akar proyek PHP, sisa dari sisi layanan Python.
+   Masuk `.gitignore` dan dikecualikan dari paket.
+3. Dua pemeriksaan buatan sendiri yang **salah** dan langsung ketahuan: symlink
+   storage diperiksa dengan `is_link()`/`is_dir()` yang keduanya mengembalikan
+   false untuk symlink Windows walaupun tautannya berfungsi (diganti
+   `realpath()`), dan status migrasi dibaca lewat API internal migrator yang
+   melempar diam-diam sehingga berubah menjadi catatan "tidak bisa dibaca"
+   alih-alih menjawab pertanyaannya (diganti perbandingan langsung terhadap
+   tabel `migrations`).
+
+### `deploy.sh`
+
+Dijalankan di server, idempoten. Halaman pemeliharaan, dependensi, aset,
+migrasi, cache, muat ulang worker, lalu `deploy:check --produksi`. Situs
+dikembalikan menyala lewat `trap EXIT` walaupun ada langkah yang gagal di
+tengah.
+
+### `build-release.sh`
+
+Dijalankan di laptop, menghasilkan `.tar.gz` sekitar 600 KB berisi kode plus
+aset terbangun. Untuk server tanpa Git atau Node.js.
+
+Dua kesalahan yang terjadi saat menulisnya, keduanya sudah diperbaiki:
+
+- **`npm ci` menghapus `node_modules` lebih dulu**, dan itu mencabut paket di
+  bawah kaki server Vite yang sedang berjalan (`composer dev`). Diganti
+  `npm install` yang hanya dijalankan bila `node_modules` belum ada.
+- **`rm -f public/hot` percuma** selama `npm run dev` berjalan: Vite langsung
+  menulisnya kembali. Yang penting ia tidak ikut ke paket, dan itu sudah
+  dijamin daftar `--exclude`.
+
+`--exclude='.git'` ditulis **tanpa `./` di depan** supaya berlaku pada setiap
+tingkat, bukan hanya akar. Versi pertama memakai `'./.git'` dan meloloskan
+`public/anotasi/.git/` (67 entri) ke dalam paket.
+
+### Catatan tes
+
+`phpunit.xml` menyetel `QUEUE_CONNECTION=sync`, dan itu benar untuk menjalankan
+tes - tetapi salah satu keadaan yang justru harus DITOLAK `deploy:check`.
+`DeployCheckTest` karena itu menyiapkan keadaan "sehat" secara eksplisit alih-
+alih mewarisinya dari lingkungan tes.
+
+Satu lagi: `Http::fake()` **menggabungkan** stub, bukan menggantinya, dan stub
+yang cocok lebih dulu yang menang. Stub "layanan sehat" di `setUp()` membuat tes
+yang justru menguji layanan mati tetap melihat balasan 200. Fake-nya dipindah ke
+masing-masing pemanggil.
+
+Tes: **477**. Yang baru: `DeployCheckTest` (7).
+
+## Kunci API layanan NLP & varian Hugging Face Spaces (23 Sep 2026)
+
+Layanan NLP kini **berkunci**: setiap endpoint kecuali `/` dan `/health` menuntut
+header `X-API-Key`, dan wajib diisi bila `APP_ENV=production` (lihat
+`../nlp-api-service/app/security.py`). **Catatan di atas yang menyebut layanan
+NLP "tidak punya autentikasi" sudah tidak berlaku** - termasuk bagian "Kendala
+hosting". Sisi web sudah mengirim header itu dari `NLP_API_KEY` sejak sebelumnya
+(`NLPApiService::http()`); yang kurang adalah dokumentasi dan pemeriksaannya.
+
+`NLP_API_KEY` (web) dan `API_KEY` (layanan) harus sama persis. Di lokal keduanya
+sudah diisi dan diverifikasi identik (48 karakter). Di Hugging Face Spaces,
+`API_KEY` diisi sebagai **Secret**, bukan di berkas.
+
+### Celah yang ditutup: `deploy:check` hijau dengan kunci yang salah
+
+`/health` sengaja terbuka tanpa kunci supaya platform hosting bisa memakainya
+sebagai healthcheck. Akibatnya "Layanan NLP merespons" lulus walaupun kuncinya
+salah, sementara **setiap analisis ditolak 401**.
+
+`NLPApiService::checkApiKey()` memanggil `/api/normalize/aspects` - endpoint
+berkunci yang paling ringan (hanya stemmer, tidak memuat model, tidak mengubah
+apa pun) - dan membedakan 200, 401/403 (kunci kosong atau salah, dengan pesan
+berbeda), dan galat lain. `deploy:check` menampilkannya sebagai baris tersendiri.
+
+Diverifikasi terhadap layanan yang berjalan: kunci benar -> HTTP 200; kunci yang
+sengaja disalahkan -> "Layanan NLP merespons" **tetap OK** dan pemeriksaan baru
+GAGAL dengan HTTP 401. Persis celah yang dimaksud.
+
+### Varian HF Spaces di `DEPLOYMENT.md` (bagian 0b)
+
+Hanya sisi web; pemasangan Space diurus repo layanan (Dockerfile port 7860,
+`HF_WEIGHTS_REPO`, `HF_TOKEN`). Isinya: server web cukup **1 GB RAM** karena
+PyTorch pindah ke HF, langkah 8 dilewati, keamanan lewat kunci API bukan
+firewall, dan **worker antrean tetap wajib** (alasan shared hosting biasanya
+tetap tidak cukup).
+
+Tiga hal yang harus diukur selama uji coba Space, karena menentukan apakah batas
+waktu sisi web perlu diubah:
+
+1. **Waktu bangun** Space yang tertidur, versus batas `health()` 10 detik.
+2. **Lama satu putaran pelatihan** di CPU Space, versus `RetrainModel` 7200 detik.
+3. **Apakah bobot hasil pelatihan bertahan** setelah Space dimulai ulang. Disk
+   Space tidak permanen; bila `*_retrained` kembali `false`, riwayat pelatihan
+   mencatat "selesai" padahal model sudah kembali ke bobot dasar.
+
+Tes: **478**. Yang baru: satu di `DeployCheckTest` (kunci ditolak walau
+`/health` hijau).
+
+## Lambang aplikasi & gambar halaman depan (23 Sep 2026)
+
+**Lambang**: balon percakapan putih berisi tiga batang naik di atas ubin
+bergradasi biru (#2563EB -> #06B6D4). Balon = teks opini, batang = hasil ukur,
+tiga warna batang = tiga kelas sentimen (rose/amber/emerald) yang dipakai di
+seluruh aplikasi. Satu komponen `<x-logo-mark>` (varian `solid` / `terang` untuk
+latar yang sudah bergradasi) menggantikan kotak teks "AT" di halaman depan,
+navigasi, layout tamu, pedoman, dan halaman galat; `application-logo` Breeze
+diarahkan ke sana. Id gradasinya diacak per pemanggilan - dua lambang dengan id
+yang sama pada satu halaman membuat salah satunya kehilangan warna (ada tesnya).
+
+Ikon: `public/favicon.svg` (sumber utama), `favicon.ico` dan
+`apple-touch-icon.png` digambar ulang dengan Pillow dari geometri yang sama,
+`public/img/logo-512.png` untuk keperluan lain. Favicon emoji robot dibuang.
+
+**Gambar pahlawan** halaman depan dulu foto stok Unsplash yang tampil kosong.
+Diganti pratinjau halaman hasil yang digambar langsung dengan HTML/SVG (donat
+sentimen, batang per aspek, dua kartu prediksi), berlabel **"Contoh"** supaya
+angkanya tidak terbaca sebagai hasil pengukuran.
+
+**Animasi angka** di bawah tombol memotong format Indonesia: `parseInt` atas
+digit saja membuat 85,7% beranimasi menjadi **857%** dan 8.393 menjadi 8393.
+Kini formatnya dibaca, animasi memakai `toLocaleString('id-ID')` dengan jumlah
+desimal yang sama, dan teks asli dipasang kembali di akhir. Klaim "dalam
+hitungan detik" ikut dihapus (korpus ribuan teks memakan menit).
+
+Tes: **481**. Yang baru: `BrandingTest` (3).
+
+## Angka halaman publik mengikuti keadaan terakhir (23 Sep 2026)
+
+`App\Services\PublicStatsService::snapshot()` menggantikan angka yang ditulis
+tangan di `LandingController` dan `layouts/guest.blade.php`. Sumbernya:
+evaluation run terakhir yang sah (`EvaluationRun::completed()`, jadi run batal
+tidak pernah tampil) untuk akurasi, confidence interval, ukuran test set, dan
+micro F1 aspek; run pertama pada dataset yang sama sebagai pembanding "naik
+dari"; nomor iterasi run terakhir; jumlah `training_items` terkoreksi; jumlah
+`total_records` analisis yang selesai. Cache 60 detik.
+
+Setiap angka boleh null, dan kartu yang null **tidak dirender** - termasuk
+seluruh bagian "Hasil Uji" beserta tautan navigasinya bila belum ada evaluasi.
+Kegagalan basis data (tabel belum dimigrasi, MySQL mati) ditangkap dan halaman
+tetap 200 tanpa angka; kegagalan tidak di-cache.
+
+Catatan: kartu iterasi kini menampilkan **6** (iterasi active learning setelah
+baseline), bukan 7 (jumlah titik pengukuran) seperti versi tulis tangan.
+
+Tidak ada lagi sebutan "studi kasus" di antarmuka; data yang dulu disebut begitu
+diperlakukan sebagai pemakaian nyata aplikasi. Istilah teknis yang lazim dalam
+bahasa Inggris tidak diterjemahkan lagi: active learning, test set, data
+training, confidence score, confidence interval, base model, preprocessing,
+stopword, stemming, case folding, topic modeling, word cloud, F1-score, data
+leakage, screenshot, error (halaman galat), upload.
+
+Tes: **483**. `BrandingTest` bertambah dua (angka mengikuti run terakhir dan
+menyingkirkan run batal; tanpa evaluasi bagian Hasil Uji tidak tampil).
+
+## Halaman depan diringankan (23 Sep 2026)
+
+Sumber beratnya di peramban, bukan di server (TTFB setara `/login`):
+
+1. **Tiga blob 300-400px dengan `filter: blur(70px)`** yang dianimasikan terus
+   dan digeser lagi di setiap event scroll (parallax). Blur sebesar itu
+   digambar ulang tiap frame. Diganti satu `.hero-glow` berisi tiga
+   `radial-gradient` statis: tampak hampir sama, tanpa biaya setelah render.
+2. **AOS dari unpkg**: stylesheet yang memblokir render dari server luar plus
+   skripnya. Diganti skrip kecil berbasis IntersectionObserver yang membaca
+   atribut `data-aos`/`data-aos-delay` yang sama. Status tersembunyinya hanya
+   berlaku di bawah kelas `.js` pada `<html>`, jadi tanpa JavaScript isi tetap
+   terlihat.
+3. **`app.js` (Alpine, WordCloud, axios; 92 KB)** tidak dipakai halaman ini dan
+   kini tidak dimuat; `@vite` hanya memuat CSS.
+4. **Empat listener scroll** (satu membaca `offsetTop` setiap section di tiap
+   event) menjadi satu listener pasif yang di-throttle `requestAnimationFrame`;
+   penanda menu aktif pindah ke IntersectionObserver.
+5. `backdrop-filter` pada navbar dibuang (tak terlihat pada latar 98% buram),
+   kartu besar hero tidak lagi melayang (hanya dua kartu kecil), bobot font
+   Inter 900 yang tidak dipakai dibuang, CSS mati (`glass-effect`,
+   `pulse-ring`, `gradient-bg-2/3`) dan console easter egg dihapus.
+6. `prefers-reduced-motion` dihormati: animasi melayang, muncul, dan angka
+   berjalan dimatikan.
+
+`BrandingTest` menjaga agar unpkg, `app.js`, dan blob ber-blur tidak kembali.
+Tes: **484**.
+
+## Hosting satu VPS & antrean pelatihan terpisah (23 Sep 2026)
+
+Disepakati bersama sesi `nlp-api-service` lewat
+`../nlp-api-service/docs/TITIPAN_HOSTING_SATU_VPS.md` dan
+`JAWABAN_HOSTING_SATU_VPS.md`: **satu VPS** (4 vCPU / 8 GB, Ubuntu 24.04,
+swap 4 GB) menjalankan web dan layanan NLP; layanan di 127.0.0.1:8001 lewat
+systemd + venv, torch versi CPU. `DEPLOYMENT.md` ditulis ulang untuk itu
+(bagian 0, 1, 7, 8, 11, daftar periksa); varian HF Spaces dibuang karena HF
+tidak lagi menyediakan Space Docker gratis.
+
+### 1. Timeout HTTP pelatihan dipisah (dulu 1200 dtk)
+
+Terukur di CPU (Ryzen 7 5700U): 1,68 dtk/sampel sentimen, 1,06 aspek; VPS
+diperkirakan 2-3x lebih lambat, jadi 41-61 menit per putaran. Klien yang
+menyerah **tidak menghentikan** pelatihan di layanan (terukur dengan uvicorn
+sungguhan): checkpoint tersimpan sementara `model_trainings` mencatat `failed`.
+Rantainya kini `services.nlp_api.retrain_timeout` 6600 < `RetrainModel::$timeout`
+7200 < retry_after koneksi `training` 7500.
+
+### 2. Antrean `training` dengan worker sendiri
+
+`RetrainModel` masuk koneksi `config('queue.training_connection')` (bawaan
+`training`, tabel `jobs` yang sama, antrean `training`, retry_after sendiri).
+`phpunit.xml` menyetelnya `sync`. `composer dev` kini menjalankan listener
+kelima (`queue:listen training --queue=training`). **Worker `composer dev` yang
+sudah berjalan harus dimulai ulang**, atau pelatihan lokal tidak pernah diambil.
+`deploy.sh` sengaja hanya me-restart paksa worker analisis; worker pelatihan
+berhenti sendiri lewat `queue:restart` setelah job-nya selesai.
+
+### 3. 503 + `Retry-After` saat model sedang dilatih
+
+Layanan (saklar `RETRAIN_REJECT_INFERENCE`, mati secara bawaan) menolak analisis
+yang butuh model yang sedang dilatih. Sisi web:
+
+- `NLPApiService::kirimAnalisis()` - satu jalur untuk keempat endpoint analisis.
+  503 **dengan** `Retry-After` tidak diulang HTTP-nya dan menjadi
+  `NlpBusyException`; 503 **tanpa** header itu tetap galat biasa.
+- Kedua loop batch melempar ulang `NlpBusyException` alih-alih mencatatnya
+  sebagai batch gagal. Tanpa itu analisis selesai "sukses" dengan teks hilang.
+- `ProcessTextAnalysis`: `$tries = 3` diganti `retryUntil()` 8 jam +
+  `$maxExceptions = 3` + `$failOnTimeout = true`. Jatah galat sungguhan
+  (`PERCOBAAN = 3`) dihitung `percobaanNyata()` = `attempts()` dikurangi
+  jumlah pelepasan karena menunggu (di cache). Laravel menghitung setiap
+  release sebagai percobaan, jadi tanpa ini menunggu satu pelatihan saja
+  menghabiskan jatahnya.
+
+Urutan pemasangan: versi web ini dulu, **baru** `RETRAIN_REJECT_INFERENCE=true`.
+
+### 4. Temuan: contoh `.env` produksi berisi `NLP_API_TIMEOUT=3600`
+
+Sama dengan batas job, melanggar rantai "HTTP < job". Tes tidak membaca berkas
+itu, jadi `deploy:check` kini memeriksa rantai analisis dan rantai pelatihan
+secara eksplisit.
+
+### 5. Cadangan
+
+`backup-db.sh` (mysqldump `--single-transaction`, gzip, 14 hari, `RCLONE_REMOTE`
+untuk salinan di luar server), dijadwalkan cron. Basis data adalah satu-satunya
+data yang tak tergantikan; bobot bisa dibangkitkan ulang dari kolam koreksi.
+
+Tes: **495**. Yang baru: `NlpBusyRetryTest` (8), satu di
+`QueueTimeoutConfigTest`, dua di `DeployCheckTest`.
+
+## Evaluasi otomatis, F1 aspek parsial, dan server Rumahweb (24 Sep 2026)
+
+### Evaluasi hold-out kini OTOMATIS (keputusan pemilik proyek)
+
+Membalik keputusan 4 Sep ("evaluasi sepenuhnya manual"). `RetrainModel::handle()`
+memanggil `AutoEvaluationService::setelahPelatihan()` di blok `finally`, jadi
+berjalan apa pun status job-nya. Evaluasi diantrekan hanya bila:
+
+1. `ANALYSIS_AUTO_EVALUATE` menyala (bawaan true);
+2. **tidak ada pelatihan lain yang pending/running** - satu putaran = job
+   sentimen + job aspek, dan mengukur setelah job pertama berarti mengukur
+   campuran bobot baru dan lama;
+3. ada test set beku (`EvaluationDataset::ujiAktif()`: split `test`, beku,
+   berisi; yang terakhir dipakai run didahulukan);
+4. ada pelatihan `completed` yang belum diukur (bila kedua modul `rejected`,
+   bobot tidak berubah dan tidak ada yang perlu diukur);
+5. belum ada run pending/running pada dataset itu.
+
+Run tidak diberi `training_id`: job pemicunya bisa saja yang gagal/ditolak, dan
+`HoldoutEvaluationService` sudah menautkan run ke pelatihan terakhir yang selesai.
+
+**Penjaga "belum diukur" kini hanya berlaku bila ada test set beku.** Tanpa itu
+pemasangan tanpa golden dataset berhenti selamanya setelah putaran pertama:
+penjaga menunggu evaluasi yang tidak akan pernah dijalankan.
+
+Tes: `AutoEvaluationTest` (7). Tes lama `test_pelatihan_ulang_tidak_memicu_evaluasi`
+dihapus; helper `IterationSequenceTest::pelatihanSelesai()` kini memastikan ada
+test set beku.
+
+Catatan Pint: `php_unit_method_casing` mengganti nama method tes yang diawali
+`test` - termasuk helper privat seperti `testSetBeku()` - menjadi `test_set_beku()`
+dan memutus pemanggilnya. Jangan awali nama helper tes dengan `test`.
+
+### F1 ekstraksi aspek: parsial adalah angka utama
+
+`metrics.aspect.partial.micro_f1` (iterasi 6: 80,06%) menggantikan micro-F1 ketat
+(74,38%) sebagai angka utama di halaman depan, panel login, halaman evaluasi
+(baris pertama, lencana "utama"), `evaluation:run`, dan `evaluation:report`.
+Ketat tetap ditampilkan sebagai **batas bawah**. `PublicStatsService` jatuh ke
+angka ketat untuk run lama tanpa blok `partial`. Kurva perbandingan mendapat
+`aspect_partial_f1`.
+
+### Halaman hasil: bagian prediksi dirampingkan
+
+Tab "Perlu Ditinjau (N)", catatan antrean tinjauan ("jangan memakainya untuk
+mengukur akurasi"), dan "Catatan mutu data" dihapus dari `show.blade.php`.
+Ajakan mengoreksi baris yang ragu tetap ada di panel keyakinan. Data
+`review_queue` dan `data-review-rank` pada kartu tidak disentuh.
+
+### DEPLOYMENT.md untuk server sungguhan
+
+Server: Rumahweb VPS XL (4 vCPU Xeon Gold 6138, 7,8 GB, 158 GB), domain
+`text-analyze.ing.biz.id` (subdomain, tanpa `www`). Temuan sesi layanan saat
+memasang, kini masuk panduan:
+
+- **Mirror `cermin.rumahweb.id` tidak menyajikan `noble-updates`/`-security`.**
+  `apt upgrade` melaporkan "0 upgraded" tanpa galat sementara `openssh-server`
+  tertahan di versi rentan CVE-2024-6387. Langkah 0 di §0b memeriksa
+  `apt-cache policy openssh-server` dan mengganti sumber apt.
+- `apt update` sebelum memasang ufw (image baru: "no installation candidate").
+- Swap bawaan 255 MB diganti 4 GB.
+- nginx `listen [::]:80` karena server ber-IPv6: dengan record AAAA, Let's
+  Encrypt memvalidasi lewat IPv6 lebih dulu.
+- Daftar periksa: sudo tanpa kata sandi sementara harus dicabut.
+
+Tes: **501**.
+
+### Timeout topik & tidak mengulang permintaan yang kehabisan waktu (24 Sep 2026)
+
+Terukur di VPS produksi: 3.366 komentar = sentimen 3,6 mnt + aspek 9,5 mnt +
+topik 16,2 mnt (972 dtk). `analyzeTopic` dulu memakai `timeout * 2` = 1200 dtk,
+sisa ~19%. Kini `services.nlp_api.topic_timeout` (`NLP_API_TOPIC_TIMEOUT`,
+2400), dijaga `QueueTimeoutConfigTest` dan `deploy:check`.
+
+`kirimAnalisis()` **tidak lagi mengulang HTTP yang kehabisan waktu**
+(`NLPApiService::kehabisanWaktu()`: ConnectionException dengan cURL 28/"timed
+out"). Layanan tidak membatalkan handler saat klien memutus, jadi mengulang
+berarti dua pemodelan topik serentak di 3 vCPU. Koneksi ditolak (cURL 7) tetap
+diulang. Di tingkat job, `ProcessTextAnalysis` kini langsung menandai gagal
+dengan pesan "tidak selesai dalam batas waktu... pecah berkasnya" alih-alih
+melepas ulang dengan backoff, karena alasan yang sama.
+
+Catatan tes: permintaan yang callback `Http::fake`-nya MELEMPAR tidak tercatat
+oleh `Http::assertSentCount`; hitung di dalam callback.
+
+Tes: **505**.
+
+## Mode tunda pelatihan untuk fase evaluasi kuesioner (24 Sep 2026)
+
+Permintaan pemilik proyek: selama uji coba CSUQ pengguna nyata langsung
+mengoreksi hasilnya, tetapi golden dataset domain baru baru bisa diambil
+setelah semua pengguna selesai. Pelatihan otomatis karena itu DITUNDA dan
+pemicunya dicatat, lalu diputar ulang setelah golden dataset siap.
+
+### Alur
+
+1. `/admin/training` -> "Nyalakan mode tunda" (atau `retrain:tunda nyalakan`).
+   Disimpan di tabel baru `app_settings` (kunci `retrain.tunda`), bukan .env,
+   supaya berganti fase tidak menuntut SSH. Bawaan awal: `ANALYSIS_RETRAIN_DEFER`.
+2. Selama tunda, `AutoRetrainService::run()` - SETELAH lolos ambang dan jeda -
+   memanggil `RetrainDeferralService::catat()`: satu baris `retrain_deferrals`
+   (`cutoff_at`, koreksi baru, besar kolam, analisis asal). Tidak ada pesan ke
+   pengguna (`blocking` false). Tombol admin dan `retrain:analysis` juga
+   ditolak kecuali "paksa".
+3. Ambil golden dataset dari analisis pengguna, anotasi, bekukan, lalu jalankan
+   evaluasi baseline (iterasi 0) pada dataset itu.
+4. Matikan tunda, lalu "Putar ulang N pemicu" (`retrain:tunda putar-ulang`).
+   `RetrainDeferralService::lanjutkan()` menjalankan pemicu tertua lewat
+   `RetrainingService::dispatch(..., $batas = cutoff_at)`; evaluasi otomatis
+   mengukurnya; `RunHoldoutEvaluation` (atau `AutoEvaluationService` bila bobot
+   tidak berubah) memanggil `lanjutkan()` lagi untuk pemicu berikutnya.
+
+### Keputusan yang penting
+
+- **Kolam dipotong pada `cutoff_at`** (`correctedItemsSampai()`). Protokol
+  kolam melatih dari bobot dasar dengan seed tetap atas seluruh koreksi; tanpa
+  potongan, N putaran atas kolam akhir yang sama menghasilkan model identik N
+  kali. `correctedItems()` tetap tanpa argumen seperti keputusan 10 Sep;
+  potongan waktu adalah method terpisah yang hanya dipakai pemutaran ulang.
+- **Titik hitung koreksi baru dan jeda** kini pelatihan terakhir ATAU pemicu
+  tertunda terakhir (`titikTerakhir()`). Tanpa itu, selama tunda setiap koreksi
+  sesudah ambang pertama tercatat sebagai pemicu baru.
+- Pemicu yang kolamnya di bawah `MIN_LAYAK` pada titik itu **dilewati** (bila
+  berjalan langsung pun ia ditolak), lalu pemicu berikutnya dicoba.
+- Selama pemutaran ulang, pemicu langsung diam, supaya kurva rekonstruksinya
+  tidak bercampur putaran yang tidak pernah ditunda.
+- Syarat mulai: tunda mati, ada yang tertunda, tidak ada pelatihan berjalan,
+  evaluasi otomatis menyala, ada test set beku, dan test set itu sudah diukur
+  sejak dibekukan.
+
+### Pengambilan sampel golden: koreksi yang belum dilatih boleh terambil
+
+Aturan lama mengecualikan SEMUA baris yang pernah dikoreksi. Kini hanya yang
+koreksinya **sudah dilatihkan** (terverifikasi sebelum pelatihan terakhir
+dibuat, atau tanpa `verified_at`). Koreksi fase kuesioner belum pernah
+dilatihkan, jadi mengecualikannya tidak mencegah kebocoran apa pun, dan justru
+membuat sampel tidak acak: ajakan koreksi mendahulukan baris yang paling ragu,
+sehingga test set kehilangan baris tersulit. Setelah dibekukan,
+`correctedItems()` menyingkirkannya dari pelatihan. Harganya dicatat di
+`sampling_plan.koreksi_belum_dilatih_terambil`: koreksi pengguna yang tidak akan
+pernah dilatihkan.
+
+### Lain-lain
+
+- `.env` di server berizin 640 milik www-data; `backup-db.sh` kini keluar dengan
+  pesan jelas bila tidak bisa membacanya (jalankan dengan sudo / crontab root).
+  DEPLOYMENT.md bagian 5 memuat izin itu.
+- Butuh `php artisan migrate` di server (tabel `app_settings`,
+  `retrain_deferrals`).
+
+Tes: **517**. Yang baru: `RetrainDeferralTest` (11), satu di `GoldenSamplingTest`.
+
+### Perbaikan setelah pemasangan 24 Sep 17.15 (laporan sesi layanan)
+
+- `build-release.sh` mengemas `storage/app/golden-gabungan.csv` karena hanya
+  mengecualikan subfolder tertentu. Kini `--exclude='./storage/app/*'`
+  (diverifikasi dengan `tar -t`: yang tersisa hanya folder kosong dan
+  `.gitignore`), dan `deploy.sh` membuat ulang folder storage yang dibutuhkan
+  dengan `mkdir -p` sebelum `storage:link`.
+- `PanduanTest::test_tangkapan_layar_yang_belum_ada...` mengandaikan
+  `01-dashboard.png` belum ada dan gagal begitu pemilik proyek menaruhnya. Kini
+  merender komponen `<x-panduan-gambar>` dengan nama yang tidak akan pernah ada.
+- Sesi layanan menambah subbagian "Header keamanan" di DEPLOYMENT.md bagian 6
+  (HSTS tanpa includeSubDomains, nosniff, X-Frame-Options SAMEORIGIN,
+  Referrer-Policy, Permissions-Policy, server_tokens off).
+
+## Video panduan di /panduan (24 Sep 2026)
+
+`public/video/Pedoman.mp4` (66 MB, H.264 + AAC, 2:10) tampil sebagai bagian
+"Tonton dulu: video panduan" di atas bagian 1, dengan tautan tak bernomor di
+atas daftar isi (nomor daftar isi harus tetap sama dengan nomor di judul
+bagian). `PanduanController::video()` mengembalikan null bila berkas tidak ada,
+dan bagiannya tidak dirender - pemutar kosong lebih membingungkan daripada tidak
+ada video. URL membawa `?v=<filemtime>` supaya video yang diganti tidak tertahan
+cache. Durasinya dibaca dari atom `mvhd` (`durasiMp4()`, 1 MB pertama saja).
+
+**Berkas aslinya tidak faststart**: atom `moov` (indeks) ada di UJUNG, setelah
+66 MB data, sehingga peramban harus melompat ke akhir berkas sebelum bisa
+memutar. Disusun ulang tanpa re-encode (skrip Python: moov dipindah sebelum
+mdat, 7.797 offset `stco` digeser 89.255 byte), lalu diverifikasi: setiap
+potongan menunjuk 64 byte yang identik dengan aslinya dan blok mdat identik
+byte demi byte. Tanpa ffmpeg di mesin ini, itu satu-satunya jalan.
+
+`preload="metadata"` hanya mengunduh indeks saat halaman dibuka. Ada tautan
+unduhan cadangan, dan versi cetak menampilkan alamat video sebagai ganti pemutar.
+Sampul opsional: `public/img/panduan/video-poster.jpg`.
+
+Catatan: `public/hot` sempat tertinggal lagi (Vite mati) sehingga SELURUH
+halaman lokal tanpa gaya; dihapus dan aset dibangun ulang.
+
+Tes: **519**. Yang baru: dua di `PanduanTest` (bagian video, pembaca `mvhd`
+versi 0 dan 1).
+
+## Galat "Model AI gemini-1.5-pro tidak tersedia" (24 Sep 2026)
+
+Keluhan pengguna nyata pada Ringkasan Eksekutif AI. Penyebabnya dua lapis:
+
+1. `.env` (lokal dan server, karena `.env` server dibangun dari lokal) berisi
+   `GEMINI_MODEL=gemini-3.5-flash,gemini-1.5-flash,gemini-1.5-pro`. Kedua
+   cadangan sudah **pensiun** (404 "no longer available to new users"; begitu
+   juga `gemini-2.5-*`, walau masih tercantum di `ListModels`).
+2. `LlmService::generate()` melaporkan galat model **terakhir** yang dicoba.
+   Model utama gagal sesaat (sibuk/timeout), cadangannya 404, dan pengguna
+   melihat "model tidak tersedia" - bukan penyebab sebenarnya.
+
+Perbaikan (berlaku untuk SEMUA pemanggilan AI; seluruhnya lewat `generate()`):
+
+- Rantai baru `gemini-3.5-flash,gemini-3.6-flash`, diuji langsung dengan kunci
+  proyek (200 keduanya; `3.5-flash-lite` 200 tetapi 41 detik, terlalu dekat
+  batas 45). Bawaan config ikut diubah; tetap dipatok, bukan `-latest`.
+- `pesanKegagalan()` memilih penyebab paling berguna dari SEMUA kandidat: kuota
+  (429) > sibuk/tak terjangkau (5xx, koneksi) > ditolak (400/403) > "model tidak
+  tersedia" hanya bila seluruh kandidat 404. Model 404 dicatat di log dengan
+  saran menghapusnya dari `GEMINI_MODEL`.
+- **Kunci API kini lewat header `x-goog-api-key`, bukan `?key=` di URL.** Pesan
+  galat koneksi Laravel memuat URL lengkap, sehingga kunci ikut tertulis ke
+  `storage/logs`. Log lokal memuat 3 baris seperti itu; server kemungkinan juga.
+- `deploy:check` mendapat bagian "AI (Gemini)": `LlmService::periksaModel()`
+  mengirim permintaan terkecil ke tiap model di `GEMINI_MODEL` (peringatan, bukan
+  kegagalan - aplikasi tetap utuh tanpa AI). `ListModels` saja tidak cukup
+  sebagai bukti, lihat butir 1.
+
+Tes: **522**. Yang baru: tiga di `LlmServiceTest`.
+
+### Worker tertahan 11 menit saat deploy (24 Sep 2026)
+
+Dari supervisord.log server (dibaca sesi layanan): `queue:restart` membuat worker
+pelatihan yang menganggur keluar (18:26:49,617), Supervisor langsung memunculkan
+proses baru (49,738), dan SIGTERM dari `supervisorctl restart all` tiba sekitar
+25 ms kemudian, saat proses itu masih bootstrap. Sinyalnya hilang sebelum
+Laravel memasang penangannya, Supervisor menunggu `stopwaitsecs`, dan situs
+tetap dalam mode pemeliharaan sampai proses itu di-SIGKILL 11 menit kemudian.
+pcntl terpasang; pada 17:14 dengan jarak 0,3 detik proses yang sama berhenti
+normal.
+
+Kondisi pacu yang sama berlaku untuk worker analisis di `deploy.sh`
+(`queue:restart` lalu `supervisorctl restart 'analisisteks-worker:*'`). Kini
+`deploy.sh` hanya mengirim `queue:restart`: tiap worker menyelesaikan job-nya,
+keluar, dan Supervisor menghidupkannya lagi dengan kode baru. Buktinya bukan
+"RUNNING" (proses lama juga RUNNING) melainkan **PID yang berganti**: PID
+dicatat sebelum `queue:restart`, lalu ditunggu sampai 45 detik (worker pelatihan
+memakai `--sleep=10`). Worker yang sedang mengerjakan job boleh mempertahankan
+PID lamanya dan hanya dilaporkan sebagai CATATAN, karena deploy.sh tidak
+menolak berjalan saat ada analisis. Setiap pembacaan PID memakai `|| true`
+karena skripnya `set -euo pipefail`. Kedua jalur diuji dengan supervisorctl
+palsu. Gagasan menunggu PID dari sesi layanan. DEPLOYMENT.md bagian 7 memperingatkan agar
+`supervisorctl restart` tidak disusulkan setelah `queue:restart`.
+
+## Aturan pengambilan golden 24 Sep dipertahankan (26 Sep 2026)
+
+Pemilik proyek sempat meminta golden sampling mengecualikan SEMUA baris
+terkoreksi, lalu membatalkannya setelah meninjau ulang. Aturan 24 Sep tetap
+berlaku: yang dikecualikan hanya koreksi yang **sudah dilatihkan**
+(`hashSudahDikoreksi()`, `verified_at` <= pelatihan terakhir); koreksi yang
+belum dilatihkan boleh terambil dan jumlahnya dicatat di
+`sampling_plan.koreksi_belum_dilatih_terambil`.
+
+Alasan pemilik: supaya baris berkeyakinan rendah tetap ikut diuji. Mengecualikan
+semua koreksi membuat test set kehilangan baris tersulit, karena ajakan koreksi
+mendahulukan baris yang paling ragu. Penjaga yang dibutuhkan hanya satu: data
+yang sudah dipakai untuk retraining tidak boleh masuk test set. Koreksi yang
+terambil golden disingkirkan dari pelatihan sesudahnya oleh `frozenHashes()`.
+
+Jangan usulkan pembalikan ini lagi tanpa alasan baru.
+
+## Tebakan aspek model di aplikasi anotasi (26 Sep 2026)
+
+Berkas anotasi "+ Prediksi Model" kini punya kolom ketiga `model_aspects`, diisi
+`GoldenSamplingService::modelAspects()` dari `document_aspects` analisis sumber
+(dikunci indeks `raw_data`, dicocokkan lewat sidik jari teks, tanpa panggilan
+baru ke layanan). Tiga keadaan seperti kolom `aspects`: daftar dipisah `;`,
+`-` = model memeriksa dan tidak menemukan aspek, kosong = tidak ada data
+(analisis sentimen saja). Bentuk permukaan, bukan stem, karena dibaca manusia.
+**Batasan (diluruskan 27 Sep):** baris dari batch aspek yang gagal TIDAK
+kosong melainkan `-`, karena jalur batch mengisinya `[]` dan kegagalannya
+tidak tersimpan pada hasil analisis.
+
+`public/anotasi/index.html`: tebakan aspek **tidak** terbuka otomatis seperti
+tebakan sentimen. Sentimen diputuskan satu klik, aspek ditambahkan satu per
+satu - membukanya begitu aspek pertama ada akan menjangkarkan aspek
+berikutnya. Tombol "Tampilkan tebakan aspek model" baru muncul setelah aspek
+anotator tertetapkan (termasuk "Tidak ada aspek") atau baris ditandai tidak
+jelas. Chip hijau = sama, kuning = hanya model. Perubahan aspek setelah tebakan
+dibuka dicatat di kolom ekspor `aspects_changed_after_reveal`, terpisah dari
+`changed_after_reveal`; kolom itu hanya ditambahkan bila berkasnya memuat
+`model_aspects`, jadi berkas lama diekspor seperti dulu.
+
+Impor mengabaikan kolom tambahan karena `readAnnotationFile` mencari kolom
+lewat nama persis; `model_aspects` tidak pernah tertukar dengan `aspects`
+(ada tesnya). Skenario aplikasi diuji lewat Edge headless (`--dump-dom`) pada
+salinan halaman: 24 pemeriksaan, termasuk berkas lama.
+
+Tes: **524**.
+
+## Evaluasi menolak hasil parsial, run yatim, dan pemicu yang terlewat (27 Sep 2026)
+
+Dari sesi `nlp-api-service`, terukur di server 26 Sep: setelah pelatihan
+iterasi 2, `RunHoldoutEvaluation` berjalan 31 menit, dua batch aspek kehabisan
+waktu (cURL 28, 600 dtk), job dibunuh, dan run-nya tertinggal `running`.
+Akar lambatnya (memori layanan tidak dilepas setelah pelatihan) diperbaiki di
+sisi layanan.
+
+### Run yatim
+
+`RunHoldoutEvaluation::failed()` menandai run pada dataset itu yang dibuat sejak
+job diantrekan (`$diantrekanPada`, dibulatkan ke detik) menjadi `failed`. Blok
+catch di `HoldoutEvaluationService::run()` tidak pernah berjalan bila job
+dibunuh dari luar. `deploy:check` memeriksa rantai HTTP analisis < job evaluasi
+< retry_after (peringatan, bukan kegagalan).
+
+### Evaluasi tidak boleh selesai dengan batch bolong
+
+Analisis pengguna tetap memaafkan batch yang gagal (`failed_batches`). Evaluasi
+tidak: `NLPApiService::utuh()` mengembalikan salinan yang melempar pada batch
+PERTAMA yang gagal. Selain metriknya aman, itu membebaskan worker bawaan yang
+dipakai bersama analisis pengguna, alih-alih menunggu sisa batch dari pekerjaan
+yang toh ditolak. `HoldoutEvaluationService` menjaga lapis kedua: menolak
+`failed_batches`, baris tanpa prediksi, baris `method: error` (layanan
+mengisinya `neutral` keyakinan 0 - bukan tebakan model), dan
+`document_aspects` yang tidak mencakup setiap baris.
+
+### Pemicu yang terlewat
+
+1. **Batas kolam, bukan waktu pelatihan.** `newCorrectionCount()` kini dihitung
+   dari `RetrainDeferralService::batasKolamTerakhir()`: `cutoff_at` pemicu yang
+   diputar ulang (dibaca lewat `retrain_deferrals.training_ids`), `created_at`
+   untuk pelatihan langsung, dan `cutoff_at` pemicu tertunda. Dulu dari waktu
+   pelatihan dibuat, sehingga pelatihan hasil pemutaran ulang (26 Sep) menelan
+   36 koreksi 24 Sep yang tidak pernah dilatih. Jeda tetap memakai
+   `titikTerakhir()` (waktu sebenarnya).
+2. **`analysis:auto-retrain` dijadwalkan tiap jam** di `routes/console.php`,
+   membalik keputusan 3 Sep. Penyebabnya nyata: koreksi yang tertahan jeda tidak
+   pernah dievaluasi ulang bila tidak ada yang menyimpan lagi. Butuh cron
+   `* * * * * php artisan schedule:run` sebagai www-data; tanpanya perilakunya
+   sama seperti dulu.
+
+Catatan tes: `schedule:run` menjalankan perintah terjadwal sebagai PROSES
+terpisah terhadap basis data sungguhan, jadi tes memeriksa pendaftaran jadwal
+dan perilaku perintahnya secara terpisah.
+
+Diverifikasi: 8 dari 12 tes baru gagal pada kode sebelum perbaikan (4 sisanya
+penjaga regresi).
+
+Tes: **536**. Yang baru: `EvaluationRobustnessTest` (8), dua di
+`RetrainDeferralTest`, dua di `AutoRetrainTest`.
+
+## Angka publik = angka model yang sedang dipakai (27 Sep 2026)
+
+Permintaan pemilik proyek. 27 Sep bobot aspek dikembalikan ke iterasi 1 (#17)
+karena iterasi 2 (#19) lebih buruk secara signifikan, sementara sentimen tetap
+iterasi 2 (#18). Halaman depan membaca run terakhir (#14), jadi F1 aspeknya
+(78,77) milik bobot yang sudah diarsipkan.
+
+`App\Services\ActiveModelService` menjadi satu-satunya penjawab "bobot mana yang
+aktif, dan run mana yang mengukurnya":
+
+- Bobot aktif per modul dari `/health` -> `models.<modul>_pool_fingerprint`
+  (timeout 3 dtk, cache 5 menit, bacaan terakhir disimpan selamanya sebagai
+  cadangan saat layanan mati). Kunci ada bernilai null = bobot dasar; kunci
+  tidak ada sama sekali (layanan versi lama) = tebakan "pelatihan tersimpan
+  terakhir", ditandai `pasti: false`.
+- Bobot dibandingkan lewat KUNCI (`dasar` / `sj:<sidik>` / `latih:<id>` untuk
+  pelatihan lama tanpa sidik jari), bukan id pelatihan: dua pelatihan atas kolam
+  yang sama menghasilkan bobot yang sama.
+- Bobot sebuah run: `model_info.<modul>_pool_fingerprint` (kini disimpan
+  `modelInfo()` bersama `*_pool_samples` dan `aspect_restored_from`, hanya bila
+  layanan menyebutnya). Run lama tanpa itu: pelatihan `completed` modul itu
+  yang selesai sebelum run dimulai. Benar untuk run 10, 11, 14 di server karena
+  pemulihan terjadi setelahnya.
+
+`PublicStatsService`: akurasi dari run terbaru yang mengukur sentimen aktif, F1
+aspek dari run terbaru yang mengukur aspek aktif (boleh run berbeda; ekstraksi
+aspek tidak memakai model sentimen). **Bobot aktif yang belum diukur tidak
+menampilkan angka apa pun** - angka run lain tidak boleh tampil sebagai angka
+model aktif. Kalimat "dasar" di halaman depan menyebut iterasi asal tiap angka;
+`iterations` = iterasi tertinggi yang terukur pada dataset itu, bukan nomor run
+terakhir. Dataset: `ujiAktif()`, atau dataset run terakhir bila belum ada yang
+beku.
+
+Admin: lencana "Aktif" pada pelatihan di `/admin/training` ("Aktif?" bila
+tebakan) dan "sentimen aktif"/"aspek aktif" pada run di halaman dataset
+evaluasi. `RetrainModel` mengosongkan cache bobot aktif setelah tiap pelatihan.
+
+Urutan pemasangan: layanan NLP dulu (yang melaporkan sidik jari), baru web.
+Tanpa layanan baru, web jatuh ke tebakan lama dan tidak rusak.
+
+Diverifikasi: kedelapan tes baru gagal pada kode sebelum perubahan. Dua tes
+"layanan tidak terjangkau" gagal di sana hanya karena asersinya memakai kelas
+baru; bagian "halaman tetap terbuka"-nya penjaga regresi.
+
+Tes: **544**. Yang baru: `ActiveModelStatsTest` (8).
+

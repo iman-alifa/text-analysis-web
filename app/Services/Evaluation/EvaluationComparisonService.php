@@ -94,6 +94,8 @@ class EvaluationComparisonService
             'majority_baseline' => $sentimen['majority_baseline']['accuracy'] ?? null,
             'aspect_micro_f1' => $aspek['micro_f1'] ?? null,
             'aspect_macro_f1' => $aspek['macro_f1'] ?? null,
+            // Angka utama ekstraksi aspek; micro_f1 ketat di atas adalah batas bawahnya.
+            'aspect_partial_f1' => $aspek['partial']['micro_f1'] ?? null,
             'coherence' => ($topik['available'] ?? false) ? $topik['c_v'] : null,
             'coherence_label' => $topik['c_v_label'] ?? null,
             'topic_count' => $topik['topic_count'] ?? null,
@@ -124,6 +126,7 @@ class EvaluationComparisonService
             'cohen_kappa' => $selisih($a['cohen_kappa'] ?? null, $b['cohen_kappa'] ?? null),
             'aspect_micro_f1' => $selisih($aAspek['micro_f1'] ?? null, $bAspek['micro_f1'] ?? null),
             'aspect_macro_f1' => $selisih($aAspek['macro_f1'] ?? null, $bAspek['macro_f1'] ?? null),
+            'aspect_partial_f1' => $selisih($aAspek['partial']['micro_f1'] ?? null, $bAspek['partial']['micro_f1'] ?? null),
             // Koherensi bukan poin persen, jadi selisihnya dibulatkan lebih
             // halus. Dilaporkan sebagai kontrol: model topik tidak ikut
             // dilatih ulang, jadi angka ini semestinya nyaris diam.

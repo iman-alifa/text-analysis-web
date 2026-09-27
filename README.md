@@ -1,59 +1,125 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# AnalisisTeks
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Aplikasi web untuk analisis teks berbahasa Indonesia: **analisis sentimen**,
+**ekstraksi aspek**, dan **pemodelan topik**, dengan alur koreksi pengguna yang
+ikut melatih ulang model (*active learning*).
 
-## About Laravel
+Aplikasi ini **tidak menjalankan NLP sendiri**. Seluruh pemodelan berjalan di
+layanan FastAPI terpisah (`nlp-api-service`) yang dihubungi lewat HTTP.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Kebutuhan
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+| Komponen | Versi |
+|---|---|
+| PHP | 8.2 atau lebih baru |
+| Composer | 2.x |
+| Node.js | 18 atau lebih baru |
+| MySQL | 8.0 (atau MariaDB 10.6+) |
+| `nlp-api-service` | berjalan di port 8001 |
 
-## Learning Laravel
+Ekstensi PHP: `pdo_mysql`, `mbstring`, `openssl`, `zip`, `gd`, `fileinfo`.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## Pemasangan
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```bash
+composer install
+cp .env.example .env
+php artisan key:generate
 
-## Laravel Sponsors
+# Sesuaikan DB_*, NLP_API_URL, dan kunci API di .env
+php artisan migrate
+php artisan storage:link
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+npm install && npm run build
+```
 
-### Premium Partners
+Jalankan dua proses, dan keduanya wajib:
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+```bash
+php artisan serve      # aplikasi web
+php artisan queue:work # analisis & pelatihan ulang berjalan di antrean
+```
 
-## Contributing
+Tanpa `queue:work`, analisis akan berhenti di status "diproses" selamanya.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Untuk pengembangan, `composer dev` menjalankan server, worker antrean, log, dan
+Vite sekaligus.
 
-## Code of Conduct
+## Kunci konfigurasi
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+Seluruhnya terdokumentasi di `.env.example`. Yang wajib diisi:
 
-## Security Vulnerabilities
+| Kunci | Keterangan |
+|---|---|
+| `NLP_API_URL` | Alamat layanan NLP, mis. `http://127.0.0.1:8001` |
+| `DB_*` | Koneksi MySQL |
+| `GEMINI_API_KEY` | Opsional. Tanpa ini, tombol penjelasan AI mati dan sisa halaman tetap utuh |
+| `YOUTUBE_API_KEY` | Opsional, hanya untuk fitur pengambilan komentar YouTube |
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+Tiga kunci yang **jangan diubah sembarangan**:
 
-## License
+- `DB_QUEUE_RETRY_AFTER` (4200) harus lebih besar dari `ProcessTextAnalysis::$timeout`
+  (3600). Bila lebih kecil, job yang masih berjalan diambil worker kedua dan
+  analisis yang sama berjalan berkali-kali.
+- `ANALYSIS_EVAL_SEED` (42) menentukan selang kepercayaan macro-F1. Mengubahnya
+  di tengah rangkaian evaluasi membuat angka lama tidak bisa dihitung ulang.
+- `ANALYSIS_ERROR_TOLERANCE` (0,10) menentukan ambang tinjauan sekaligus batas
+  pita keyakinan. Keduanya sengaja satu angka.
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Menyiapkan untuk produksi
+
+Langkah lengkapnya (server, web server, worker antrean, layanan NLP, HTTPS,
+dan daftar periksa) ada di **[DEPLOYMENT.md](DEPLOYMENT.md)**. Ringkasnya:
+
+```bash
+composer install --no-dev --optimize-autoloader
+npm run build
+
+php artisan config:cache
+php artisan route:cache
+php artisan view:cache
+php artisan migrate --force
+```
+
+Pastikan di `.env` produksi:
+
+```env
+APP_ENV=production
+APP_DEBUG=false
+```
+
+`APP_DEBUG=true` di produksi akan menampilkan jejak galat beserta isi
+konfigurasi kepada pengunjung.
+
+Arahkan document root web server ke `public/`, bukan ke akar proyek. Jalankan
+`queue:work` sebagai layanan yang dipantau (systemd atau Supervisor) agar
+otomatis hidup lagi bila mati.
+
+## Struktur singkat
+
+```
+app/Http/Controllers/    Analisis, feedback, scraper, admin (training & evaluasi)
+app/Services/            NLPApiService, RetrainingService, Evaluation/*
+app/Support/             TextFingerprint, PoolFingerprint, ScraperExport
+resources/views/         Blade + Tailwind
+public/anotasi/          Aplikasi anotasi statis, tanpa backend
+```
+
+## Pengujian
+
+```bash
+composer test        # 454 tes
+./vendor/bin/pint    # format kode
+```
+
+Tes memakai SQLite dalam memori dan memalsukan seluruh permintaan HTTP, jadi
+tidak memerlukan layanan NLP yang berjalan.
+
+## Catatan
+
+Dokumen penelitian (panduan evaluasi, pedoman anotasi, catatan arsitektur)
+berada di luar folder aplikasi agar tidak ikut ter-deploy.
+
+Antarmuka dan pesan aplikasi seluruhnya berbahasa Indonesia.

@@ -93,12 +93,12 @@
             <div class="flex-1 min-w-[16rem]">
                 <p class="font-semibold text-indigo-900">
                     {{ number_format($sangatRagu['count']) }} teks dinilai dengan sangat ragu
-                    - maukah Anda membantu memperbaikinya?
+                    . Maukah Anda membantu memperbaikinya?
                 </p>
                 <p class="text-sm text-indigo-800 mt-1">
                     Baris ini punya keyakinan di bawah
                     <strong>{{ number_format($confidence['band_bounds']['sedang'] * 100, 0) }}%</strong>
-                    ({{ $sangatRagu['share'] }}% dari yang dinilai) - pita paling meragukan pada analisis
+                    ({{ $sangatRagu['share'] }}% dari yang dinilai), pita paling meragukan pada analisis
                     ini. Diminta lebih dulu, bukan seluruh baris yang ragu sekaligus: model belajar
                     paling banyak dari contoh yang paling membuatnya ragu, dan permintaan yang lebih
                     kecil lebih mungkin benar-benar diselesaikan.
@@ -113,7 +113,7 @@
                 <p class="text-xs text-indigo-700 mt-2">
                     Ambang diambil dari
                     {{ $confidence['threshold_source'] === 'nlp-api' ? 'model itu sendiri' : 'pengaturan aplikasi' }}.
-                    Bersifat sukarela - hasil analisis tetap bisa dipakai tanpa mengoreksi apa pun.
+                    Bersifat sukarela. Hasil analisis tetap bisa dipakai tanpa mengoreksi apa pun.
                 </p>
             </div>
 

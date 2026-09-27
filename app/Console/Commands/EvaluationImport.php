@@ -90,7 +90,9 @@ class EvaluationImport extends Command
 
         if ($bocor['overlap'] > 0) {
             $this->warn(sprintf(
-                '%d baris golden juga ada di training_items (%d di antaranya sudah dikoreksi). Baris itu akan otomatis disingkirkan dari data latih.',
+                '%d dari %d baris golden juga ada di training_items, terbawa oleh %d baris data latih (%d di antaranya sudah dikoreksi). Baris data latih itu akan otomatis disingkirkan.',
+                $bocor['golden_affected'],
+                $bocor['total_golden'],
                 $bocor['overlap'],
                 $bocor['corrected_overlap']
             ));

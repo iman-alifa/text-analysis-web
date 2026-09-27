@@ -13,6 +13,7 @@ use App\Services\NLPApiService;
 use App\Services\PredictionQueryService;
 use App\Services\PreprocessingConfigResolver;
 use App\Services\SegmentAnalysisService;
+use App\Support\ScraperExport;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -64,11 +65,29 @@ class AnalysisController extends Controller
         return view('analysis.index', compact('analyses', 'filter'));
     }
 
-    public function create()
+    public function create(Request $request)
     {
         $preprocessingConfigs = PreprocessingConfig::all();
 
-        return view('analysis.create', compact('preprocessingConfigs'));
+        // Berkas hasil YouTube Scraper yang dibawa lewat tombol "Analisis
+        // Sekarang". Hanya namanya yang dioper; isinya tetap dibaca dari
+        // direktori exports dan divalidasi ScraperExport, jadi parameter URL
+        // ini tidak bisa menunjuk berkas lain.
+        $berkasScraper = null;
+
+        if ($nama = $request->query('dari_scraper')) {
+            $path = ScraperExport::path((string) $nama);
+
+            if ($path !== null) {
+                $berkasScraper = [
+                    'nama' => basename($path),
+                    'ukuran' => filesize($path) ?: 0,
+                    'baris' => $request->query('baris'),
+                ];
+            }
+        }
+
+        return view('analysis.create', compact('preprocessingConfigs', 'berkasScraper'));
     }
 
     /**
@@ -231,7 +250,7 @@ class AnalysisController extends Controller
     {
         return match ($task) {
             'transformer' => 'Stemming dan penghapusan stopword dinonaktifkan untuk analisis sentimen karena merusak deteksi negasi.',
-            'bag_of_words' => 'Stemming dan penghapusan stopword diaktifkan untuk pemodelan topik karena model bag-of-words diuntungkan pembersihan agresif.',
+            'bag_of_words' => 'Stemming dan penghapusan stopword diaktifkan untuk topic modeling karena model bag-of-words diuntungkan pembersihan agresif.',
             'span' => 'Teks dibiarkan utuh untuk ekstraksi aspek karena aspek ditemukan berdasarkan posisi karakter pada teks asli.',
             default => 'Analisis gabungan menjalankan tiga modul, masing-masing dengan kebijakan preprocessing sendiri. Pratinjau ini memakai konfigurasi apa adanya.',
         };
@@ -242,19 +261,25 @@ class AnalysisController extends Controller
      */
     public function uploadFile(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
-        ]);
+        // Dua sumber berkas yang sah: unggahan biasa, atau berkas hasil
+        // YouTube Scraper yang dirujuk namanya. Keduanya berakhir sebagai
+        // UploadedFile dan melewati pemrosesan yang sama persis.
+        $file = $this->berkasMasukan($request);
 
-        if ($validator->fails()) {
+        if (! $file instanceof \Illuminate\Http\UploadedFile) {
+            $validator = Validator::make($request->all(), [
+                'file' => 'required|file|mimes:csv,txt,xlsx,xls|max:10240',
+            ]);
+
             return response()->json([
                 'success' => false,
-                'message' => $validator->errors()->first(),
+                'message' => $validator->fails()
+                    ? $validator->errors()->first()
+                    : 'Berkas tidak ditemukan.',
             ], 422);
         }
 
         try {
-            $file = $request->file('file');
             $processedData = $this->fileProcessingService->processFile($file);
 
             return response()->json([
@@ -286,8 +311,11 @@ class AnalysisController extends Controller
             // Manual input
             'manual_text' => 'required_if:input_type,manual|nullable|string',
 
-            // File upload
-            'file' => 'required_if:input_type,file|nullable|file|mimes:csv,txt,xlsx,xls|max:10240',
+            // File upload. `required_if` dilepas karena berkasnya boleh datang
+            // dari YouTube Scraper (medan `scraped_file`); ketiadaan keduanya
+            // diperiksa tepat sebelum berkas dipakai.
+            'file' => 'nullable|file|mimes:csv,txt,xlsx,xls|max:10240',
+            'scraped_file' => 'nullable|string|max:255',
 
             // File configuration - Excel/CSV
             'file_has_header' => 'nullable|string',
@@ -363,7 +391,14 @@ class AnalysisController extends Controller
 
             } else {
                 // File upload
-                $file = $request->file('file');
+                $file = $this->berkasMasukan($request);
+
+                if (! $file instanceof \Illuminate\Http\UploadedFile) {
+                    return back()->withInput()->withErrors([
+                        'file' => 'Pilih berkas yang akan dianalisis terlebih dahulu.',
+                    ]);
+                }
+
                 $fileExtension = strtolower($file->getClientOriginalExtension());
 
                 // Save file
@@ -477,6 +512,24 @@ class AnalysisController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Berkas masukan analisis: unggahan biasa, atau berkas hasil YouTube
+     * Scraper yang dirujuk lewat `scraped_file`.
+     *
+     * Unggahan didahulukan. Kalau pengguna datang dari scraper lalu memilih
+     * berkas lain di formulir, yang dipilihnya belakangan itulah maksudnya.
+     */
+    private function berkasMasukan(Request $request): ?\Illuminate\Http\UploadedFile
+    {
+        if ($request->hasFile('file')) {
+            return $request->file('file');
+        }
+
+        $nama = $request->input('scraped_file');
+
+        return $nama ? ScraperExport::asUploadedFile((string) $nama) : null;
     }
 
     /**

@@ -85,7 +85,7 @@ class LlmServiceTest extends TestCase
         ]);
 
         $this->expectException(LlmException::class);
-        $this->expectExceptionMessage('Layanan AI sedang bermasalah. Coba lagi beberapa menit lagi.');
+        $this->expectExceptionMessage('Layanan AI sedang sibuk atau tidak terjangkau. Coba lagi beberapa menit lagi.');
 
         app(LlmService::class)->generate('halo', $this->schema);
     }
@@ -106,6 +106,53 @@ class LlmServiceTest extends TestCase
             // paling akhir justru model-b.
             $this->assertStringContainsString('model-b', $e->getMessage());
         }
+    }
+
+    public function test_model_utama_sibuk_dan_cadangan_pensiun_melaporkan_sibuk_bukan_model_hilang(): void
+    {
+        // Keluhan pengguna 24 Sep 2026: GEMINI_MODEL berisi cadangan yang sudah
+        // pensiun (gemini-1.5-*). Model utama sibuk sesaat, cadangannya 404, dan
+        // pengguna melihat 'Model AI "gemini-1.5-pro" tidak tersedia' - pesan
+        // dari model TERAKHIR, bukan penyebab yang sebenarnya.
+        config()->set('services.gemini.model', 'utama,cadangan-pensiun');
+
+        Http::fake([
+            '*/utama:generateContent' => Http::response(['error' => 'overloaded'], 503),
+            '*/cadangan-pensiun:generateContent' => Http::response(['error' => ['message' => 'no longer available']], 404),
+        ]);
+
+        try {
+            app(LlmService::class)->generate('halo', $this->schema);
+            $this->fail('Seharusnya melempar LlmException.');
+        } catch (LlmException $e) {
+            $this->assertStringContainsString('sedang sibuk', $e->getMessage());
+            $this->assertStringNotContainsString('tidak tersedia', $e->getMessage());
+        }
+    }
+
+    public function test_kunci_dikirim_lewat_header_bukan_url(): void
+    {
+        // Pesan galat koneksi Laravel memuat URL lengkap. Kunci di ?key= ikut
+        // tertulis ke storage/logs setiap kali Gemini tidak terjangkau.
+        config()->set('services.gemini.key', 'kunci-rahasia-uji');
+        Http::fake(['*generateContent*' => Http::response($this->sukses())]);
+
+        app(LlmService::class)->generate('halo', $this->schema);
+
+        Http::assertSent(fn ($request) => ! str_contains($request->url(), 'kunci-rahasia-uji')
+            && $request->header('x-goog-api-key') === ['kunci-rahasia-uji']);
+    }
+
+    public function test_periksa_model_mencoba_setiap_kandidat(): void
+    {
+        config()->set('services.gemini.model', 'hidup, pensiun');
+
+        Http::fake([
+            '*/hidup:generateContent' => Http::response($this->sukses()),
+            '*/pensiun:generateContent' => Http::response([], 404),
+        ]);
+
+        $this->assertSame(['hidup' => 200, 'pensiun' => 404], app(LlmService::class)->periksaModel());
     }
 
     public function test_system_instruction_dikirim_terpisah_dari_prompt(): void

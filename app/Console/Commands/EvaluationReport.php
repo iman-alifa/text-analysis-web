@@ -110,9 +110,15 @@ class EvaluationReport extends Command
         }
 
         $bocor = $golden->leakageReport($dataset);
-        $b[] = '- Kebocoran ke data latih: '.($bocor['overlap'] === 0
-            ? '**nihil**'
-            : '**'.$bocor['overlap'].' baris** bertabrakan ('.$bocor['corrected_overlap'].' sudah dikoreksi); baris tersebut disingkirkan otomatis dari pelatihan');
+        $b[] = '- Kebocoran ke data latih: '.($bocor['corrected_overlap'] === 0
+            ? '**nihil** - tidak satu pun dari '.$bocor['total_golden'].' baris golden pernah masuk muatan '
+                .'pelatihan. Seluruh baris golden memang terdaftar di `training_items` sebagai kandidat '
+                .'('.$bocor['golden_affected'].' baris, terbawa oleh '.$bocor['overlap'].' entri), tetapi '
+                .'muatan pelatihan hanya diambil dari baris berstatus terkoreksi dan tidak ada satu pun '
+                .'baris golden yang berstatus demikian'
+            : '**'.$bocor['corrected_golden_affected'].' dari '.$bocor['total_golden'].' baris golden** '
+                .'pernah masuk muatan pelatihan lewat '.$bocor['corrected_overlap'].' entri terkoreksi; '
+                .'baris tersebut ditahan penjaga kebocoran sebelum pelatihan berikutnya');
         $b[] = '';
 
         $kurva = $banding->learningCurve($dataset);
@@ -277,10 +283,12 @@ class EvaluationReport extends Command
 
                 $b[] = '| Pencocokan | Micro-F1 | Macro-F1 |';
                 $b[] = '|---|---|---|';
-                $b[] = '| Ketat (nama sama persis) | **'.$aspek['micro_f1'].'%** | **'.$aspek['macro_f1'].'%** |';
-                $b[] = '| Parsial (irisan kata-dasar) | '
+                // Parsial adalah angka utama; ketat dilaporkan sebagai batas
+                // bawah supaya pelonggarannya tidak menyembunyikan apa pun.
+                $b[] = '| **Parsial (irisan kata-dasar), utama** | '
                     .(isset($parsial['micro_f1']) ? '**'.$parsial['micro_f1'].'%**' : '-').' | '
-                    .(isset($parsial['macro_f1']) ? $parsial['macro_f1'].'%' : '-').' |';
+                    .(isset($parsial['macro_f1']) ? '**'.$parsial['macro_f1'].'%**' : '-').' |';
+                $b[] = '| Ketat (nama sama persis), batas bawah | '.$aspek['micro_f1'].'% | '.$aspek['macro_f1'].'% |';
                 $b[] = '| Ketat, aspek support &ge; '.($sering['min_support'] ?? 2)
                     .' ('.($sering['aspects'] ?? 0).' jenis) | - | '
                     .(isset($sering['macro_f1']) ? '**'.$sering['macro_f1'].'%**' : '-').' |';

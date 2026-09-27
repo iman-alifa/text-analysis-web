@@ -6,167 +6,78 @@
     <meta name="description" content="Platform analisis teks otomatis berbasis Machine Learning dan Natural Language Processing untuk analisis sentimen, ekstraksi aspek, dan identifikasi topik.">
     <meta name="keywords" content="analisis teks, NLP, machine learning, sentiment analysis, text mining, Indonesia">
     <meta name="author" content="Iman Alifa Novansyah">
-    <title>Analisis Teks Otomatis - NLP & Machine Learning Platform</title>
+    <title>AnalisisTeks: Analisis Sentimen, Aspek, dan Topik Bahasa Indonesia</title>
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.bunny.net">
-    <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700,800,900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.bunny.net/css?family=inter:400,500,600,700,800&display=swap" rel="stylesheet" />
     
-    <!-- Styles -->
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
-    
-    <!-- AOS Animation -->
-    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+    {{-- Hanya CSS. app.js (Alpine, WordCloud, axios; ~92 KB) tidak dipakai
+         halaman ini sama sekali, dan pustaka animasi AOS dari unpkg diganti
+         skrip kecil di bawah. Dulu stylesheet-nya memblokir render dari
+         server luar. --}}
+    @vite(['resources/css/app.css'])
     
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="any">
+    <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
+    <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon.png') }}">
     
+    {{-- Dulu halaman ini memuat tiga "blob" 300-400px dengan filter blur(70px)
+         yang dianimasikan tanpa henti dan digeser lagi pada setiap event scroll.
+         Blur sebesar itu digambar ulang tiap frame, dan itulah sumber utama
+         halaman terasa berat. Kini latarnya satu gradien radial statis: tampak
+         nyaris sama, biaya gambarnya nol setelah render pertama. --}}
     <style>
-        /* Custom Gradient Background */
-        .gradient-bg {
-            background: linear-gradient(135deg, #0EA5E9 0%, #06B6D4 100%); /* Sky Blue to Cyan */
-        }
-        
-        .gradient-bg-2 {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-        }
-        
-        .gradient-bg-3 {
-            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-        }
-        
-        /* Gradient Text */
+        .gradient-bg { background: linear-gradient(135deg, #0EA5E9 0%, #06B6D4 100%); }
+
         .gradient-text {
             background: linear-gradient(135deg, #0EA5E9 0%, #06B6D4 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        
-        /* Glass Effect */
-        .glass-effect {
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-        
-        /* Hover Lift Effect */
-        .hover-lift {
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        
-        .hover-lift:hover {
-            transform: translateY(-10px);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-        }
-        
-        /* Animated Blob */
-        .blob {
+
+        .hero-glow {
             position: absolute;
-            border-radius: 50%;
-            filter: blur(70px);
-            opacity: 0.7;
-            animation: blob 7s infinite;
+            inset: 0;
             z-index: 0;
-        }
-        
-        @keyframes blob {
-            0%, 100% { 
-                transform: translate(0, 0) scale(1); 
-            }
-            33% { 
-                transform: translate(30px, -50px) scale(1.1); 
-            }
-            66% { 
-                transform: translate(-20px, 20px) scale(0.9); 
-            }
-        }
-        
-        /* Feature Card Shimmer Effect */
-        .feature-card {
-            position: relative;
-            overflow: hidden;
-        }
-        
-        .feature-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: left 0.5s;
-        }
-        
-        .feature-card:hover::before {
-            left: 100%;
-        }
-        
-        /* Navbar Scroll Effect */
-        nav {
-            transition: all 0.3s ease;
-        }
-        
-        nav.scrolled {
-            background: rgba(255, 255, 255, 0.98);
-            backdrop-filter: blur(10px);
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-        
-        /* Floating Animation */
-        @keyframes float {
-            0%, 100% {
-                transform: translateY(0px);
-            }
-            50% {
-                transform: translateY(-20px);
-            }
-        }
-        
-        .float-animation {
-            animation: float 3s ease-in-out infinite;
-        }
-        
-        /* Pulse Animation */
-        @keyframes pulse-ring {
-            0% {
-                transform: scale(0.95);
-                opacity: 1;
-            }
-            100% {
-                transform: scale(1.05);
-                opacity: 0;
-            }
-        }
-        
-        .pulse-ring {
-            animation: pulse-ring 1.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite;
-        }
-        
-        /* Scrollbar Styling */
-        ::-webkit-scrollbar {
-            width: 10px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(135deg, #0EA5E9 0%, #06B6D4 100%);
-            border-radius: 5px;
+            pointer-events: none;
+            background:
+                radial-gradient(28rem 22rem at 5% 10%, rgba(147, 197, 253, .55), transparent 70%),
+                radial-gradient(32rem 26rem at 100% 35%, rgba(103, 232, 249, .45), transparent 70%),
+                radial-gradient(26rem 20rem at 40% 100%, rgba(125, 211, 252, .40), transparent 70%);
         }
 
-        ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(135deg, #06B6D4 0%, #0EA5E9 100%);
-        }
-        
-        /* Number Counter Animation */
-        .counter {
-            font-variant-numeric: tabular-nums;
+        .hover-lift { transition: transform .3s ease, box-shadow .3s ease; }
+        .hover-lift:hover { transform: translateY(-6px); box-shadow: 0 20px 40px rgba(0, 0, 0, .12); }
+
+        /* Tanpa backdrop-filter: pada latar 98% buram hasilnya tidak terlihat,
+           tetapi biayanya dibayar di setiap frame scroll. */
+        nav { transition: background-color .3s ease, box-shadow .3s ease; }
+        nav.scrolled { background: rgba(255, 255, 255, .98); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, .1); }
+
+        /* Hanya dua kartu kecil yang melayang; kartu besar diam. */
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+        .float-soft { animation: float 4s ease-in-out infinite; will-change: transform; }
+
+        /* Pengganti AOS. Hanya berlaku bila JavaScript jalan (kelas .js dipasang
+           di <html>), jadi tanpa JavaScript isinya tetap terlihat. */
+        .js [data-aos] { opacity: 0; transition: opacity .6s ease, transform .6s ease; }
+        .js [data-aos="fade-up"] { transform: translateY(24px); }
+        .js [data-aos="fade-right"] { transform: translateX(-24px); }
+        .js [data-aos="fade-left"] { transform: translateX(24px); }
+        .js [data-aos].aos-animate { opacity: 1; transform: none; }
+
+        .counter { font-variant-numeric: tabular-nums; }
+
+        @media (prefers-reduced-motion: reduce) {
+            .float-soft { animation: none; }
+            .js [data-aos] { opacity: 1; transform: none; transition: none; }
+            html { scroll-behavior: auto; }
         }
     </style>
+    <script>document.documentElement.classList.add('js');</script>
 </head>
 <body class="font-sans antialiased bg-white text-gray-900">
     
@@ -179,9 +90,7 @@
                 <!-- Logo -->
                 <div class="flex-shrink-0 flex items-center">
                     <a href="/" class="flex items-center space-x-3 group">
-                        <div class="w-10 h-10 gradient-bg rounded-lg flex items-center justify-center transform group-hover:scale-110 transition-transform duration-300">
-                            <span class="text-white text-xl font-bold">AT</span>
-                        </div>
+                        <x-logo-mark class="w-10 h-10 transform group-hover:scale-110 transition-transform duration-300" />
                         <span class="text-xl font-bold text-gray-900 hidden sm:inline">
                             Analisis<span class="gradient-text">Teks</span>
                         </span>
@@ -192,8 +101,11 @@
                 <div class="hidden md:flex items-center space-x-8">
                     <a href="#features" class="text-gray-700 hover:text-blue-600 transition font-medium">Fitur</a>
                     <a href="#how-it-works" class="text-gray-700 hover:text-blue-600 transition font-medium">Cara Kerja</a>
-                    <a href="#testimonials" class="text-gray-700 hover:text-blue-600 transition font-medium">Testimoni</a>
+                    @if (count($pengukuran))
+                    <a href="#hasil-uji" class="text-gray-700 hover:text-blue-600 transition font-medium">Hasil Uji</a>
+                    @endif
                     <a href="#about" class="text-gray-700 hover:text-blue-600 transition font-medium">Tentang</a>
+                    <a href="{{ route('panduan') }}" class="text-gray-700 hover:text-blue-600 transition font-medium">Pedoman</a>
                     
                     @auth
                         <a href="{{ route('dashboard') }}" class="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-lg font-semibold hover:shadow-lg transform hover:scale-105 transition-all duration-300">
@@ -223,7 +135,10 @@
             <div class="px-4 pt-2 pb-3 space-y-1">
                 <a href="#features" class="block px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-blue-600 rounded-md transition">Fitur</a>
                 <a href="#how-it-works" class="block px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-blue-600 rounded-md transition">Cara Kerja</a>
-                <a href="#testimonials" class="block px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-blue-600 rounded-md transition">Testimoni</a>
+                @if (count($pengukuran))
+                <a href="#hasil-uji" class="block px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-blue-600 rounded-md transition">Hasil Uji</a>
+                @endif
+                <a href="{{ route('panduan') }}" class="block px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-blue-600 rounded-md transition">Pedoman</a>
                 <a href="#about" class="block px-3 py-2 text-gray-700 hover:bg-indigo-50 hover:text-blue-600 rounded-md transition">Tentang</a>
                 @auth
                     <a href="{{ route('dashboard') }}" class="block px-3 py-2 bg-blue-600 text-white rounded-md text-center font-semibold">Dashboard</a>
@@ -239,10 +154,7 @@
          HERO SECTION
          ============================================ -->
     <section class="relative pt-32 pb-20 px-4 sm:px-6 lg:px-8 overflow-hidden">
-        <!-- Background Blobs -->
-        <div class="blob w-72 h-72 bg-blue-300 top-0 -left-20"></div>
-        <div class="blob w-96 h-96 bg-cyan-300 top-40 -right-40" style="animation-delay: 2s;"></div>
-        <div class="blob w-80 h-80 bg-sky-300 bottom-0 left-1/3" style="animation-delay: 4s;"></div>
+        <div class="hero-glow" aria-hidden="true"></div>
         
         <div class="max-w-7xl mx-auto relative z-10">
             <div class="grid lg:grid-cols-2 gap-12 items-center">
@@ -259,7 +171,7 @@
                     </h1>
                     
                     <p class="text-xl text-gray-600 mb-8 leading-relaxed">
-                        Platform berbasis AI untuk menganalisis sentimen, mengekstraksi aspek, dan mengidentifikasi topik dari data teks dalam hitungan detik. Sempurna untuk riset, survei, dan analisis opini publik.
+                        Platform berbasis AI untuk menganalisis sentimen, mengekstraksi aspek, dan mengidentifikasi topik dari data teks berbahasa Indonesia. Cocok untuk riset, survei, dan analisis opini publik.
                     </p>
                     
                     <div class="flex flex-col sm:flex-row gap-4 mb-8">
@@ -293,35 +205,105 @@
                 
                 <!-- Right Image/Illustration -->
                 <div data-aos="fade-left" class="hidden lg:block">
-                    <div class="relative float-animation">
+                    <div class="relative">
                         <div class="absolute inset-0 bg-gradient-to-r from-blue-500 to-cyan-600 rounded-3xl transform rotate-6 opacity-20"></div>
                         <div class="relative bg-white rounded-3xl shadow-2xl p-8">
-                            <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&h=600&fit=crop" 
-                                 alt="Data Analysis Dashboard" 
-                                 class="rounded-2xl w-full h-auto">
+                            {{-- Pratinjau halaman hasil, digambar langsung dengan HTML/SVG.
+                                 Dulu foto stok dari Unsplash: bergantung pada layanan luar,
+                                 kosong saat gagal dimuat, dan tidak memperlihatkan aplikasi
+                                 ini sama sekali. Angkanya contoh dan diberi label begitu,
+                                 supaya tidak terbaca sebagai hasil pengukuran. --}}
+                            <figure class="rounded-2xl bg-gray-50 border border-gray-100 p-5 select-none" aria-label="Contoh tampilan halaman hasil analisis">
+                                <div class="flex items-center justify-between mb-4">
+                                    <div class="flex items-center gap-2">
+                                        <x-logo-mark class="w-7 h-7" />
+                                        <div>
+                                            <div class="text-sm font-semibold text-gray-900 leading-tight">Komentar Layanan Publik</div>
+                                            <div class="text-[11px] text-gray-500">Analisis gabungan &middot; 1.200 teks</div>
+                                        </div>
+                                    </div>
+                                    <span class="text-[10px] font-semibold uppercase tracking-wide text-gray-500 bg-white border border-gray-200 rounded-full px-2 py-0.5">Contoh</span>
+                                </div>
+
+                                <div class="grid grid-cols-5 gap-3 mb-3">
+                                    {{-- Distribusi sentimen --}}
+                                    <div class="col-span-2 bg-white rounded-xl border border-gray-100 p-3">
+                                        <div class="text-[11px] font-medium text-gray-500 mb-2">Sentimen</div>
+                                        <div class="relative w-20 h-20 mx-auto">
+                                            <svg viewBox="0 0 36 36" class="w-full h-full -rotate-90" aria-hidden="true">
+                                                <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#10B981" stroke-width="5" stroke-dasharray="52 48"/>
+                                                <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#F59E0B" stroke-width="5" stroke-dasharray="30 70" stroke-dashoffset="-52"/>
+                                                <circle cx="18" cy="18" r="15.9155" fill="none" stroke="#F43F5E" stroke-width="5" stroke-dasharray="18 82" stroke-dashoffset="-82"/>
+                                            </svg>
+                                            <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                                <span class="text-base font-bold text-gray-900 leading-none">52%</span>
+                                                <span class="text-[9px] text-gray-500">positif</span>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2 space-y-0.5 text-[10px] text-gray-600">
+                                            <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>Positif 52%</div>
+                                            <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-amber-500"></span>Netral 30%</div>
+                                            <div class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-500"></span>Negatif 18%</div>
+                                        </div>
+                                    </div>
+
+                                    {{-- Sentimen per aspek --}}
+                                    <div class="col-span-3 bg-white rounded-xl border border-gray-100 p-3">
+                                        <div class="text-[11px] font-medium text-gray-500 mb-2">Sentimen per aspek</div>
+                                        <div class="space-y-2.5">
+                                            @foreach ([['pelayanan', 64, 22, 14], ['kinerja', 48, 30, 22], ['anggaran', 21, 34, 45], ['informasi', 55, 35, 10]] as [$aspek, $pos, $net, $neg])
+                                                <div>
+                                                    <div class="text-[10px] text-gray-700 mb-0.5">{{ $aspek }}</div>
+                                                    <div class="flex h-2 rounded-full overflow-hidden bg-gray-100">
+                                                        <div class="bg-emerald-500" style="width: {{ $pos }}%"></div>
+                                                        <div class="bg-amber-400" style="width: {{ $net }}%"></div>
+                                                        <div class="bg-rose-500" style="width: {{ $neg }}%"></div>
+                                                    </div>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {{-- Contoh prediksi per komentar --}}
+                                <div class="space-y-2">
+                                    <div class="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-start gap-2">
+                                        <span class="mt-0.5 shrink-0 text-[10px] font-semibold text-emerald-700 bg-emerald-50 rounded px-1.5 py-0.5">Positif</span>
+                                        <p class="text-[11px] text-gray-700 leading-snug flex-1">Pelayanannya sekarang cepat, antrean juga lebih tertib.</p>
+                                        <span class="text-[10px] text-gray-400 shrink-0">0,97</span>
+                                    </div>
+                                    <div class="bg-white rounded-xl border border-gray-100 px-3 py-2 flex items-start gap-2">
+                                        <span class="mt-0.5 shrink-0 text-[10px] font-semibold text-rose-700 bg-rose-50 rounded px-1.5 py-0.5">Negatif</span>
+                                        <p class="text-[11px] text-gray-700 leading-snug flex-1">Anggarannya besar tapi hasilnya belum terasa di daerah.</p>
+                                        <span class="text-[10px] text-gray-400 shrink-0">0,93</span>
+                                    </div>
+                                </div>
+                            </figure>
                             
+                            @if (($stats[0]['label'] ?? null) === 'Akurasi sentimen')
                             <!-- Floating Card 1 -->
-                            <div class="absolute -top-6 -right-6 bg-white rounded-xl shadow-xl p-4" style="animation: float 3s ease-in-out infinite;">
+                            <div class="absolute -top-6 -right-6 bg-white rounded-xl shadow-xl p-4 float-soft">
                                 <div class="flex items-center space-x-3">
                                     <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                                         <span class="text-2xl">✅</span>
                                     </div>
                                     <div>
-                                        <div class="text-sm font-semibold text-gray-900">99% Akurasi</div>
-                                        <div class="text-xs text-gray-500">Model Tervalidasi</div>
+                                        <div class="text-sm font-semibold text-gray-900">{{ $stats[0]['number'] }} Akurasi</div>
+                                        <div class="text-xs text-gray-500">Diuji pada test set berlabel</div>
                                     </div>
                                 </div>
                             </div>
-                            
+                            @endif
+
                             <!-- Floating Card 2 -->
-                            <div class="absolute -bottom-6 -left-6 bg-white rounded-xl shadow-xl p-4" style="animation: float 3s ease-in-out infinite; animation-delay: 1s;">
+                            <div class="absolute -bottom-16 -left-6 bg-white rounded-xl shadow-xl p-4 float-soft" style="animation-delay: -2s;">
                                 <div class="flex items-center space-x-3">
                                     <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                                         <span class="text-2xl">⚡</span>
                                     </div>
                                     <div>
-                                        <div class="text-sm font-semibold text-gray-900">Proses Cepat</div>
-                                        <div class="text-xs text-gray-500">< 5 detik</div>
+                                        <div class="text-sm font-semibold text-gray-900">Berjalan di Latar</div>
+                                        <div class="text-xs text-gray-500">Ribuan teks sekali jalan</div>
                                     </div>
                                 </div>
                             </div>
@@ -427,47 +409,46 @@
     </section>
     
     <!-- ============================================
-         TESTIMONIALS SECTION
+         HASIL PENGUKURAN
          ============================================ -->
-    <section id="testimonials" class="py-20 bg-gray-50">
+    @if (count($pengukuran))
+    <section id="hasil-uji" class="py-20 bg-gray-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16" data-aos="fade-up">
                 <h2 class="text-4xl font-extrabold text-gray-900 mb-4">
-                    Apa Kata <span class="gradient-text">Pengguna</span>
+                    Hasil <span class="gradient-text">Pengukuran</span>
                 </h2>
                 <p class="text-xl text-gray-600 max-w-3xl mx-auto">
-                    Dipercaya oleh peneliti, analis data, dan profesional di berbagai bidang
+                    Angka di bawah ini berasal dari pengujian pada komentar yang dilabeli manusia
+                    dan sengaja disisihkan dari data training, bukan dari data yang dipakai melatih model.
                 </p>
             </div>
-            
+
             <div class="grid md:grid-cols-3 gap-8">
-                @foreach($testimonials as $index => $testimonial)
+                @foreach($pengukuran as $index => $ukur)
                 <div class="bg-white rounded-2xl p-8 shadow-lg hover-lift" data-aos="fade-up" data-aos-delay="{{ $index * 100 }}">
-                    <div class="flex items-center mb-6">
-                        <img src="{{ $testimonial['image'] }}" 
-                             alt="{{ $testimonial['name'] }}" 
-                             class="w-16 h-16 rounded-full mr-4 ring-4 ring-blue-100">
-                        <div>
-                            <h4 class="font-bold text-gray-900">{{ $testimonial['name'] }}</h4>
-                            <p class="text-sm text-gray-600">{{ $testimonial['role'] }}</p>
-                        </div>
-                    </div>
-                    
-                    <div class="flex mb-4">
-                        @for($i = 0; $i < 5; $i++)
-                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                        </svg>
-                        @endfor
-                    </div>
-                    
-                    <p class="text-gray-600 italic leading-relaxed">"{{ $testimonial['comment'] }}"</p>
+                    <p class="text-4xl font-extrabold gradient-text">{{ $ukur['angka'] }}</p>
+                    <h3 class="mt-3 text-lg font-bold text-gray-900">{{ $ukur['judul'] }}</h3>
+                    <p class="mt-2 text-sm text-gray-600 leading-relaxed">{{ $ukur['dasar'] }}</p>
                 </div>
                 @endforeach
             </div>
+
+            {{-- Batasan disebut di halaman depan, bukan disembunyikan di naskah.
+                 Pembaca yang melihat angka akurasi berhak tahu di korpus apa angka
+                 itu berlaku sebelum menyimpulkan berlaku juga untuk datanya. --}}
+            <p class="mt-10 text-center text-sm text-gray-500 max-w-3xl mx-auto">
+                Pengukuran dilakukan pada korpus komentar YouTube berbahasa Indonesia.
+                Ketepatan pada jenis teks yang berbeda bisa berbeda pula, jadi gunakan fitur koreksi
+                untuk menyesuaikan model dengan data Anda sendiri.
+                @if ($diukurPada)
+                    Pengukuran terakhir: {{ $diukurPada }}.
+                @endif
+            </p>
         </div>
     </section>
-    
+    @endif
+
     <!-- ============================================
          CTA SECTION
          ============================================ -->
@@ -483,7 +464,8 @@
                 Siap Memulai Analisis Teks Anda?
             </h2>
             <p class="text-xl text-white/90 mb-10 max-w-2xl mx-auto">
-                Bergabunglah dengan ratusan pengguna yang telah memanfaatkan kekuatan AI untuk analisis teks. Mulai sekarang, gratis!
+                Upload data Anda, jalankan analisis, lalu perbaiki hasilnya bila ada yang keliru.
+                Setiap koreksi ikut melatih model pada putaran berikutnya.
             </p>
             
             @auth
@@ -530,9 +512,7 @@
                 <!-- Brand -->
                 <div class="md:col-span-2">
                     <div class="flex items-center space-x-3 mb-4">
-                        <div class="w-10 h-10 gradient-bg rounded-lg flex items-center justify-center">
-                            <span class="text-white text-xl font-bold">AT</span>
-                        </div>
+                        <x-logo-mark class="w-10 h-10" />
                         <span class="text-xl font-bold text-white">Analisis<span class="gradient-text">Teks</span></span>
                     </div>
                     <p class="text-gray-400 mb-4 max-w-md leading-relaxed">
@@ -572,8 +552,13 @@
                         <li><a href="#how-it-works" class="hover:text-blue-400 transition-colors duration-300 flex items-center">
                             <span class="mr-2">→</span> Cara Kerja
                         </a></li>
-                        <li><a href="#testimonials" class="hover:text-blue-400 transition-colors duration-300 flex items-center">
-                            <span class="mr-2">→</span> Testimoni
+                        @if (count($pengukuran))
+                        <li><a href="#hasil-uji" class="hover:text-blue-400 transition-colors duration-300 flex items-center">
+                            <span class="mr-2">→</span> Hasil Uji
+                        </a></li>
+                        @endif
+                        <li><a href="{{ route('panduan') }}" class="hover:text-blue-400 transition-colors duration-300 flex items-center">
+                            <span class="mr-2">→</span> Pedoman Penggunaan
                         </a></li>
                         @guest
                         <li><a href="{{ route('login') }}" class="hover:text-blue-400 transition-colors duration-300 flex items-center">
@@ -643,209 +628,125 @@
          JAVASCRIPT
          ============================================ -->
     
-    <!-- AOS Animation Script -->
-    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
-    
     <script>
-        // ==========================================
-        // Initialize AOS Animation
-        // ==========================================
-        AOS.init({
-            duration: 800,
-            once: true,
-            offset: 100,
-            easing: 'ease-in-out'
-        });
-        
-        // ==========================================
-        // Mobile Menu Toggle
-        // ==========================================
-        const mobileMenuButton = document.getElementById('mobile-menu-button');
-        const mobileMenu = document.getElementById('mobile-menu');
-        
-        mobileMenuButton.addEventListener('click', () => {
-            mobileMenu.classList.toggle('hidden');
-        });
-        
-        // ==========================================
-        // Navbar Scroll Effect
-        // ==========================================
+    (() => {
+        // Satu skrip kecil menggantikan AOS dan empat listener scroll. Yang dulu
+        // dihitung di tiap event scroll (posisi setiap section, parallax blob)
+        // kini dikerjakan IntersectionObserver, di luar jalur scroll.
         const navbar = document.getElementById('navbar');
-        
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 50) {
-                navbar.classList.add('scrolled');
-            } else {
-                navbar.classList.remove('scrolled');
-            }
-        });
-        
-        // ==========================================
-        // Smooth Scroll for Anchor Links
-        // ==========================================
-        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
-            anchor.addEventListener('click', function (e) {
-                e.preventDefault();
-                const target = document.querySelector(this.getAttribute('href'));
-                
-                if (target) {
-                    const offsetTop = target.offsetTop - 80;
-                    
-                    window.scrollTo({
-                        top: offsetTop,
-                        behavior: 'smooth'
-                    });
-                    
-                    mobileMenu.classList.add('hidden');
-                }
-            });
-        });
-        
-        // ==========================================
-        // Scroll to Top Button
-        // ==========================================
-        const scrollToTopBtn = document.getElementById('scroll-to-top');
-        
-        window.addEventListener('scroll', () => {
-            if (window.scrollY > 300) {
-                scrollToTopBtn.classList.remove('opacity-0', 'invisible');
-                scrollToTopBtn.classList.add('opacity-100', 'visible');
-            } else {
-                scrollToTopBtn.classList.add('opacity-0', 'invisible');
-                scrollToTopBtn.classList.remove('opacity-100', 'visible');
-            }
-        });
-        
-        scrollToTopBtn.addEventListener('click', () => {
-            window.scrollTo({
-                top: 0,
-                behavior: 'smooth'
-            });
-        });
-        
-        // ==========================================
-        // Number Counter Animation
-        // ==========================================
-        const observerOptions = {
-            threshold: 0.5,
-            rootMargin: '0px 0px -100px 0px'
+        const keAtas = document.getElementById('scroll-to-top');
+        const menu = document.getElementById('mobile-menu');
+        const tombolMenu = document.getElementById('mobile-menu-button');
+
+        // --- Scroll: satu listener pasif, paling banyak sekali per frame ---
+        let menunggu = false;
+        const perbarui = () => {
+            const y = window.scrollY;
+            navbar.classList.toggle('scrolled', y > 50);
+            const tampil = y > 300;
+            keAtas.classList.toggle('opacity-0', !tampil);
+            keAtas.classList.toggle('invisible', !tampil);
+            keAtas.classList.toggle('opacity-100', tampil);
+            menunggu = false;
         };
-        
-        const counters = document.querySelectorAll('.counter');
-        const animateCounter = (element) => {
-            const target = element.textContent;
-            const isPercent = target.includes('%');
-            const isTime = target.includes('s');
-            const isPlus = target.includes('+');
-            
-            let numericValue = parseInt(target.replace(/[^0-9]/g, ''));
-            const duration = 2000;
-            const increment = numericValue / (duration / 16);
-            let current = 0;
-            
-            const timer = setInterval(() => {
-                current += increment;
-                if (current >= numericValue) {
-                    current = numericValue;
-                    clearInterval(timer);
-                }
-                
-                let displayValue = Math.floor(current);
-                if (isPlus) displayValue += 'K+';
-                if (isPercent) displayValue += '%';
-                if (isTime) displayValue = '<' + displayValue + 's';
-                
-                element.textContent = displayValue;
-            }, 16);
-        };
-        
-        const counterObserver = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    animateCounter(entry.target);
-                    counterObserver.unobserve(entry.target);
-                }
-            });
-        }, observerOptions);
-        
-        counters.forEach(counter => {
-            counterObserver.observe(counter);
-        });
-        
-        // ==========================================
-        // Parallax Effect for Blobs
-        // ==========================================
         window.addEventListener('scroll', () => {
-            const blobs = document.querySelectorAll('.blob');
-            const scrolled = window.pageYOffset;
-            
-            blobs.forEach((blob, index) => {
-                const speed = 0.5 + (index * 0.1);
-                blob.style.transform = `translateY(${scrolled * speed}px)`;
-            });
+            if (!menunggu) {
+                menunggu = true;
+                requestAnimationFrame(perbarui);
+            }
+        }, { passive: true });
+        perbarui();
+
+        keAtas.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+
+        // --- Menu seluler ---
+        tombolMenu.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.toggle('hidden');
         });
-        
-        // ==========================================
-        // Add active state to navigation links
-        // ==========================================
-        const sections = document.querySelectorAll('section[id]');
-        const navLinks = document.querySelectorAll('nav a[href^="#"]');
-        
-        window.addEventListener('scroll', () => {
-            let current = '';
-            
-            sections.forEach(section => {
-                const sectionTop = section.offsetTop;
-                const sectionHeight = section.clientHeight;
-                
-                if (window.pageYOffset >= sectionTop - 100) {
-                    current = section.getAttribute('id');
-                }
-            });
-            
-            navLinks.forEach(link => {
-                link.classList.remove('text-blue-600', 'font-bold');
-                if (link.getAttribute('href') === `#${current}`) {
-                    link.classList.add('text-blue-600', 'font-bold');
-                }
-            });
-        });
-        
-        // ==========================================
-        // Lazy Loading Images
-        // ==========================================
-        if ('IntersectionObserver' in window) {
-            const imageObserver = new IntersectionObserver((entries, observer) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting) {
-                        const img = entry.target;
-                        img.src = img.dataset.src || img.src;
-                        img.classList.add('loaded');
-                        imageObserver.unobserve(img);
-                    }
-                });
-            });
-            
-            document.querySelectorAll('img').forEach(img => {
-                imageObserver.observe(img);
-            });
-        }
-        
-        // ==========================================
-        // Close mobile menu when clicking outside
-        // ==========================================
         document.addEventListener('click', (e) => {
-            if (!mobileMenuButton.contains(e.target) && !mobileMenu.contains(e.target)) {
-                mobileMenu.classList.add('hidden');
-            }
+            if (!menu.contains(e.target)) menu.classList.add('hidden');
         });
-        
-        // ==========================================
-        // Console Easter Egg
-        // ==========================================
-        console.log('%c🤖 Analisis Teks Otomatis', 'color: #667eea; font-size: 20px; font-weight: bold;');
-        console.log('%cDikembangkan dengan ❤️ menggunakan Laravel & Machine Learning', 'color: #764ba2; font-size: 12px;');
-        console.log('%cInterested in the code? Check out the GitHub repo!', 'color: #10B981; font-size: 12px;');
+
+        // --- Tautan jangkar: geser 80px untuk bilah navigasi tetap ---
+        document.querySelectorAll('a[href^="#"]').forEach((tautan) => {
+            tautan.addEventListener('click', (e) => {
+                const href = tautan.getAttribute('href');
+                const sasaran = href.length > 1 ? document.querySelector(href) : null;
+                if (!sasaran) return;
+                e.preventDefault();
+                window.scrollTo({ top: sasaran.getBoundingClientRect().top + window.scrollY - 80, behavior: 'smooth' });
+                menu.classList.add('hidden');
+            });
+        });
+
+        const adaObserver = 'IntersectionObserver' in window;
+        const kurangiGerak = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // --- Animasi muncul (pengganti AOS) ---
+        const muncul = document.querySelectorAll('[data-aos]');
+        if (!adaObserver || kurangiGerak) {
+            muncul.forEach((el) => el.classList.add('aos-animate'));
+        } else {
+            const pengamat = new IntersectionObserver((entri) => {
+                entri.forEach((e) => {
+                    if (!e.isIntersecting) return;
+                    e.target.style.transitionDelay = parseInt(e.target.dataset.aosDelay || '0', 10) + 'ms';
+                    e.target.classList.add('aos-animate');
+                    pengamat.unobserve(e.target);
+                });
+            }, { rootMargin: '0px 0px -60px 0px' });
+            muncul.forEach((el) => pengamat.observe(el));
+        }
+
+        // --- Penanda tautan navigasi aktif ---
+        if (adaObserver) {
+            const tautanNav = document.querySelectorAll('nav a[href^="#"]');
+            const pengamatBagian = new IntersectionObserver((entri) => {
+                entri.forEach((e) => {
+                    if (!e.isIntersecting) return;
+                    tautanNav.forEach((l) => {
+                        const aktif = l.getAttribute('href') === '#' + e.target.id;
+                        l.classList.toggle('text-blue-600', aktif);
+                        l.classList.toggle('font-bold', aktif);
+                    });
+                });
+            }, { rootMargin: '-45% 0px -50% 0px' });
+            document.querySelectorAll('section[id], footer[id]').forEach((s) => pengamatBagian.observe(s));
+        }
+
+        // --- Angka berjalan ---
+        // Angka ditulis dalam format Indonesia ("85,7%", "8.393"). Formatnya
+        // dibaca, animasi memakai format yang sama, dan teks aslinya dipasang
+        // kembali di akhir supaya angka yang terbaca selalu persis angka sumber.
+        const jalankanAngka = (el) => {
+            const asli = el.textContent.trim();
+            const cocok = asli.match(/^(\D*)([\d.]+(?:,\d+)?)(.*)$/);
+            if (!cocok) return;
+            const [, awalan, angka, akhiran] = cocok;
+            const desimal = (angka.split(',')[1] || '').length;
+            const nilai = parseFloat(angka.replace(/\./g, '').replace(',', '.'));
+            if (!isFinite(nilai)) return;
+            const format = (v) => v.toLocaleString('id-ID', { minimumFractionDigits: desimal, maximumFractionDigits: desimal });
+            const mulai = performance.now();
+            const langkah = (kini) => {
+                const p = Math.min((kini - mulai) / 1500, 1);
+                el.textContent = p < 1 ? awalan + format(nilai * p) + akhiran : asli;
+                if (p < 1) requestAnimationFrame(langkah);
+            };
+            requestAnimationFrame(langkah);
+        };
+        if (adaObserver && !kurangiGerak) {
+            const pengamatAngka = new IntersectionObserver((entri) => {
+                entri.forEach((e) => {
+                    if (!e.isIntersecting) return;
+                    jalankanAngka(e.target);
+                    pengamatAngka.unobserve(e.target);
+                });
+            }, { threshold: 0.5 });
+            document.querySelectorAll('.counter').forEach((el) => pengamatAngka.observe(el));
+        }
+    })();
     </script>
     
 </body>

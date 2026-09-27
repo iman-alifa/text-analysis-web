@@ -40,27 +40,57 @@ class EvaluationLeakage extends Command
         }
 
         $this->info('Baris golden diperiksa: '.$laporan['total_golden']);
-        $this->info('Bertabrakan dengan training_items: '.$laporan['overlap']);
-        $this->info('Di antaranya sudah dikoreksi manusia: '.$laporan['corrected_overlap']);
+        $this->newLine();
+
+        // ── Angka yang menentukan: hanya item terkoreksi yang pernah dilatih ──
+        $this->line('<options=bold>KEBOCORAN NYATA KE DATA LATIH</>');
+        $this->line(sprintf(
+            '  Baris golden yang pernah masuk muatan pelatihan: %d dari %d (%.2f%%)',
+            $laporan['corrected_golden_affected'],
+            $laporan['total_golden'],
+            $laporan['total_golden'] > 0
+                ? $laporan['corrected_golden_affected'] / $laporan['total_golden'] * 100
+                : 0.0
+        ));
+        $this->line('  Baris training_items terkoreksi yang bertabrakan: '.$laporan['corrected_overlap']);
+
+        if ($laporan['corrected_overlap'] === 0) {
+            $this->info('  => Nihil. Tidak satu pun baris uji pernah dilatihkan; angka hold-out sah dikutip.');
+        } else {
+            $this->error('  => ADA KEBOCORAN. Baris tersebut ditahan RetrainingService, tetapi periksa riwayat pelatihan sebelumnya.');
+        }
+
+        $this->newLine();
+
+        // ── Konteks: kolam kandidat, bukan muatan pelatihan ──────────────────
+        $this->line('<options=bold>KONTEKS: KOLAM KANDIDAT</>');
+        $this->line(sprintf(
+            '  Baris golden yang terdaftar di training_items: %d dari %d (%.2f%%)',
+            $laporan['golden_affected'],
+            $laporan['total_golden'],
+            $laporan['total_golden'] > 0
+                ? $laporan['golden_affected'] / $laporan['total_golden'] * 100
+                : 0.0
+        ));
+        $this->line('  Jumlah baris training_items yang bertabrakan: '.$laporan['overlap']);
+        $this->comment(
+            '  Angka ini WAJAR mendekati 100% dan BUKAN kebocoran: training_items memuat setiap '.
+            'baris hasil analisis, sedangkan golden dataset memang disampel dari analisis yang sama. '.
+            'Muatan pelatihan hanya diambil dari baris berstatus is_corrected, dan baris golden '.
+            'disaring lagi oleh RetrainingService::correctedItems() sebelum pelatihan. Jangan kutip '.
+            'angka ini sebagai angka kebocoran di naskah.'
+        );
 
         if ($laporan['overlap'] === 0) {
-            $this->info('Tidak ada kebocoran. Angka hold-out sah untuk dikutip.');
-
             return self::SUCCESS;
         }
 
         $this->newLine();
-        $this->warn('Baris berikut ada di kedua sisi (dipotong 120 karakter):');
+        $this->line('Contoh baris yang terdaftar di kedua sisi (dipotong 120 karakter):');
 
         foreach ($laporan['examples'] as $contoh) {
             $this->line('  - '.$contoh);
         }
-
-        $this->newLine();
-        $this->comment(
-            'Baris ini otomatis disingkirkan dari data latih, jadi hold-out tetap sah. '.
-            'Yang berkurang adalah jumlah sampel pelatihan, bukan keabsahan evaluasi.'
-        );
 
         return self::SUCCESS;
     }

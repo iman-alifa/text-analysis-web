@@ -34,16 +34,18 @@
                     id="btn-preview-retrain"
                     class="inline-flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 shadow-sm transition text-sm font-medium">
                 <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                Periksa Data Latih
+                Periksa Data Training
             </button>
         </div>
     </div>
 
+    @include('admin.training.partials.tunda')
+
     {{-- Panel pelatihan ulang.
-         Tiap putaran melatih dari bobot dasar atas SELURUH kolam koreksi -
+         Tiap putaran melatih dari base model atas SELURUH kolam koreksi -
          protokol active learning baku, dan sama dengan yang dipakai layanan
          (`retrain_from_baseline = true`). Menyaring per analisis akan membuat
-         putaran kedua berangkat dari bobot dasar tetapi hanya melihat lembaga
+         putaran kedua berangkat dari base model tetapi hanya melihat lembaga
          kedua: lembaga pertama terlupakan, dan kurvanya mengukur "ganti
          korpus" alih-alih "tambah data".
          Pemilihan lembaga tetap WAJIB, tetapi sebagai PENCATATAN asal putaran -
@@ -54,7 +56,7 @@
             <div>
                 <h3 class="text-lg font-bold text-gray-900">Jalankan Putaran Active Learning</h3>
                 <p class="mt-1 text-sm text-gray-600">
-                    Satu putaran melatih ulang model dari bobot dasar memakai <strong>seluruh kolam koreksi</strong> ({{ number_format($autoStatus['pool']) }} baris) - protokol active learning baku. Ukur hasilnya di halaman evaluasi sebelum menjalankan putaran berikutnya: bobot lama tertimpa, jadi iterasi yang belum diukur tidak bisa diukur belakangan.
+                    Satu putaran melatih ulang model dari base model memakai <strong>seluruh kolam koreksi</strong> ({{ number_format($autoStatus['pool']) }} baris), mengikuti protokol active learning baku. Ukur hasilnya di halaman evaluasi sebelum menjalankan putaran berikutnya: bobot lama tertimpa, jadi iterasi yang belum diukur tidak bisa diukur belakangan.
                 </p>
             </div>
 
@@ -98,7 +100,7 @@
                         <option value="gabungan">Tidak spesifik / beberapa lembaga sekaligus</option>
                     </select>
                     <p class="mt-1 text-xs text-gray-500">
-                        Dicatat di riwayat untuk penamaan iterasi. <strong>Bukan penyaring</strong> - data latihnya tetap seluruh kolam.
+                        Dicatat di riwayat untuk penamaan iterasi. <strong>Bukan penyaring</strong>, karena data training-nya tetap seluruh kolam.
                     </p>
                 </div>
                 <div>
@@ -126,7 +128,7 @@
                     <input type="checkbox" name="paksa" value="1" id="retrain-paksa"
                            class="mt-0.5 rounded border-gray-300 text-amber-600 focus:ring-amber-500">
                     <span>
-                        <strong class="text-gray-800">Paksa</strong> - jalankan walau kolamnya di bawah {{ $ambangLatih }} sampel, atau iterasi sebelumnya belum diukur.
+                        <strong class="text-gray-800">Paksa</strong>: jalankan walau kolamnya di bawah {{ $ambangLatih }} sampel, atau iterasi sebelumnya belum diukur.
                         <span class="block text-xs text-gray-500">Di bawah {{ $ambangLatih }} sampel, set validasi 20%-nya tidak sampai 10 baris sehingga keputusan menerima checkpoint tidak lagi bermakna.</span>
                     </span>
                 </label>
@@ -283,7 +285,7 @@
     {{-- Laporan kesiapan data latih, sebelum melatih apa pun --}}
     <div id="retrain-preview-panel" class="bg-white rounded-xl shadow-sm border border-gray-100 hidden">
         <div class="p-6 border-b border-gray-100">
-            <h2 class="text-lg font-semibold text-gray-900">Kesiapan Data Latih</h2>
+            <h2 class="text-lg font-semibold text-gray-900">Kesiapan Data Training</h2>
             <p class="mt-1 text-sm text-gray-600">
                 Komposisi data koreksi yang akan dikirim ke NLP API. Data yang timpang bisa
                 menghasilkan model yang hanya menebak kelas mayoritas.
@@ -305,7 +307,7 @@
                  data. Itu persis bagaimana putaran pertama ketahuan rusak, setelah
                  bobotnya terlanjur terpasang. --}}
             <p class="mt-2 text-xs text-gray-500">
-                <strong>Validasi</strong> adalah dasar keputusan menerima checkpoint; di bawah {{ $ambangValidasi }} baris, "tidak memburuk" berhenti berarti apa-apa. <strong>Delta</strong> nol berarti pengukuran tidak membedakan apa pun. <strong>T</strong> yang diwarisi berarti keyakinan model pada iterasi itu belum diukur ulang. <strong>Sidik jari kolam</strong> yang sama dua putaran berturut-turut berarti kolamnya tidak bertambah - keliru menurut protokol kolam.
+                <strong>Validasi</strong> adalah dasar keputusan menerima checkpoint; di bawah {{ $ambangValidasi }} baris, "tidak memburuk" berhenti berarti apa-apa. <strong>Delta</strong> nol berarti pengukuran tidak membedakan apa pun. <strong>T</strong> yang diwarisi berarti keyakinan model pada iterasi itu belum diukur ulang. <strong>Sidik jari kolam</strong> yang sama dua putaran berturut-turut berarti kolamnya tidak bertambah, dan itu keliru menurut protokol kolam.
                 {{-- Keterangan BATAL hanya muncul bila memang ada barisnya.
                      Legenda untuk keadaan yang tidak ada di layar membuat
                      pembaca mencarinya, lalu mengira ada yang terlewat. --}}
@@ -340,7 +342,15 @@
                                 <span class="block text-xs text-gray-400">durasi {{ $training->duration }}</span>
                             @endif
                         </td>
-                        <td class="px-6 py-3 font-medium text-gray-900 capitalize">{{ $training->model_type }}</td>
+                        <td class="px-6 py-3 font-medium text-gray-900">
+                            <span class="capitalize">{{ $training->model_type }}</span>
+                            @if(($pelatihanAktif[$training->model_type] ?? null) === $training->id)
+                                <span class="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800"
+                                      title="{{ $aktif['pasti'] ? 'Bobot ini yang sedang dipakai layanan (sidik jari kolam cocok).' : 'Tebakan: layanan tidak menyebut sidik jari bobotnya, jadi dianggap pelatihan tersimpan terakhir.' }}">
+                                    Aktif{{ $aktif['pasti'] ? '' : '?' }}
+                                </span>
+                            @endif
+                        </td>
                         <td class="px-6 py-3">
                             {{-- Gabungan ditandai tegas: putaran yang mencampur
                                  enam lembaga tidak bisa dilaporkan sebagai
@@ -374,7 +384,7 @@
                             @if($training->sidik_jari_kolam)
                                 <span class="font-mono text-xs text-gray-700">{{ $training->sidik_jari_kolam }}</span>
                                 @if(($sidikBerulang[$training->id] ?? false))
-                                    <span class="block text-xs text-amber-700 font-semibold">sama dengan putaran sebelumnya - kolam tidak bertambah</span>
+                                    <span class="block text-xs text-amber-700 font-semibold">sama dengan putaran sebelumnya, berarti kolam tidak bertambah</span>
                                 @endif
                             @else
                                 <span class="text-gray-400" title="Putaran ini berjalan sebelum sidik jari kolam dicatat">-</span>
@@ -453,7 +463,7 @@
                                      sehingga tidak ada seorang pun yang bisa
                                      menghitung ulang angka itu. Menampilkannya
                                      apa adanya mengundangnya masuk naskah. --}}
-                                <span class="text-red-700 font-semibold">Dibatalkan - tidak dapat direproduksi.</span>
+                                <span class="text-red-700 font-semibold">Dibatalkan karena tidak dapat direproduksi.</span>
                                 <span class="block text-xs text-red-600">
                                     {{ $training->alasan_batal ?? 'Angkanya tidak boleh dikutip; putaran ini perlu diulang.' }}
                                 </span>
@@ -476,21 +486,21 @@
                                      memburuk" secara teknis benar pada n=4. --}}
                                 @if($delta !== null)
                                     <span class="block text-xs {{ $delta > 0 ? 'text-green-700' : ($delta < 0 ? 'text-red-700' : 'text-amber-700 font-semibold') }}">
-                                        {{ sprintf('%+.4f', $delta) }}{{ $delta == 0.0 ? ' - pengukuran tidak membedakan apa pun' : '' }}
+                                        {{ sprintf('%+.4f', $delta) }}{{ $delta == 0.0 ? ' (pengukuran tidak membedakan apa pun)' : '' }}
                                     </span>
                                 @endif
 
                                 {{-- Titik berangkat. Membaca `trained_from_baseline`,
                                      BUKAN `baseline_swapped`: yang kedua hanya menyala
                                      ketika bobot ditukar, sehingga putaran yang memang
-                                     berangkat dari bobot dasar karena checkpoint-nya
+                                     berangkat dari base model karena checkpoint-nya
                                      belum ada tercatat false - kebalikan dari yang
                                      terjadi. Protokol kolam menuntut SELALU dari dasar,
                                      jadi yang tidak, ditandai. --}}
                                 @if($training->dari_bobot_dasar === false)
-                                    <span class="block text-xs text-amber-700">melanjutkan checkpoint sebelumnya - bukan dari bobot dasar</span>
+                                    <span class="block text-xs text-amber-700">melanjutkan checkpoint sebelumnya, bukan dari base model</span>
                                 @elseif($training->dari_bobot_dasar === true)
-                                    <span class="block text-xs text-gray-400">berangkat dari bobot dasar</span>
+                                    <span class="block text-xs text-gray-400">berangkat dari base model</span>
                                 @endif
 
                                 {{-- Suhu kalibrasi. Diwarisi berarti keyakinan pada
@@ -498,7 +508,7 @@
                                      dari bobot sebelumnya. --}}
                                 @if($kalibrasi)
                                     <span class="block text-xs {{ $kalibrasi['inherited'] || $kalibrasi['unknown'] ? 'text-amber-700' : 'text-gray-400' }}">
-                                        T = {{ rtrim(rtrim(number_format($kalibrasi['temperature'], 4, ',', ''), '0'), ',') }} - {{ $kalibrasi['label'] }}
+                                        T = {{ rtrim(rtrim(number_format($kalibrasi['temperature'], 4, ',', ''), '0'), ',') }} ({{ $kalibrasi['label'] }})
                                     </span>
                                 @endif
 
@@ -536,12 +546,12 @@
 
             {{-- Peringatan ini wajib ada di sini. Angka di bawah dihitung atas baris
                  yang persis sama dengan yang dikirim ke pelatihan, jadi kenaikannya
-                 sebagian berasal dari model menghafal data latihnya sendiri. Tanpa
+                 sebagian berasal dari model menghafal data training-nya sendiri. Tanpa
                  keterangan ini, grafiknya mudah dikira bukti perbaikan model. --}}
             <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 Angka di bawah dihitung <strong>atas data koreksi yang ikut dilatihkan</strong>,
-                jadi tidak boleh dikutip sebagai kinerja model - kenaikannya sebagian hanyalah
-                model menghafal data latihnya sendiri. Kinerja model yang sah diukur di
+                jadi tidak boleh dikutip sebagai kinerja model, karena kenaikannya sebagian hanyalah
+                model menghafal data training-nya sendiri. Kinerja model yang sah diukur di
                 <a href="{{ route('admin.evaluation.index') }}" class="font-semibold underline">halaman Evaluasi Model</a>,
                 atas golden dataset yang tidak pernah dilatihkan.
             </div>
@@ -617,8 +627,8 @@ document.addEventListener('DOMContentLoaded', function () {
             // Yang hilang hanya kemampuan menamai iterasi ini di riwayat.
             const setuju = confirm(
                 'Putaran ini akan tercatat TANPA lembaga asal.\n\n'
-                + 'Data latihnya sama saja (seluruh kolam), tetapi riwayat tidak bisa '
-                + 'menjawab "lembaga mana yang baru ditambahkan pada iterasi ini" - '
+                + 'Data training-nya sama saja (seluruh kolam), tetapi riwayat tidak bisa '
+                + 'menjawab "lembaga mana yang baru ditambahkan pada iterasi ini", '
                 + 'dan itu yang dipakai untuk menamai iterasi di naskah.\n\n'
                 + 'Lanjutkan tanpa lembaga asal?'
             );
@@ -796,7 +806,7 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             .finally(() => {
                 button.disabled = false;
-                button.textContent = 'Periksa Data Latih';
+                button.textContent = 'Periksa Data Training';
             });
     });
 });

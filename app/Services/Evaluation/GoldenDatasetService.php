@@ -517,7 +517,35 @@ class GoldenDatasetService
     /**
      * Berapa banyak baris data latih yang bertabrakan dengan golden dataset.
      *
-     * @return array{overlap: int, corrected_overlap: int, total_golden: int, examples: array}
+     * PENTING - laporan ini memuat DUA angka yang berbeda dan tidak boleh
+     * tertukar saat dikutip di naskah:
+     *
+     *   overlap         jumlah BARIS DATA LATIH yang teksnya cocok dengan
+     *                   golden dataset. Satu teks golden bisa muncul pada
+     *                   beberapa training_items - teks yang sama ikut pada
+     *                   lebih dari satu analisis, atau dikoreksi lebih dari
+     *                   sekali - sehingga angka ini BISA MELEBIHI total_golden.
+     *                   Ia menghitung sisi data latih, bukan sisi data uji.
+     *
+     *   golden_affected jumlah BARIS GOLDEN BERBEDA yang tersentuh oleh kolam
+     *                   KANDIDAT. Angka ini mendekati 100% secara wajar, sebab
+     *                   training_items memuat SETIAP baris hasil analisis dan
+     *                   golden dataset justru diambil dari analisis yang sama.
+     *                   Berada di kolam kandidat BUKAN berarti pernah dilatih.
+     *
+     *   corrected_overlap / corrected_golden_affected
+     *                   bagian yang berstatus is_corrected, yaitu satu-satunya
+     *                   yang benar-benar masuk muatan pelatihan lewat
+     *                   RetrainingService::correctedItems(). INILAH angka
+     *                   kebocoran yang sesungguhnya; nol berarti tidak ada
+     *                   baris uji yang pernah dilatihkan.
+     *
+     * Tanpa pemisahan ini, laporan bisa terbaca seolah "seluruh 300 baris uji
+     * bocor", padahal yang terjadi hanyalah baris uji ikut terdaftar sebagai
+     * kandidat dan tidak satu pun pernah dikoreksi sehingga tidak pernah
+     * dilatihkan.
+     *
+     * @return array{overlap: int, golden_affected: int, corrected_overlap: int, corrected_golden_affected: int, total_golden: int, examples: array}
      */
     public function leakageReport(?EvaluationDataset $dataset = null): array
     {
@@ -526,25 +554,47 @@ class GoldenDatasetService
             : $this->frozenHashes();
 
         if (empty($hashes)) {
-            return ['overlap' => 0, 'corrected_overlap' => 0, 'total_golden' => 0, 'examples' => []];
+            return [
+                'overlap' => 0,
+                'golden_affected' => 0,
+                'corrected_overlap' => 0,
+                'corrected_golden_affected' => 0,
+                'total_golden' => 0,
+                'examples' => [],
+            ];
         }
 
         $tumpang = 0;
         $tumpangTerkoreksi = 0;
         $contoh = [];
+        // Kunci hash golden yang tersentuh; dipakai agar satu teks golden yang
+        // muncul berkali-kali di training_items tetap dihitung satu baris uji.
+        $golderTersentuh = [];
+        $golderTersentuhTerkoreksi = [];
 
         TrainingItem::whereHas('textAnalysis')
             ->select(['id', 'text_content', 'is_corrected'])
-            ->chunk(500, function ($potongan) use ($hashes, &$tumpang, &$tumpangTerkoreksi, &$contoh) {
+            ->chunk(500, function ($potongan) use (
+                $hashes,
+                &$tumpang,
+                &$tumpangTerkoreksi,
+                &$contoh,
+                &$golderTersentuh,
+                &$golderTersentuhTerkoreksi
+            ) {
                 foreach ($potongan as $item) {
-                    if (! isset($hashes[TextFingerprint::hash((string) $item->text_content)])) {
+                    $sidik = TextFingerprint::hash((string) $item->text_content);
+
+                    if (! isset($hashes[$sidik])) {
                         continue;
                     }
 
                     $tumpang++;
+                    $golderTersentuh[$sidik] = true;
 
                     if ($item->is_corrected) {
                         $tumpangTerkoreksi++;
+                        $golderTersentuhTerkoreksi[$sidik] = true;
                     }
 
                     if (count($contoh) < 5) {
@@ -555,7 +605,9 @@ class GoldenDatasetService
 
         return [
             'overlap' => $tumpang,
+            'golden_affected' => count($golderTersentuh),
             'corrected_overlap' => $tumpangTerkoreksi,
+            'corrected_golden_affected' => count($golderTersentuhTerkoreksi),
             'total_golden' => count($hashes),
             'examples' => $contoh,
         ];

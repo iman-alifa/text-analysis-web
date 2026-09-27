@@ -8,7 +8,7 @@
         <h1 class="text-3xl font-bold text-gray-900">Evaluasi Model</h1>
         <p class="mt-1 text-sm text-gray-600 max-w-3xl">
             Golden dataset adalah kumpulan teks berlabel manusia yang tidak pernah ikut dilatih.
-            Hanya angka dari halaman ini yang layak dikutip sebagai kinerja model - metrik pada
+            Hanya angka dari halaman ini yang layak dikutip sebagai kinerja model. Metrik pada
             halaman Training dihitung atas data koreksi yang justru dilatihkan, jadi angkanya
             selalu menyanjung.
         </p>
@@ -48,23 +48,33 @@
 
     {{-- Kebocoran diperiksa lintas seluruh dataset beku, bukan hanya yang sedang dibuka:
          satu tabrakan di mana pun sudah cukup membuat angka hold-out patut diragukan. --}}
-    <div class="rounded-2xl border {{ $leakage['overlap'] > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white' }} p-5">
+    <div class="rounded-2xl border {{ $leakage['corrected_overlap'] > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white' }} p-5">
         <h2 class="text-sm font-semibold text-gray-900">Pemeriksaan kebocoran data</h2>
         @if($leakage['total_golden'] === 0)
             <p class="mt-1 text-sm text-gray-600">
                 Belum ada golden dataset beku bertipe <em>test</em>, jadi belum ada yang perlu dijaga.
             </p>
-        @elseif($leakage['overlap'] === 0)
+        @elseif($leakage['corrected_overlap'] === 0)
             <p class="mt-1 text-sm text-gray-700">
-                {{ $leakage['total_golden'] }} baris golden diperiksa terhadap seluruh data latih:
-                <strong class="text-emerald-700">tidak ada tumpang tindih</strong>.
+                {{ $leakage['total_golden'] }} baris golden diperiksa terhadap muatan pelatihan:
+                <strong class="text-emerald-700">tidak satu pun pernah dilatihkan</strong>.
             </p>
         @else
             <p class="mt-1 text-sm text-gray-700">
-                <strong>{{ $leakage['overlap'] }}</strong> baris data latih bertabrakan dengan golden dataset
-                ({{ $leakage['corrected_overlap'] }} sudah dikoreksi manusia). Baris itu otomatis disingkirkan
-                sebelum pelatihan, jadi hold-out tetap sah - yang berkurang jumlah sampel latih, bukan
-                keabsahan evaluasi.
+                <strong>{{ $leakage['corrected_golden_affected'] }}</strong> dari {{ $leakage['total_golden'] }}
+                baris golden pernah masuk muatan pelatihan lewat {{ $leakage['corrected_overlap'] }} entri
+                terkoreksi. Baris itu ditahan penjaga kebocoran sebelum pelatihan berikutnya, tetapi riwayat
+                pelatihan sebelumnya perlu diperiksa.
+            </p>
+        @endif
+
+        @if($leakage['total_golden'] > 0)
+            <p class="mt-2 text-xs text-gray-500">
+                Konteks: {{ $leakage['golden_affected'] }} dari {{ $leakage['total_golden'] }} baris golden terdaftar
+                di <em>training_items</em> sebagai kandidat, terbawa oleh {{ $leakage['overlap'] }} entri. Angka ini
+                wajar mendekati seluruh baris dan bukan kebocoran, karena <em>training_items</em> memuat setiap baris
+                hasil analisis sedangkan golden dataset memang disampel dari analisis yang sama. Yang dilatihkan
+                hanya baris berstatus terkoreksi.
             </p>
         @endif
     </div>
@@ -141,11 +151,11 @@
 
             <div class="mt-3 rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 space-y-1">
                 <p class="font-medium text-gray-700">Kolom yang dikenali</p>
-                <p><code>text</code> (atau teks/komentar) - wajib</p>
-                <p><code>label</code> (atau sentimen) - wajib, positif/netral/negatif</p>
-                <p><code>label_2</code> - label anotator kedua, untuk menghitung kappa</p>
-                <p><code>aspects</code> - dipisah titik koma</p>
-                <p><code>segment</code> - mis. nama lembaga, untuk rincian per segmen</p>
+                <p><code>text</code> (atau teks/komentar): wajib</p>
+                <p><code>label</code> (atau sentimen): wajib, positif/netral/negatif</p>
+                <p><code>label_2</code>: label anotator kedua, untuk menghitung kappa</p>
+                <p><code>aspects</code>: dipisah titik koma</p>
+                <p><code>segment</code>: mis. nama lembaga, untuk rincian per segmen</p>
             </div>
 
             <form action="{{ route('admin.evaluation.store') }}" method="POST" enctype="multipart/form-data" class="mt-4 space-y-3">
@@ -175,8 +185,8 @@
                     <label for="split" class="block text-xs font-medium text-gray-700">Jenis</label>
                     <select name="split" id="split"
                             class="mt-1 block w-full rounded-lg border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                        <option value="test">Hold-out test - angka untuk naskah</option>
-                        <option value="dev">Dev - boleh dilihat berulang saat menyetel</option>
+                        <option value="test">Hold-out test (angka untuk naskah)</option>
+                        <option value="dev">Dev (boleh dilihat berulang saat menyetel)</option>
                     </select>
                 </div>
 

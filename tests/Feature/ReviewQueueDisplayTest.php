@@ -49,20 +49,27 @@ class ReviewQueueDisplayTest extends TestCase
         ];
     }
 
-    public function test_tab_perlu_ditinjau_muncul_dengan_jumlahnya(): void
+    public function test_tab_tinjauan_dan_catatan_mutu_tidak_ditampilkan(): void
     {
+        // Dihapus dari bagian prediksi atas permintaan pemilik proyek
+        // (24 Sep 2026). Diuji dengan data yang DULU memunculkan ketiganya,
+        // supaya yang terbukti adalah penghapusannya, bukan sekadar datanya
+        // yang kosong.
         $analysis = $this->makeAnalysis([
             'total_analyzed' => 3,
+            'total_empty' => 2,
+            'total_truncated' => 1,
             'review_queue' => ['threshold' => 0.94, 'count' => 2, 'share' => 0.6667, 'indices' => [1, 2]],
         ], $this->predictions());
 
         $this->actingAs($analysis->user)
             ->get(route('analysis.show', $analysis->id))
             ->assertOk()
-            ->assertSee('Perlu Ditinjau (2)')
-            ->assertSee('di bawah 94%', false)
-             // peringatan agar antrean tidak dipakai mengukur akurasi
-            ->assertSee('jangan memakainya untuk mengukur akurasi', false);
+            ->assertDontSee('Perlu Ditinjau (2)')
+            ->assertDontSee('jangan memakainya untuk mengukur akurasi', false)
+            ->assertDontSee('Catatan mutu data')
+            // Filter sentimen biasa tetap ada.
+            ->assertSee('data-filter="positive"', false);
     }
 
     public function test_baris_antrean_ditandai_dengan_peringkatnya(): void
@@ -92,34 +99,6 @@ class ReviewQueueDisplayTest extends TestCase
             ->assertOk()
             ->assertSee('Tanpa model')
             ->assertSee('Tidak dinilai');
-    }
-
-    public function test_penghitung_mutu_hanya_muncul_kalau_tidak_nol(): void
-    {
-        $bersih = $this->makeAnalysis([
-            'total_empty' => 0,
-            'total_truncated' => 0,
-            'total_failed' => 0,
-        ], $this->predictions());
-
-        $this->actingAs($bersih->user)
-            ->get(route('analysis.show', $bersih->id))
-            ->assertOk()
-            ->assertDontSee('Catatan mutu data');
-
-        $bermasalah = $this->makeAnalysis([
-            'total_empty' => 2,
-            'total_truncated' => 1,
-            'total_failed' => 0,
-        ], $this->predictions());
-
-        $this->actingAs($bermasalah->user)
-            ->get(route('analysis.show', $bermasalah->id))
-            ->assertOk()
-            ->assertSee('Catatan mutu data')
-            ->assertSee('2 baris kosong')
-            ->assertSee('1 teks terpotong')
-            ->assertDontSee('baris gagal dinilai');
     }
 
     /**

@@ -126,6 +126,11 @@ return [
 
     'auto_retrain' => [
         'enabled' => (bool) env('ANALYSIS_AUTO_RETRAIN', true),
+
+        // Bawaan awal mode tunda (fase evaluasi kuesioner). Nilai yang berlaku
+        // disimpan di tabel app_settings dan diubah dari /admin/training;
+        // lihat RetrainDeferralService.
+        'defer' => (bool) env('ANALYSIS_RETRAIN_DEFER', false),
         'min_new_corrections' => (int) env('ANALYSIS_AUTO_RETRAIN_MIN', 10),
         'cooldown_hours' => (int) env('ANALYSIS_AUTO_RETRAIN_COOLDOWN', 6),
         'model_type' => env('ANALYSIS_AUTO_RETRAIN_MODEL', 'both'),
@@ -149,13 +154,20 @@ return [
     | Evaluasi hold-out
     |--------------------------------------------------------------------------
     |
-    | Evaluasi dijalankan MANUAL - tidak ada pemicu otomatis di mana pun.
-    | Kapan sebuah iterasi diukur adalah keputusan peneliti; sistem tidak boleh
-    | menambah titik ke kurva tanpa diminta.
+    | Evaluasi dijalankan OTOMATIS di akhir setiap putaran pelatihan ulang
+    | (AutoEvaluationService, dipanggil RetrainModel), atas test set beku yang
+    | sedang dipakai. Sempat manual atas permintaan pemilik proyek; dijadikan
+    | otomatis lagi (24 Sep 2026) supaya loop active learning berjalan penuh
+    | tanpa campur tangan: koreksi -> pelatihan -> pengukuran -> putaran
+    | berikutnya.
     |
-    | Yang perlu diingat: bobot lama tertimpa begitu checkpoint pelatihan ulang
-    | diterima, jadi iterasi yang belum diukur tidak bisa diukur belakangan.
-    | Ukur sebelum memicu pelatihan berikutnya.
+    | Mengapa di akhir PUTARAN, bukan setiap job: satu putaran melatih sentimen
+    | dan aspek sebagai dua job. Mengukur setelah job pertama berarti mengukur
+    | campuran bobot baru dan lama yang tidak cocok dengan iterasi mana pun.
+    |
+    | Tombol di /admin/evaluation dan `evaluation:run` tetap ada untuk
+    | pengukuran ulang manual. Matikan pemicu otomatis dengan
+    | ANALYSIS_AUTO_EVALUATE=false.
     |
     | `bootstrap_rounds` dan `bootstrap_seed` menentukan selang kepercayaan
     | macro-F1. Semainya tetap supaya angka di naskah bisa dihitung ulang;
@@ -164,6 +176,7 @@ return [
     */
 
     'evaluation' => [
+        'auto' => (bool) env('ANALYSIS_AUTO_EVALUATE', true),
         'bootstrap_rounds' => (int) env('ANALYSIS_EVAL_BOOTSTRAP', 1000),
         'bootstrap_seed' => (int) env('ANALYSIS_EVAL_SEED', 42),
     ],

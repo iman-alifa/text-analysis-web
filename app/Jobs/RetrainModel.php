@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Exceptions\RetrainBusyException;
 use App\Models\AnalysisLog;
 use App\Models\ModelTraining;
+use App\Services\AutoEvaluationService;
 use App\Services\NLPApiService;
 use App\Support\PoolFingerprint;
 use Exception;
@@ -14,6 +15,7 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Kirim data koreksi (active learning) ke endpoint retraining NLP API.
@@ -25,7 +27,13 @@ class RetrainModel implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public $timeout = 7200; // fine-tuning bisa berjam-jam untuk dataset besar
+    /**
+     * Fine-tuning di CPU VPS bisa mendekati satu jam per modul.
+     *
+     * Rantai: HTTP retrain (services.nlp_api.retrain_timeout, 6600) < nilai ini
+     * < retry_after koneksi antrean 'training' (7500).
+     */
+    public $timeout = 7200;
 
     public $tries = 1;      // jangan mengulang training yang mahal secara otomatis
 
@@ -37,9 +45,35 @@ class RetrainModel implements ShouldQueue
     {
         $this->training = $training;
         $this->trainingData = $trainingData;
+
+        // Antrean sendiri dengan worker sendiri, supaya pelatihan yang memakan
+        // puluhan menit tidak menahan analisis pengguna di belakangnya, dan
+        // retry_after-nya cukup panjang untuk pelatihan yang masih berjalan.
+        $this->onConnection(config('queue.training_connection', 'training'));
+        $this->onQueue('training');
     }
 
-    public function handle(NLPApiService $nlpService): void
+    public function handle(NLPApiService $nlpService, ?AutoEvaluationService $evaluasiOtomatis = null): void
+    {
+        try {
+            $this->latih($nlpService);
+        } finally {
+            // Dipanggil apa pun hasilnya, termasuk bila pelatihan melempar:
+            // job ini bisa saja yang terakhir dalam putaran, dan modul lain
+            // di putaran yang sama mungkin berhasil dan perlu diukur.
+            // Bobot aktif mungkin baru saja berganti; halaman publik jangan
+            // menunggu cache lima menit untuk mengetahuinya.
+            app(\App\Services\ActiveModelService::class)->lupakan();
+
+            try {
+                ($evaluasiOtomatis ?? app(AutoEvaluationService::class))->setelahPelatihan($this->training->fresh() ?? $this->training);
+            } catch (Throwable $e) {
+                Log::error('Evaluasi otomatis gagal diantrekan: '.$e->getMessage());
+            }
+        }
+    }
+
+    private function latih(NLPApiService $nlpService): void
     {
         $type = $this->training->model_type;
 
@@ -161,16 +195,10 @@ class RetrainModel implements ShouldQueue
     }
 
     /*
-     * Catatan: pelatihan ulang TIDAK memicu evaluasi hold-out.
-     *
-     * Sempat dibuat otomatis, lalu dilepas atas permintaan pemilik proyek:
-     * evaluasi di sini murni alat penyusunan skripsi, dan kapan sebuah iterasi
-     * diukur adalah keputusan penelitinya - bukan efek samping antrean.
-     *
-     * Konsekuensinya perlu diingat: bobot lama tertimpa begitu checkpoint
-     * diterima, jadi iterasi yang belum diukur tidak bisa diukur ulang
-     * belakangan. Jalankan `php artisan evaluation:run <dataset>` atau tombol
-     * di /admin/evaluation setelah setiap pelatihan yang ingin dicatat.
+     * Evaluasi hold-out dipicu di handle() lewat AutoEvaluationService, di
+     * akhir putaran (bukan di akhir setiap job). Sempat manual atas permintaan
+     * pemilik proyek, lalu dijadikan otomatis lagi (24 Sep 2026) supaya loop
+     * active learning berjalan tanpa campur tangan.
      */
 
     private function markFailed(string $message): void

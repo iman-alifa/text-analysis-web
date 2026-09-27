@@ -8,7 +8,7 @@
         <h1 class="mt-1 text-3xl font-bold text-gray-900">Ambil Sampel Golden Dataset</h1>
         <p class="mt-1 max-w-3xl text-sm text-gray-600">
             Mengambil sampel acak berstrata dari korpus yang sudah ada di sistem, untuk dianotasi
-            manusia. Hasilnya berupa berkas anotasi kosong - label diisi orang, bukan model.
+            manusia. Hasilnya berupa berkas anotasi kosong, dan labelnya diisi orang, bukan model.
         </p>
     </div>
 
@@ -32,7 +32,7 @@
         <ol class="mt-3 space-y-2 text-sm text-indigo-900">
             <li>
                 <strong>1. Acak, bukan berdasarkan keyakinan model.</strong>
-                Menggoda memakai baris berkeyakinan rendah sebagai test set - datanya sudah ada
+                Menggoda memakai baris berkeyakinan rendah sebagai test set, karena datanya sudah ada
                 dan tampak menantang. Tetapi sampel itu memilih justru kasus tersulit, sehingga
                 akurasinya jauh di bawah kinerja sebenarnya dan tidak bisa digeneralisasi.
                 Halaman ini karena itu <em>tidak menyediakan</em> pilihan tersebut.
@@ -44,7 +44,7 @@
             </li>
             <li>
                 <strong>3. Baris yang sudah dikoreksi dikecualikan otomatis.</strong>
-                Baris itu data latih; memasukkannya ke test set adalah kebocoran sejak awal.
+                Baris itu data training; memasukkannya ke test set adalah kebocoran sejak awal.
             </li>
             <li>
                 <strong>4. Berkas anotasi tidak memuat prediksi model.</strong>
@@ -57,7 +57,7 @@
     @if(empty($sumber))
         <div class="rounded-2xl border border-gray-200 bg-white p-10 text-center">
             <p class="text-sm text-gray-600">Belum ada analisis yang bisa dijadikan sumber sampel.</p>
-            <p class="mt-1 text-xs text-gray-500">Jalankan analisis atas korpus studi kasus lebih dulu.</p>
+            <p class="mt-1 text-xs text-gray-500">Jalankan analisis atas korpusnya lebih dulu.</p>
         </div>
     @else
     <form action="{{ route('admin.evaluation.sample') }}" method="POST" class="space-y-6">
@@ -137,7 +137,7 @@
                     <p class="mt-1 text-xs text-gray-500">
                         Penyebutnya adalah baris yang <strong>lolos penyaringan</strong> (unik, ada isinya,
                         cukup panjang, belum dikoreksi) &mdash; bukan jumlah baris mentah di berkas. Pada
-                        korpus studi kasus selisihnya 20,5%: 8.393 baris mentah menjadi 6.674 kandidat.
+                        korpus komentar YouTube selisihnya bisa lebih dari 20%, karena emotikon, duplikat, dan komentar pendek ikut tersaring.
                     </p>
                 </div>
 
@@ -164,7 +164,7 @@
                    id="margin-hidup"></p>
 
                 <p class="mt-2 text-xs text-gray-500">
-                    Margin selang kepercayaan Wilson pada akurasi 85%. Perhatikan bahwa margin
+                    Margin confidence interval Wilson pada akurasi 85%. Perhatikan bahwa margin
                     <strong>hanya bergantung pada n</strong>, bukan pada persentase korpus: 500 baris
                     memberi &plusmn;3,1 poin baik diambil dari korpus 5.000 maupun 50.000. Itu sebabnya
                     jumlah baris yang menentukan mutu evaluasi, sementara persentase hanya cara
@@ -179,7 +179,7 @@
                     <label for="stratify_by" class="block text-xs font-medium text-gray-700">Kolom pemisah</label>
                     <select name="stratify_by" id="stratify_by"
                             class="mt-1 block w-full rounded-lg border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                        <option value="">Tanpa kolom - distratifikasi per analisis</option>
+                        <option value="">Tanpa kolom (distratifikasi per analisis)</option>
                     </select>
                     <p class="mt-1 text-xs text-gray-500">
                         Isi dengan kolom yang memuat nama lembaga atau judul video. Daftarnya
@@ -211,7 +211,7 @@
                     <p class="mt-2 text-xs text-amber-700">
                         Biarkan 0 kecuali ada lembaga yang komentarnya sangat sedikit. Menaikkannya
                         membuat proporsi tidak lagi mengikuti korpus, sehingga angka keseluruhan
-                        menaksir rerata antar-lembaga alih-alih rerata korpus - dan itu harus
+                        menaksir rerata antar-lembaga alih-alih rerata korpus, dan itu harus
                         disebut di naskah.
                     </p>
                 </details>
@@ -221,7 +221,7 @@
         <div class="rounded-2xl border border-gray-200 bg-white p-5">
             <label for="name" class="block text-xs font-medium text-gray-700">Nama golden dataset</label>
             <input type="text" name="name" id="name" required
-                   value="{{ old('name', 'Hold-out studi kasus') }}"
+                   value="{{ old('name', 'Hold-out test set') }}"
                    class="mt-1 block w-full max-w-md rounded-lg border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
 
             <button type="submit"
@@ -335,7 +335,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const kosong = document.createElement('option');
         kosong.value = '';
-        kosong.textContent = 'Tanpa kolom - distratifikasi per analisis';
+        kosong.textContent = 'Tanpa kolom (distratifikasi per analisis)';
         pilihan.appendChild(kosong);
 
         (bersama || []).forEach(function (kolom) {

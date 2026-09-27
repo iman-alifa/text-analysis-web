@@ -6,18 +6,16 @@ use App\Services\AutoRetrainService;
 use Illuminate\Console\Command;
 
 /**
- * Pemeriksaan manual, untuk keperluan operasional.
+ * Mengevaluasi pemicu pelatihan ulang tanpa menunggu koreksi berikutnya.
  *
- * Pelatihan ulang otomatis dipicu saat pengguna menyimpan koreksi; itu jalur
- * satu-satunya yang dibutuhkan pemasangan biasa, dan tidak menuntut cron atau
- * penjadwal apa pun. Perintah ini hanya menutup satu celah sempit: koreksi
- * yang sudah melewati ambang tetapi tertahan jeda, lalu tidak ada lagi yang
- * mengoreksi sesudahnya - tanpa perintah ini, koreksi itu menganggur sampai
- * ada koreksi berikutnya.
+ * Pelatihan ulang otomatis dipicu saat pengguna menyimpan koreksi. Perintah
+ * ini menutup celah koreksi yang sudah melewati ambang tetapi tertahan jeda,
+ * lalu tidak ada lagi yang mengoreksi sesudahnya.
  *
- * Bisa dijadwalkan bila memang diinginkan, tetapi sengaja tidak dipasang di
- * routes/console.php supaya aplikasi tidak diam-diam bergantung pada penjadwal
- * yang mungkin tidak pernah dijalankan.
+ * Dijadwalkan tiap jam di routes/console.php (dulu sengaja tidak; dibalik
+ * 27 Sep setelah celah itu benar-benar terjadi di server). Tanpa cron
+ * `schedule:run`, aplikasi tetap berjalan seperti sebelumnya: pemicu hanya
+ * dievaluasi saat koreksi disimpan.
  */
 class AutoRetrainCommand extends Command
 {

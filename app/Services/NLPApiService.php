@@ -2,8 +2,12 @@
 
 namespace App\Services;
 
+use App\Exceptions\NlpBusyException;
 use App\Exceptions\RetrainBusyException;
 use Exception;
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -18,11 +22,89 @@ class NLPApiService
 
     private int $batchSize;
 
+    private string $apiKey;
+
     public function __construct()
     {
         $this->apiUrl = config('services.nlp_api.url');
         $this->timeout = config('services.nlp_api.timeout', 300);
         $this->batchSize = config('services.nlp_api.batch_size', 50);
+        $this->apiKey = (string) config('services.nlp_api.key', '');
+    }
+
+    /**
+     * Klien HTTP untuk layanan NLP, lengkap dengan kunci API.
+     *
+     * Dibuat terpusat dan BUKAN ditempel di dua belas tempat pemanggilan.
+     * Alasannya kegagalan-tertutup: satu pemanggilan yang terlupa headernya
+     * akan gagal 401 pada saat dijalankan, bukan saat ditinjau - dan di kelas
+     * ini sudah pernah ada perbaikan yang terlewat di sebagian jalur
+     * (`predefined_aspects` dijatuhkan di dua tempat sekaligus).
+     *
+     * Kunci kosong berarti layanan NLP berjalan tanpa autentikasi (hanya sah
+     * untuk pengembangan lokal); header tidak dikirim dan perilakunya sama
+     * seperti sebelumnya.
+     */
+    private function http(?int $timeout = null)
+    {
+        $klien = Http::timeout($timeout ?? $this->timeout);
+
+        return $this->apiKey === ''
+            ? $klien
+            : $klien->withHeaders(['X-API-Key' => $this->apiKey]);
+    }
+
+    /**
+     * Kirim permintaan ANALISIS ke layanan NLP.
+     *
+     * Satu jalur untuk keempat endpoint analisis, supaya aturan "sedang
+     * melatih" tidak terlewat di salah satunya. Bila layanan membalas 503
+     * dengan `Retry-After` (model yang dibutuhkan sedang dilatih ulang), HTTP
+     * TIDAK diulang - mengulang dalam hitungan detik hanya menghasilkan 503
+     * lagi - dan NlpBusyException dilempar supaya job melepas dirinya kembali
+     * ke antrean dengan jeda sebesar itu.
+     *
+     * 503 tanpa `Retry-After` tetap berarti "layanan belum siap" dan diulang
+     * seperti galat lain.
+     *
+     * Permintaan yang KEHABISAN WAKTU juga tidak diulang. Layanan tidak
+     * membatalkan handler ketika klien memutus (terukur dengan uvicorn
+     * sungguhan), jadi perhitungan pertama tetap berjalan; mengirim ulang
+     * berarti dua pemodelan topik serentak di 3 vCPU, masing-masing makin
+     * lambat, dan yang kedua pun kehabisan waktu. Yang diulang hanya galat
+     * yang memang belum sampai dikerjakan: koneksi ditolak/terputus dan 5xx.
+     */
+    private function kirimAnalisis(string $jalur, array $payload, int $timeout, int $kali, int $jedaMs): Response
+    {
+        try {
+            return $this->http($timeout)
+                ->retry(
+                    $kali,
+                    $jedaMs,
+                    fn ($e) => ! ($e instanceof RequestException && NlpBusyException::cocok($e->response))
+                        && ! self::kehabisanWaktu($e)
+                )
+                ->post("{$this->apiUrl}{$jalur}", $payload);
+        } catch (RequestException $e) {
+            if (NlpBusyException::cocok($e->response)) {
+                throw NlpBusyException::dariRespons($e->response);
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * Apakah galat ini batas waktu klien habis (cURL 28), bukan koneksi gagal.
+     *
+     * Keduanya sama-sama ConnectionException di Laravel, tetapi artinya
+     * berlawanan: koneksi yang gagal berarti layanan belum mengerjakan apa pun
+     * (aman diulang), sedangkan batas waktu berarti layanan MASIH mengerjakan.
+     */
+    public static function kehabisanWaktu(\Throwable $e): bool
+    {
+        return $e instanceof ConnectionException
+            && preg_match('/cURL error 28|timed out|timeout/i', $e->getMessage()) === 1;
     }
 
     /**
@@ -47,10 +129,10 @@ class NLPApiService
      * Mengembalikan null bila layanan tidak bisa dihubungi, supaya pemanggil
      * bisa membedakan "tidak siap" dari "tidak tahu".
      */
-    public function health(): ?array
+    public function health(int $timeout = 10): ?array
     {
         try {
-            $response = Http::timeout(10)->get("{$this->apiUrl}/health");
+            $response = $this->http($timeout)->get("{$this->apiUrl}/health");
 
             return $response->successful() ? $response->json() : null;
 
@@ -59,6 +141,44 @@ class NLPApiService
 
             return null;
         }
+    }
+
+    /**
+     * Apakah kunci API diterima layanan?
+     *
+     * `/health` sengaja terbuka tanpa kunci karena platform hosting memakainya
+     * sebagai healthcheck. Akibatnya `/health` yang membalas 200 TIDAK membuktikan
+     * apa pun soal kunci: dengan kunci yang salah pun ia tetap hijau, sementara
+     * setiap analisis ditolak 401. Pemeriksaan ini memanggil endpoint yang
+     * memang berkunci.
+     *
+     * `/api/normalize/aspects` dipilih karena paling ringan: hanya stemmer,
+     * tidak memuat model, dan tidak mengubah apa pun di layanan.
+     *
+     * @return array{ok: bool, status: int|null, pesan: string}
+     */
+    public function checkApiKey(): array
+    {
+        try {
+            $response = $this->http(30)
+                ->post("{$this->apiUrl}/api/normalize/aspects", ['aspects' => ['pelayanan']]);
+        } catch (Exception $e) {
+            return ['ok' => false, 'status' => null, 'pesan' => 'Layanan tidak terjangkau: '.$e->getMessage()];
+        }
+
+        $status = $response->status();
+
+        return match (true) {
+            $response->successful() => ['ok' => true, 'status' => $status, 'pesan' => 'Kunci diterima.'],
+            in_array($status, [401, 403], true) => [
+                'ok' => false,
+                'status' => $status,
+                'pesan' => $this->apiKey === ''
+                    ? 'Layanan meminta kunci, tetapi NLP_API_KEY kosong.'
+                    : 'Kunci ditolak. NLP_API_KEY harus sama persis dengan API_KEY di layanan NLP.',
+            ],
+            default => ['ok' => false, 'status' => $status, 'pesan' => "Layanan membalas HTTP {$status}."],
+        };
     }
 
     /**
@@ -102,7 +222,7 @@ class NLPApiService
         }
 
         try {
-            $response = Http::timeout(60)
+            $response = $this->http(60)
                 ->post("{$this->apiUrl}/api/normalize/aspects", ['aspects' => $aspects]);
 
             if (! $response->successful()) {
@@ -124,7 +244,7 @@ class NLPApiService
     public function warmUp(): bool
     {
         try {
-            $response = Http::timeout($this->timeout)->post("{$this->apiUrl}/api/warmup");
+            $response = $this->http($this->timeout)->post("{$this->apiUrl}/api/warmup");
 
             if (! $response->successful()) {
                 Log::warning('Pemanasan model NLP gagal: '.$response->status());
@@ -151,7 +271,7 @@ class NLPApiService
     public function testConnection(): array
     {
         try {
-            $response = Http::timeout(10)->get("{$this->apiUrl}/health");
+            $response = $this->http(10)->get("{$this->apiUrl}/health");
 
             if ($response->successful()) {
                 return [
@@ -196,7 +316,7 @@ class NLPApiService
                 $payload['task'] = $task;
             }
 
-            $response = Http::timeout($this->timeout)
+            $response = $this->http($this->timeout)
                 ->post("{$this->apiUrl}/api/preprocess", $payload);
 
             if ($response->successful()) {
@@ -213,6 +333,27 @@ class NLPApiService
     /**
      * Analisis Sentimen dengan batch processing
      */
+    /**
+     * Salinan layanan yang MENOLAK hasil parsial: batch pertama yang gagal
+     * langsung menggagalkan seluruh permintaan.
+     *
+     * Analisis pengguna sengaja memaafkan batch yang gagal (dilaporkan lewat
+     * `failed_batches`), tetapi evaluasi hold-out tidak boleh: baris dari batch
+     * yang gagal terbaca sebagai "tidak ada aspek" atau hilang, dan metrik yang
+     * dihitung darinya salah tanpa jejak apa pun. Berhenti di batch pertama
+     * juga membebaskan worker, yang dipakai bersama analisis pengguna, alih-alih
+     * menunggu sisa batch dari pekerjaan yang toh akan ditolak.
+     */
+    public function utuh(): static
+    {
+        $salinan = clone $this;
+        $salinan->wajibUtuh = true;
+
+        return $salinan;
+    }
+
+    private bool $wajibUtuh = false;
+
     public function analyzeSentiment(array $texts, array $config = [], $progressCallback = null): array
     {
         try {
@@ -230,12 +371,10 @@ class NLPApiService
 
     private function executeSentimentAnalysis(array $texts, array $config): array
     {
-        $response = Http::timeout($this->timeout)
-            ->retry(3, 1000)
-            ->post("{$this->apiUrl}/api/analyze/sentiment", [
-                'texts' => $texts,
-                'preprocessing_config' => $config,
-            ]);
+        $response = $this->kirimAnalisis('/api/analyze/sentiment', [
+            'texts' => $texts,
+            'preprocessing_config' => $config,
+        ], $this->timeout, 3, 1000);
 
         if ($response->successful()) {
             $result = $response->json();
@@ -292,10 +431,20 @@ class NLPApiService
 
                 usleep(100000);
 
+            } catch (NlpBusyException $e) {
+                // Bukan batch yang gagal: model sedang dilatih. Seluruh job
+                // dilepas dan diulang nanti, bukan menyelesaikan analisis
+                // dengan batch yang bolong.
+                throw $e;
             } catch (Exception $e) {
                 // Satu batch gagal tidak boleh membatalkan seluruh analisis.
                 // Batch yang gagal dicatat dan dilaporkan lewat metrics.
                 Log::error("Batch {$batchNumber} failed: ".$e->getMessage());
+
+                if ($this->wajibUtuh) {
+                    throw new Exception("Batch sentimen {$batchNumber} dari {$totalBatches} gagal: ".$e->getMessage(), 0, $e);
+                }
+
                 $failedBatches[] = [
                     'batch' => $batchNumber,
                     'texts' => count($batch),
@@ -522,9 +671,7 @@ class NLPApiService
             $payload['predefined_aspects'] = $predefinedAspects;
         }
 
-        $response = Http::timeout($this->timeout)
-            ->retry(3, 1000)
-            ->post("{$this->apiUrl}/api/analyze/aspect", $payload);
+        $response = $this->kirimAnalisis('/api/analyze/aspect', $payload, $this->timeout, 3, 1000);
 
         if ($response->successful()) {
             $result = $response->json();
@@ -678,8 +825,15 @@ class NLPApiService
 
                 usleep(100000);
 
+            } catch (NlpBusyException $e) {
+                throw $e;
             } catch (Exception $e) {
                 Log::error("Batch {$batchNumber} failed: ".$e->getMessage());
+
+                if ($this->wajibUtuh) {
+                    throw new Exception("Batch aspek {$batchNumber} dari {$totalBatches} gagal: ".$e->getMessage(), 0, $e);
+                }
+
                 $failedBatches[] = [
                     'batch' => $batchNumber,
                     'texts' => count($batch),
@@ -764,13 +918,13 @@ class NLPApiService
     public function analyzeTopic(array $texts, array $config = [], int $numTopics = 5): array
     {
         try {
-            $response = Http::timeout($this->timeout * 2)
-                ->retry(2, 2000)
-                ->post("{$this->apiUrl}/api/analyze/topic", [
-                    'texts' => $texts,
-                    'preprocessing_config' => $config,
-                    'num_topics' => $numTopics,
-                ]);
+            // Model topik tidak dilatih lewat API, jadi layanan tidak pernah
+            // menolak jalur ini - tetap lewat kirimAnalisis demi satu aturan.
+            $response = $this->kirimAnalisis('/api/analyze/topic', [
+                'texts' => $texts,
+                'preprocessing_config' => $config,
+                'num_topics' => $numTopics,
+            ], (int) config('services.nlp_api.topic_timeout', 2400), 2, 2000);
 
             if ($response->successful()) {
                 $result = $response->json();
@@ -893,7 +1047,7 @@ class NLPApiService
      */
     public function retrainPreview(string $modelType, array $trainingData): array
     {
-        $response = Http::timeout($this->timeout)
+        $response = $this->http($this->timeout)
             ->post("{$this->apiUrl}/api/retrain/preview", [
                 'model_type' => $modelType,
                 'training_data' => array_values($trainingData),
@@ -926,8 +1080,11 @@ class NLPApiService
             'epochs' => $epochs,
         ]);
 
-        // Fine-tuning jauh lebih lama dari inference, jadi timeout digandakan.
-        $response = Http::timeout($this->timeout * 2)
+        // Timeout sendiri, bukan kelipatan timeout analisis: lihat
+        // services.nlp_api.retrain_timeout. Klien yang menyerah lebih dulu
+        // tidak menghentikan pelatihan di layanan, hanya membuat catatannya
+        // salah.
+        $response = $this->http((int) config('services.nlp_api.retrain_timeout', 6600))
             ->post("{$this->apiUrl}/api/retrain/{$type}", [
                 'training_data' => array_values($trainingData),
                 'epochs' => $epochs,
@@ -982,7 +1139,7 @@ class NLPApiService
         }
 
         try {
-            $response = Http::timeout($this->timeout)
+            $response = $this->http($this->timeout)
                 ->post("{$this->apiUrl}/api/analyze/association", [
                     'document_aspects' => array_values($documentAspects),
                     'document_topics' => array_values($documentTopics),
@@ -1027,9 +1184,7 @@ class NLPApiService
             $payload['predefined_aspects'] = $predefinedAspects;
         }
 
-        $response = Http::timeout($this->timeout * 2)
-            ->retry(2, 2000)
-            ->post("{$this->apiUrl}/api/analyze/combined", $payload);
+        $response = $this->kirimAnalisis('/api/analyze/combined', $payload, $this->timeout * 2, 2, 2000);
 
         if ($response->successful()) {
             $result = $response->json();

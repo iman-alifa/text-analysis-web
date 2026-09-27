@@ -1,2 +1,14 @@
+# Halaman depan dan pedoman boleh diindeks; sisanya adalah area kerja pengguna
+# yang toh menuntut login, jadi tidak ada gunanya dirayapi.
 User-agent: *
-Disallow:
+Allow: /$
+Allow: /panduan
+
+Disallow: /dashboard
+Disallow: /analysis
+Disallow: /admin
+Disallow: /youtube
+Disallow: /profile
+Disallow: /login
+Disallow: /register
+Disallow: /password

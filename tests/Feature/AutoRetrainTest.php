@@ -296,6 +296,45 @@ class AutoRetrainTest extends TestCase
         Queue::assertPushed(RetrainModel::class);
     }
 
+    public function test_perintah_dijadwalkan_tiap_jam(): void
+    {
+        // Pemicu hanya dievaluasi saat koreksi disimpan. Tanpa penjadwal,
+        // koreksi yang tertahan jeda menganggur sampai ada yang menyimpan lagi -
+        // di server 24 Sep itu tidak pernah terjadi, dan 36 koreksi tertinggal.
+        $jadwal = collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())
+            ->filter(fn ($event) => str_contains((string) $event->command, 'analysis:auto-retrain'));
+
+        $this->assertCount(1, $jadwal);
+        $this->assertSame('0 * * * *', $jadwal->first()->expression);
+    }
+
+    public function test_perintah_memicu_setelah_jeda_habis_tanpa_koreksi_baru(): void
+    {
+        // Koreksi masuk saat jeda masih berlaku: penyimpanan itu tidak memicu.
+        Queue::fake();
+        $analysis = $this->analysis();
+        $this->siapkanBarisLatih($analysis);
+
+        ModelTraining::create([
+            'model_type' => 'sentiment',
+            'status' => 'completed',
+            'total_samples' => 50,
+            'epochs' => 3,
+            'learning_rate' => 0.00002,
+        ]);
+
+        $this->travel(1)->minutes();
+        $this->koreksi($analysis, 60);
+        $this->assertFalse(app(AutoRetrainService::class)->run()['triggered']);
+
+        // Tujuh jam kemudian tidak ada yang menyimpan apa pun. Penjadwal yang
+        // menjalankan perintah inilah yang menutup putarannya.
+        $this->travel(7)->hours();
+        $this->artisan('analysis:auto-retrain')->assertSuccessful();
+
+        Queue::assertPushed(RetrainModel::class);
+    }
+
     public function test_dry_run_tidak_mengantrekan_apa_pun(): void
     {
         Queue::fake();

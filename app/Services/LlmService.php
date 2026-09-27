@@ -25,11 +25,19 @@ class LlmService
      * prompt berubah, supaya narasi lama bisa dibedakan dari yang baru ketika
      * hasilnya dikutip di naskah.
      */
-    public const PROMPT_VERSION = 2;
+    public const PROMPT_VERSION = 3;
 
     private const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
     private string $usedModel = '';
+
+    /**
+     * Dipatok versinya, bukan alias -latest: narasi yang dikutip di naskah harus
+     * bisa direproduksi. Diuji 24 Sep 2026 dengan kunci proyek: 3.5-flash dan
+     * 3.6-flash membalas 200; 2.5-flash dan seluruh 1.5 sudah 404 ("no longer
+     * available to new users").
+     */
+    public const MODEL_BAWAAN = 'gemini-3.5-flash';
 
     public function isConfigured(): bool
     {
@@ -41,9 +49,23 @@ class LlmService
         if ($this->usedModel) {
             return $this->usedModel;
         }
-        $models = explode(',', (string) config('services.gemini.model', 'gemini-3.5-flash'));
 
-        return trim($models[0]);
+        return $this->daftarModel()[0];
+    }
+
+    /**
+     * Kandidat model dari GEMINI_MODEL, berurutan, tanpa entri kosong.
+     *
+     * @return list<string>
+     */
+    private function daftarModel(): array
+    {
+        $models = array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) config('services.gemini.model', self::MODEL_BAWAAN))
+        )));
+
+        return $models ?: [self::MODEL_BAWAAN];
     }
 
     /**
@@ -88,10 +110,12 @@ class LlmService
             throw new LlmException('GEMINI_API_KEY belum diisi pada .env.');
         }
 
-        $models = array_map('trim', explode(',', (string) config('services.gemini.model', 'gemini-3.5-flash')));
+        $models = $this->daftarModel();
         $response = null;
-        $lastStatus = 500;
-        $lastModel = $models[0];
+
+        // Hasil tiap model: kode HTTP, atau 0 bila koneksi gagal / habis waktu.
+        // Dipakai memilih pesan yang paling berguna bila SEMUANYA gagal.
+        $kegagalan = [];
 
         $payload = [
             'contents' => [
@@ -112,9 +136,6 @@ class LlmService
         }
 
         foreach ($models as $modelName) {
-            $url = self::BASE_URL.$modelName.':generateContent';
-            $lastModel = $modelName;
-
             try {
                 $response = Http::timeout((int) config('services.gemini.timeout', 45))
                     ->retry(
@@ -129,28 +150,43 @@ class LlmService
                             || ($e instanceof \Illuminate\Http\Client\RequestException && $e->response->status() >= 500),
                         throw: false
                     )
-                    ->withHeaders(['Content-Type' => 'application/json'])
-                    ->post($url.'?key='.config('services.gemini.key'), $payload);
+                    // Kunci lewat header, BUKAN ?key= di URL. Pesan galat koneksi
+                    // Laravel memuat URL lengkap, sehingga kunci di URL ikut
+                    // tertulis ke storage/logs setiap kali Gemini tidak terjangkau.
+                    ->withHeaders([
+                        'Content-Type' => 'application/json',
+                        'x-goog-api-key' => (string) config('services.gemini.key'),
+                    ])
+                    ->post(self::BASE_URL.$modelName.':generateContent', $payload);
 
                 if ($response->successful()) {
                     $this->usedModel = $modelName;
                     break;
                 }
 
-                $lastStatus = $response->status();
-                Log::warning("Gemini (model {$modelName}) membalas {$lastStatus}: ".$response->body());
+                $kegagalan[$modelName] = $response->status();
+
+                if ($response->status() === 404) {
+                    // Model pensiun atau tidak tersedia untuk kunci ini. Bukan
+                    // gangguan sesaat: namanya perlu dibuang dari GEMINI_MODEL.
+                    Log::warning("Gemini: model {$modelName} tidak tersedia (404). Hapus dari GEMINI_MODEL. "
+                        .mb_substr((string) $response->json('error.message'), 0, 200));
+                } else {
+                    Log::warning("Gemini (model {$modelName}) membalas {$response->status()}: ".mb_substr($response->body(), 0, 500));
+                }
             } catch (\Throwable $e) {
                 // Direset supaya percobaan model sebelumnya yang gagal tidak
                 // dibaca seolah masih berlaku kalau model TERAKHIR justru
                 // gagal lewat exception (bukan respons HTTP).
                 $response = null;
+                $kegagalan[$modelName] = 0;
                 Log::error("Gemini (model {$modelName}) tidak dapat dihubungi: ".$e->getMessage());
             }
         }
 
         if (! $response || $response->failed()) {
-            Log::error('Semua model Gemini gagal memberikan respons yang valid.');
-            throw new LlmException($this->pesanKegagalan($lastStatus, $lastModel));
+            Log::error('Semua model Gemini gagal: '.json_encode($kegagalan));
+            throw new LlmException($this->pesanKegagalan($kegagalan));
         }
 
         $text = $response->json('candidates.0.content.parts.0.text');
@@ -172,6 +208,36 @@ class LlmService
         }
 
         return $decoded;
+    }
+
+    /**
+     * Coba setiap model di GEMINI_MODEL dengan permintaan terkecil.
+     *
+     * Dipakai `deploy:check`. Daftar model dari API tidak cukup sebagai bukti:
+     * gemini-2.5-flash masih tercantum di sana tetapi generateContent-nya
+     * membalas 404 "no longer available to new users".
+     *
+     * @return array<string, int> model => kode HTTP (0 = tidak terjangkau)
+     */
+    public function periksaModel(): array
+    {
+        $hasil = [];
+
+        foreach ($this->daftarModel() as $model) {
+            try {
+                $hasil[$model] = Http::timeout(30)
+                    ->withHeaders(['x-goog-api-key' => (string) config('services.gemini.key')])
+                    ->post(self::BASE_URL.$model.':generateContent', [
+                        'contents' => [['parts' => [['text' => 'Balas: ok']]]],
+                        'generationConfig' => ['maxOutputTokens' => 5],
+                    ])
+                    ->status();
+            } catch (\Throwable) {
+                $hasil[$model] = 0;
+            }
+        }
+
+        return $hasil;
     }
 
     /**
@@ -276,14 +342,29 @@ class LlmService
         return $mapped;
     }
 
-    private function pesanKegagalan(int $status, ?string $model = null): string
+    /**
+     * Pesan untuk pengguna saat SEMUA model gagal.
+     *
+     * Dulu pesannya diambil dari model TERAKHIR yang dicoba. Dengan
+     * GEMINI_MODEL berisi cadangan yang sudah pensiun, kegagalan sesaat model
+     * utama (sibuk/timeout) tampil sebagai "Model gemini-1.5-pro tidak tersedia"
+     * - menyesatkan, karena penyebab sebenarnya layanan yang sedang sibuk.
+     *
+     * Urutan prioritas: kuota habis > layanan sibuk/tak terjangkau > permintaan
+     * ditolak > model tidak tersedia (hanya bila SEMUA kandidat 404).
+     *
+     * @param  array<string, int>  $kegagalan  model => kode HTTP (0 = koneksi gagal)
+     */
+    private function pesanKegagalan(array $kegagalan): string
     {
+        $kode = array_values($kegagalan);
+
         return match (true) {
-            $status === 429 => 'Kuota AI harian sudah habis. Coba lagi besok atau gunakan API key lain.',
-            $status === 400 => 'Permintaan ke AI ditolak. Periksa GEMINI_API_KEY dan nama model.',
-            $status === 404 => 'Model AI "'.($model ?? $this->model()).'" tidak tersedia untuk API key ini.',
-            $status >= 500 => 'Layanan AI sedang bermasalah. Coba lagi beberapa menit lagi.',
-            default => 'Permintaan ke AI gagal (HTTP '.$status.').',
+            in_array(429, $kode, true) => 'Kuota AI harian sudah habis. Coba lagi besok atau gunakan API key lain.',
+            (bool) array_filter($kode, fn ($k) => $k === 0 || $k >= 500) => 'Layanan AI sedang sibuk atau tidak terjangkau. Coba lagi beberapa menit lagi.',
+            in_array(400, $kode, true) || in_array(403, $kode, true) => 'Permintaan ke AI ditolak. Periksa GEMINI_API_KEY.',
+            $kode !== [] && count(array_filter($kode, fn ($k) => $k === 404)) === count($kode) => 'Model AI ('.implode(', ', array_keys($kegagalan)).') tidak tersedia untuk API key ini. Perbarui GEMINI_MODEL.',
+            default => 'Permintaan ke AI gagal (HTTP '.implode(', ', $kode).').',
         };
     }
 }

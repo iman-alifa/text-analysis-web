@@ -170,6 +170,9 @@ class AnalysisInterpretationService
 
         $prompt = $this->prompt($analysis, $fakta);
 
+        // Empat medan, bukan dua. Narasi saja menjawab "apa isinya" tetapi
+        // meninggalkan pembaca non-teknis pada pertanyaan yang sebenarnya:
+        // kenapa angka ini perlu dilihat, dan besok harus berbuat apa.
         $schema = [
             'type' => 'object',
             'properties' => [
@@ -178,8 +181,13 @@ class AnalysisInterpretationService
                     'type' => 'array',
                     'items' => ['type' => 'string'],
                 ],
+                'why' => ['type' => 'string'],
+                'how' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string'],
+                ],
             ],
-            'required' => ['narrative', 'highlights'],
+            'required' => ['narrative', 'highlights', 'why', 'how'],
         ];
 
         $hasil = $this->llm->generate($prompt, $schema, systemInstruction: $this->systemInstruction($section));
@@ -190,15 +198,17 @@ class AnalysisInterpretationService
             throw new LlmException('AI mengembalikan narasi kosong. Coba bangkitkan ulang.');
         }
 
-        $highlights = array_values(array_filter(array_map(
+        $bersihkan = fn ($daftar) => array_values(array_filter(array_map(
             fn ($baris) => trim((string) $baris),
-            $hasil['highlights'] ?? []
+            is_array($daftar) ? $daftar : []
         )));
 
         return array_merge($this->llm->provenance(), [
             'type' => 'narrative',
             'narrative' => $narrative,
-            'highlights' => array_slice($highlights, 0, 4),
+            'highlights' => array_slice($bersihkan($hasil['highlights'] ?? []), 0, 4),
+            'why' => trim((string) ($hasil['why'] ?? '')),
+            'how' => array_slice($bersihkan($hasil['how'] ?? []), 0, 4),
         ]);
     }
 
@@ -460,6 +470,46 @@ class AnalysisInterpretationService
      * perilaku ketika ditaruh di systemInstruction daripada ditumpuk jadi
      * satu blok teks bersama data yang berubah-ubah tiap permintaan.
      */
+    /**
+     * Apa gunanya satu bagian analisis, dalam kalimat yang bisa dipakai model
+     * sebagai bahan - bukan disalin mentah.
+     *
+     * Ditulis di sisi kode, bukan diserahkan sepenuhnya ke model, karena
+     * kegunaan sebuah metode analisis adalah pengetahuan tetap: ia tidak
+     * berubah mengikuti data, dan membiarkan model mengarangnya sendiri tiap
+     * kali membuka peluang penjelasan yang keliru tentang alat yang dipakai.
+     */
+    private function kegunaanBagian(string $section): string
+    {
+        return match ($section) {
+            'sentiment' => 'Analisis sentimen memberi tahu arah opini secara keseluruhan tanpa harus '
+                .'membaca semua teks satu per satu. Gunanya: mengukur penerimaan publik atas suatu '
+                .'isu, menemukan seberapa terbelah pendapat yang ada, dan menjadi angka dasar yang '
+                .'bisa dibandingkan lagi setelah ada tindakan atau perubahan kebijakan.',
+            'aspect' => 'Ekstraksi aspek menjawab pertanyaan yang tidak bisa dijawab sentimen '
+                .'keseluruhan: bukan sekadar "orang senang atau tidak", melainkan HAL APA yang mereka '
+                .'keluhkan atau puji. Gunanya: mengarahkan perbaikan ke sasaran yang tepat, memisahkan '
+                .'keluhan yang banyak disebut dari yang hanya muncul sekali, dan memantau apakah aspek '
+                .'bermasalah membaik setelah ditangani.',
+            'topic' => 'Pemodelan topik mengelompokkan teks menurut tema yang muncul sendiri dari '
+                .'datanya, tanpa daftar kategori yang ditentukan lebih dulu. Gunanya: menemukan isu '
+                .'yang tidak terpikir sebelumnya, meringkas ribuan teks menjadi beberapa tema yang '
+                .'bisa dibaca, dan melihat tema mana yang paling banyak menyita perhatian.',
+            'association' => 'Asosiasi aspek dan topik menunjukkan pasangan mana yang cenderung muncul '
+                .'bersamaan lebih sering daripada kebetulan. Gunanya: menempatkan sebuah keluhan pada '
+                .'konteks percakapan tempat ia hidup, sehingga penanganannya menyasar pembicaraan yang '
+                .'tepat dan bukan aspeknya saja secara terpisah.',
+            'segment' => 'Rincian per pemisah membandingkan kelompok data, misalnya per video, per '
+                .'sumber, atau per periode. Gunanya: menemukan kelompok yang menyimpang dari pola '
+                .'umum, sehingga penanganan bisa diarahkan ke kelompok itu alih-alih diratakan ke '
+                .'seluruh data.',
+            'overview' => 'Ringkasan menyeluruh menyatukan sentimen, aspek, dan topik menjadi satu '
+                .'gambaran. Gunanya: memberi pembaca yang tidak sempat menelusuri tiap bagian satu '
+                .'kesimpulan yang bisa dipakai mengambil keputusan.',
+            default => 'Jelaskan apa gunanya hasil ini bagi pembacanya.',
+        };
+    }
+
     private function systemInstruction(string $section): string
     {
         $tugas = match ($section) {
@@ -483,6 +533,7 @@ class AnalysisInterpretationService
         return 'Anda seorang analis data yang menjelaskan hasil analisis teks berbahasa Indonesia '
             ."kepada pembaca non-teknis.\n\n"
             ."Tugas: {$tugas}\n\n"
+            ."Kegunaan bagian ini sebagai bahan Anda: {$this->kegunaanBagian($section)}\n\n"
             ."Aturan yang wajib dipatuhi:\n"
             ."- Tulis dalam bahasa Indonesia yang lugas, tanpa istilah teknis yang tidak dijelaskan.\n"
             .'- Gunakan hanya angka yang ada pada data yang diberikan pengguna. Jangan menghitung ulang, '
@@ -491,8 +542,18 @@ class AnalysisInterpretationService
             // Judul analisis sering berupa catatan teknis ("Final combined
             // 15:17:59") dan terbaca janggal kalau dikutip di dalam narasi.
             ."- Jangan mengutip judul analisis di dalam kalimat.\n"
-            ."- 'narrative' berisi 2 sampai 4 kalimat dalam satu paragraf, tanpa markdown.\n"
-            .'- \'highlights\' berisi maksimal 4 poin temuan, masing-masing satu kalimat pendek.';
+            .'- Jangan memakai tanda pisah panjang (em dash). Pecah menjadi dua kalimat, atau pakai '
+            ."koma, titik dua, atau tanda kurung.\n\n"
+            ."Isi keempat medan berikut:\n"
+            ."- 'narrative': 2 sampai 4 kalimat dalam satu paragraf, tanpa markdown. Isinya APA yang "
+            ."ditunjukkan angka-angka itu.\n"
+            ."- 'highlights': maksimal 4 poin temuan, masing-masing satu kalimat pendek.\n"
+            .'- \'why\': 1 sampai 2 kalimat tentang MENGAPA bagian analisis ini penting dilihat, '
+            .'dikaitkan dengan isi datanya sendiri. Jangan menyalin kalimat kegunaan di atas mentah-mentah; '
+            ."jadikan ia khusus untuk data ini.\n"
+            .'- \'how\': 2 sampai 4 langkah konkret BAGAIMANA pembaca memanfaatkan temuan ini, '
+            .'masing-masing satu kalimat yang diawali kata kerja. Langkahnya harus mengacu pada angka '
+            .'atau nama yang benar-benar muncul di data, bukan saran umum yang berlaku untuk analisis apa pun.';
     }
 
     /**

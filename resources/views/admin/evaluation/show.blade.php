@@ -94,7 +94,7 @@
     @unless($dataset->isFrozen())
         <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             Dataset ini belum dibekukan, jadi evaluasi belum bisa dijalankan. Pembekuan mengunci isinya
-            supaya dua evaluasi pada iterasi berbeda benar-benar mengukur baris yang sama - tanpa itu,
+            supaya dua evaluasi pada iterasi berbeda benar-benar mengukur baris yang sama. Tanpa itu,
             selisih angkanya bisa berasal dari datanya yang berubah, bukan dari modelnya.
         </div>
     @endunless
@@ -162,7 +162,7 @@
             </div>
 
             <p class="mt-3 text-xs text-gray-500">
-                Jangan menyunting kolom <code>id</code> - kolom itu yang memasangkan baris kembali;
+                Jangan menyunting kolom <code>id</code>, karena kolom itu yang memasangkan baris kembali;
                 teks yang tersunting masih dikenali lewat sidik jari, tetapi id lebih pasti.
             </p>
 
@@ -171,14 +171,14 @@
                 <p class="mt-1 text-xs text-indigo-900">
                     Buka <a href="{{ url('/anotasi') }}" target="_blank" class="font-semibold underline">{{ url('/anotasi') }}</a>,
                     unggah berkas di atas, lalu anotasi satu per satu dengan pintasan papan tik.
-                    Berkasnya satu halaman statis tanpa backend - salin folder <code>public/anotasi</code>
+                    Berkasnya satu halaman statis tanpa backend, jadi folder <code>public/anotasi</code> bisa disalin
                     ke hosting mana pun, atau kirim berkasnya langsung ke anotator. Pekerjaan tersimpan
                     otomatis di peramban dan tidak dikirim ke mana pun.
                 </p>
                 <p class="mt-2 text-xs text-indigo-900">
-                    Versi <strong>+ Prediksi Model</strong> menyertakan tebakan model, tetapi aplikasi
-                    menyembunyikannya sampai anotator memilih labelnya sendiri - lalu mencatat berapa
-                    label yang berubah setelah melihatnya. Tanpa penundaan itu, anotator cenderung
+                    Versi <strong>+ Prediksi Model</strong> menyertakan tebakan sentimen dan aspek model,
+                    tetapi aplikasi menyembunyikannya sampai anotator memutuskan sendiri, lalu mencatat
+                    berapa label dan aspek yang berubah setelah melihatnya. Tanpa penundaan itu, anotator cenderung
                     menyetujui model dan akurasi terukur naik tanpa modelnya berubah.
                 </p>
             </div>
@@ -315,7 +315,7 @@
             @if($dataset->annotation)
                 <p class="mt-3 text-3xl font-bold text-gray-900">{{ number_format($dataset->annotation['cohen_kappa'], 3) }}</p>
                 <p class="text-xs text-gray-500">
-                    n = {{ $dataset->annotation['double_annotated'] }} - {{ $dataset->annotation['label'] }}
+                    n = {{ $dataset->annotation['double_annotated'] }} ({{ $dataset->annotation['label'] }})
                 </p>
                 <p class="mt-3 text-sm text-gray-600">
                     Sepakat {{ $dataset->annotation['agreement'] }}% secara mentah.
@@ -336,21 +336,32 @@
             @endif
         </div>
 
-        <div class="rounded-2xl border {{ $leakage['overlap'] > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white' }} p-5">
-            <h2 class="text-sm font-semibold text-gray-900">Kebocoran ke data latih</h2>
-            @if($leakage['overlap'] === 0)
+        <div class="rounded-2xl border {{ $leakage['corrected_overlap'] > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white' }} p-5">
+            <h2 class="text-sm font-semibold text-gray-900">Data leakage ke data training</h2>
+            @if($leakage['corrected_overlap'] === 0)
                 <p class="mt-3 text-3xl font-bold text-emerald-700">0</p>
-                <p class="text-xs text-gray-500">baris bertabrakan</p>
+                <p class="text-xs text-gray-500">baris golden pernah dilatihkan</p>
                 <p class="mt-3 text-sm text-gray-600">
-                    Tidak satu pun baris uji pernah masuk data latih. Angka hold-out sah dikutip.
+                    Tidak satu pun baris uji pernah masuk muatan pelatihan. Angka hold-out sah dikutip.
                 </p>
             @else
-                <p class="mt-3 text-3xl font-bold text-amber-700">{{ $leakage['overlap'] }}</p>
-                <p class="text-xs text-gray-600">baris bertabrakan, {{ $leakage['corrected_overlap'] }} sudah dikoreksi</p>
+                <p class="mt-3 text-3xl font-bold text-amber-700">
+                    {{ $leakage['corrected_golden_affected'] }}<span class="text-lg font-semibold text-amber-600">/{{ $leakage['total_golden'] }}</span>
+                </p>
+                <p class="text-xs text-gray-600">baris golden pernah dilatihkan</p>
+                <p class="mt-2 text-xs text-gray-600">
+                    Lewat {{ $leakage['corrected_overlap'] }} entri terkoreksi.
+                </p>
                 <p class="mt-3 text-sm text-gray-700">
-                    Baris ini otomatis disingkirkan sebelum pelatihan, jadi hold-out tetap sah.
+                    Baris itu ditahan penjaga kebocoran sebelum pelatihan berikutnya, tetapi riwayat pelatihan
+                    sebelumnya perlu diperiksa.
                 </p>
             @endif
+            <p class="mt-3 text-xs text-gray-500">
+                Konteks: {{ $leakage['golden_affected'] }}/{{ $leakage['total_golden'] }} baris golden terdaftar
+                sebagai kandidat di <em>training_items</em> ({{ $leakage['overlap'] }} entri). Itu wajar dan bukan
+                kebocoran, karena yang dilatihkan hanya baris berstatus terkoreksi.
+            </p>
         </div>
     </div>
 
@@ -359,7 +370,7 @@
         <div class="rounded-2xl border border-gray-200 bg-white p-5">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h2 class="text-sm font-semibold text-gray-900">Hasil terakhir - {{ $runTerakhir->judul() }}</h2>
+                    <h2 class="text-sm font-semibold text-gray-900">Hasil terakhir: {{ $runTerakhir->judul() }}</h2>
                     <p class="mt-0.5 text-xs text-gray-500">
                         Dijalankan {{ $runTerakhir->completed_at?->format('d M Y H:i') }} atas {{ $sentimen['n'] }} baris.
                         Model: <code>{{ $runTerakhir->model_info['sentiment_source'] ?? 'tidak tercatat' }}</code>,
@@ -558,25 +569,28 @@
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-gray-100">
-                                    <tr>
-                                        <td class="py-2 text-gray-700">
-                                            Ketat
-                                            <span class="block text-xs text-gray-400">nama aspek sama persis setelah dinormalkan</span>
+                                    {{-- Parsial adalah angka utama (keputusan pemilik proyek,
+                                         24 Sep 2026). Ketat tetap ditampilkan sebagai batas
+                                         bawah, supaya pelonggarannya tidak menyembunyikan apa pun. --}}
+                                    <tr class="bg-blue-50/60">
+                                        <td class="py-2 text-gray-900 font-medium">
+                                            Parsial <span class="ml-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-white">utama</span>
+                                            <span class="block text-xs font-normal text-gray-500">ketemu bila ada kata-dasar yang sama</span>
                                         </td>
-                                        <td class="py-2 text-right font-semibold text-gray-900">{{ $aspek['micro_f1'] }}%</td>
-                                        <td class="py-2 text-right font-semibold text-gray-900">{{ $aspek['macro_f1'] }}%</td>
+                                        <td class="py-2 text-right text-base font-bold text-gray-900">
+                                            {{ isset($aspekParsial['micro_f1']) ? $aspekParsial['micro_f1'].'%' : '-' }}
+                                        </td>
+                                        <td class="py-2 text-right font-semibold text-gray-900">
+                                            {{ isset($aspekParsial['macro_f1']) ? $aspekParsial['macro_f1'].'%' : '-' }}
+                                        </td>
                                     </tr>
                                     <tr>
                                         <td class="py-2 text-gray-700">
-                                            Parsial
-                                            <span class="block text-xs text-gray-400">ketemu bila ada kata-dasar yang sama</span>
+                                            Ketat <span class="text-xs text-gray-400">(batas bawah)</span>
+                                            <span class="block text-xs text-gray-400">nama aspek sama persis setelah dinormalkan</span>
                                         </td>
-                                        <td class="py-2 text-right font-semibold text-gray-900">
-                                            {{ isset($aspekParsial['micro_f1']) ? $aspekParsial['micro_f1'].'%' : '-' }}
-                                        </td>
-                                        <td class="py-2 text-right text-gray-600">
-                                            {{ isset($aspekParsial['macro_f1']) ? $aspekParsial['macro_f1'].'%' : '-' }}
-                                        </td>
+                                        <td class="py-2 text-right text-gray-700">{{ $aspek['micro_f1'] }}%</td>
+                                        <td class="py-2 text-right text-gray-700">{{ $aspek['macro_f1'] }}%</td>
                                     </tr>
                                     <tr>
                                         <td class="py-2 text-gray-700">
@@ -617,9 +631,9 @@
                             supaya pelonggaran itu tidak menyembunyikan apa pun.
                         </p>
                         <p class="mt-2 text-xs text-gray-500">
-                            Kecocokan dinilai pada {{ $aspek['match'] ?? 'bentuk dasar' }}. Bahasa Indonesia aglutinatif:
+                            Kecocokan dinilai pada {{ $aspek['match'] ?? 'hasil stemming' }}. Bahasa Indonesia aglutinatif:
                             membandingkan <code>pelayanannya</code> dengan <code>pelayanan</code> sebagai string persis
-                            menghitung pasangan yang benar dua kali salah - sekali sebagai false positive, sekali
+                            menghitung pasangan yang benar dua kali salah: sekali sebagai false positive, sekali
                             sebagai false negative.
                         </p>
                         <p class="mt-1 text-xs text-amber-700">
@@ -638,7 +652,7 @@
 
             @if($topik)
                 <div class="mt-6 border-t border-gray-100 pt-4">
-                    <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Pemodelan topik</h3>
+                    <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Topic modeling</h3>
 
                     @if($topik['available'] ?? false)
                         @php $pita = \App\Helpers\ResultPresenter::coherenceBand((float) $topik['c_v']); @endphp
@@ -647,7 +661,7 @@
                             ({{ number_format($topik['corpus_texts']) }} teks), bukan pada test set. Golden dataset
                             adalah sampel acak: kalimat pembentuk satu topik sebagian besar tidak ikut tersampel, dan
                             pada beberapa ratus dokumen pendek matriks ko-okurensinya jarang sehingga koherensi
-                            tertekan. Koherensi juga <strong>tidak memakai label emas</strong> - jangan
+                            tertekan. Koherensi juga <strong>tidak memakai label emas</strong>, jadi jangan
                             disandingkan dengan F1 seolah setara, dan tidak sebanding antar korpus. Model topik tidak
                             ikut dilatih ulang oleh active learning, jadi angka ini berperan sebagai kontrol.
                         </p>
@@ -672,7 +686,7 @@
                             (rentang 6-19). Sebutkan seed-nya dan sertakan rentang antar-seed setiap kali menulis
                             jumlah topik di naskah.
                             @if(($topik['c_npmi'] ?? 0) < 0)
-                                c<sub>npmi</sub> yang negatif sementara c<sub>v</sub> positif juga wajar - itu
+                                c<sub>npmi</sub> yang negatif sementara c<sub>v</sub> positif juga wajar, karena itu
                                 kritik klasik terhadap c<sub>v</sub>, yang konfirmasinya tak-langsung lewat kosinus
                                 antar-vektor NPMI; siapkan satu paragraf penjelasan.
                             @endif
@@ -690,7 +704,7 @@
                     <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Per segmen</h3>
                     <p class="mt-1 text-xs text-gray-500">
                         Rerata keseluruhan bisa menyembunyikan satu segmen yang jatuh. Segmen dengan
-                        n kecil punya selang lebar - jangan menyimpulkan perbedaan dari selisih
+                        n kecil punya selang lebar, jadi jangan menyimpulkan perbedaan dari selisih
                         beberapa poin saja.
                     </p>
                     <div class="mt-2 overflow-x-auto">
@@ -776,7 +790,7 @@
                     <h2 class="text-sm font-semibold text-gray-900">Uji signifikansi antar dua iterasi</h2>
                     <p class="mt-0.5 max-w-2xl text-xs text-gray-500">
                         Selisih akurasi saja tidak cukup untuk mengklaim model membaik. Uji McNemar
-                        bekerja pada prediksi berpasangan per baris - berapa baris yang berubah
+                        bekerja pada prediksi berpasangan per baris: berapa baris yang berubah
                         dari salah menjadi benar, dan sebaliknya.
                     </p>
                     <p class="mt-1 max-w-2xl text-xs text-amber-700">
@@ -849,7 +863,7 @@
                                     <tr>
                                         <td class="py-2 text-gray-700">
                                             Koherensi c<sub>v</sub>
-                                            <span class="block text-xs text-gray-400">kontrol - model topik tidak dilatih ulang</span>
+                                            <span class="block text-xs text-gray-400">kontrol, karena model topik tidak dilatih ulang</span>
                                         </td>
                                         <td class="py-2 text-right text-gray-600">{{ $perbandingan['before']['coherence'] }}</td>
                                         <td class="py-2 text-right text-gray-900">{{ $perbandingan['after']['coherence'] }}</td>
@@ -963,6 +977,12 @@
                             <tr class="{{ $run->batal ? 'bg-rose-50/60' : '' }}">
                                 <td class="px-5 py-3 {{ $run->batal ? 'text-rose-900' : 'text-gray-900' }}">
                                     {{ $run->judul() }}
+                                    @foreach($runAktif[$run->id] ?? [] as $modul)
+                                        <span class="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800"
+                                              title="Run ini mengukur bobot {{ $modul === 'sentiment' ? 'sentimen' : 'aspek' }} yang sedang dipakai layanan.">
+                                            {{ $modul === 'sentiment' ? 'sentimen aktif' : 'aspek aktif' }}
+                                        </span>
+                                    @endforeach
                                     @if($run->batal && $run->alasan_batal)
                                         <span class="block text-xs text-rose-700">{{ $run->alasan_batal }}</span>
                                     @endif
@@ -998,7 +1018,7 @@
                                          terbaca akan dikutip, dan yang ini tidak
                                          dapat direproduksi oleh siapa pun. --}}
                                     <td colspan="2" class="px-5 py-3 text-center text-xs text-rose-700 font-semibold">
-                                        tidak dapat direproduksi - jangan dikutip
+                                        tidak dapat direproduksi, jangan dikutip
                                     </td>
                                 @else
                                     <td class="px-5 py-3 text-right text-gray-900">{{ $m['accuracy'] ?? '-' }}{{ isset($m['accuracy']) ? '%' : '' }}</td>

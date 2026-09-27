@@ -67,6 +67,33 @@ class EvaluationDataset extends Model
     }
 
     /**
+     * Test set yang sedang dipakai mengukur iterasi: dataset `test` beku dan
+     * berisi, dengan yang terakhir dipakai sebuah run didahulukan, lalu yang
+     * paling baru dibekukan. Null bila belum ada - pemasangan baru, atau
+     * golden dataset yang masih dianotasi.
+     *
+     * Satu jawaban dipakai bersama evaluasi otomatis dan penjaga "belum
+     * diukur", supaya penjaga tidak pernah menunggu evaluasi yang tidak akan
+     * pernah dijalankan.
+     */
+    public static function ujiAktif(): ?self
+    {
+        $beku = static::query()
+            ->whereNotNull('frozen_at')
+            ->where('split', 'test')
+            ->where('item_count', '>', 0);
+
+        $terakhirDipakai = EvaluationRun::completed()
+            ->whereIn('evaluation_dataset_id', (clone $beku)->select('id'))
+            ->latest('completed_at')
+            ->value('evaluation_dataset_id');
+
+        return $terakhirDipakai
+            ? static::find($terakhirDipakai)
+            : $beku->latest('frozen_at')->first();
+    }
+
+    /**
      * Hanya dataset beku yang boleh dikutip di naskah: kalau isinya masih
      * bisa berubah, dua run pada iterasi berbeda tidak mengukur hal yang sama.
      */

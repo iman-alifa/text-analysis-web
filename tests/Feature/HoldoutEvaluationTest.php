@@ -2,12 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\RetrainModel;
-use App\Jobs\RunHoldoutEvaluation;
 use App\Models\AnalysisResult;
 use App\Models\EvaluationDataset;
 use App\Models\EvaluationRun;
-use App\Models\ModelTraining;
 use App\Models\TextAnalysis;
 use App\Models\TrainingItem;
 use App\Models\User;
@@ -19,7 +16,6 @@ use App\Services\NLPApiService;
 use App\Services\RetrainingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -808,42 +804,7 @@ class HoldoutEvaluationTest extends TestCase
         $this->assertNull($item->fresh()->corrected_sentiment);
     }
 
-    // ------------------------------------------------- pemicu evaluasi
-
-    public function test_pelatihan_ulang_tidak_memicu_evaluasi(): void
-    {
-        Queue::fake();
-
-        $this->datasetDari([['Pelayanannya memuaskan', 'positive', null]]);
-
-        Http::fake([
-            '*/api/retrain/sentiment' => Http::response([
-                'status' => 'success',
-                'results' => [
-                    'saved' => true,
-                    'metrics_after' => ['weighted_f1' => 0.91],
-                ],
-            ], 200),
-        ]);
-
-        $training = ModelTraining::create([
-            'model_type' => 'sentiment',
-            'status' => 'pending',
-            'total_samples' => 12,
-            'epochs' => 3,
-            'learning_rate' => 0.00002,
-        ]);
-
-        (new RetrainModel($training, $this->sampelLatih()))
-            ->handle(app(NLPApiService::class));
-
-        $this->assertSame('completed', $training->fresh()->status);
-
-        // Evaluasi adalah alat penyusunan skripsi: kapan sebuah iterasi diukur
-        // adalah keputusan peneliti, bukan efek samping antrean. Tes ini ada
-        // supaya pemicu otomatis tidak diam-diam masuk kembali.
-        Queue::assertNotPushed(RunHoldoutEvaluation::class);
-    }
+    // Pemicu evaluasi otomatis setelah pelatihan: lihat AutoEvaluationTest.
 
     // ---------------------------------------------------------- halaman admin
 

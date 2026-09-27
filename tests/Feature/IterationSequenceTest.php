@@ -74,6 +74,12 @@ class IterationSequenceTest extends TestCase
      */
     private function pelatihanSelesai(?int $analysisId = null, string $modelType = 'sentiment'): ModelTraining
     {
+        // Penjaga "belum diukur" hanya berlaku bila ADA test set beku untuk
+        // mengukurnya. Skenario di tes ini selalu mengandaikan ada.
+        if (! EvaluationDataset::ujiAktif()) {
+            $this->dataset();
+        }
+
         return ModelTraining::create([
             'model_type' => $modelType,
             'text_analysis_id' => $analysisId,

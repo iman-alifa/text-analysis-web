@@ -58,7 +58,12 @@ return [
         // kandidat pertama), jadi setiap narasi tetap bisa disebut model
         // persisnya. Gunanya menghindari layanan mengulang model yang sama
         // yang sedang padat (503) alih-alih menunggunya lebih lama.
-        'model' => env('GEMINI_MODEL', 'gemini-3.5-flash'),
+        // Diuji 24 Sep 2026 dengan kunci proyek: gemini-3.5-flash dan
+        // gemini-3.6-flash membalas 200. gemini-2.5-* dan seluruh 1.5 sudah
+        // 404 ("no longer available to new users") - cadangan yang pensiun
+        // bukan cadangan, dan dulu justru membuat galat sesaat model utama
+        // tampil sebagai "model tidak tersedia".
+        'model' => env('GEMINI_MODEL', 'gemini-3.5-flash,gemini-3.6-flash'),
 
         // Narasi hasil analisis lebih panjang daripada label topik, jadi
         // batas 30 detik yang lama kadang terpotong.
@@ -77,6 +82,13 @@ return [
 
     'nlp_api' => [
         'url' => env('NLP_API_URL', 'http://localhost:8001'),
+        // Kunci bersama yang dikirim sebagai header X-API-Key.
+        //
+        // Layanan NLP menolak start di produksi tanpa kunci ini (lihat
+        // app/security.py di nlp-api-service): tanpa autentikasi, siapa pun
+        // yang tahu URL-nya bisa memanggil /api/retrain/* dan menimpa bobot
+        // model. Kosong hanya sah untuk pengembangan lokal.
+        'key' => env('NLP_API_KEY', ''),
         // Timeout satu permintaan HTTP ke service NLP.
         //
         // HARUS LEBIH KECIL dari ProcessTextAnalysis::$timeout (1800 detik),
@@ -91,6 +103,34 @@ return [
         // gabungan. 600 detik memberi ruang lebih dari 10x, termasuk untuk
         // permintaan pertama yang masih memuat bobot model.
         'timeout' => env('NLP_API_TIMEOUT', 600),
+
+        // Timeout HTTP khusus /api/retrain/*, terpisah dari timeout analisis.
+        //
+        // Dulu memakai timeout * 2 = 1200 detik. Terukur di CPU (laptop Ryzen 7
+        // 5700U, torch 2.9.1+cpu): 1,68 dtk/sampel sentimen, 1,06 aspek. Di VPS
+        // 4 vCPU diperkirakan 2-3x lebih lambat, jadi pelatihan sentimen atas
+        // kolam 481 sampel memakan 27-40 menit dan melewati 1200 detik.
+        //
+        // Menyerahnya klien TIDAK menghentikan pelatihan di layanan (terukur
+        // dengan uvicorn sungguhan): checkpoint tetap disimpan sementara Laravel
+        // mencatat putaran itu 'failed'. Catatan lalu tidak cocok lagi dengan
+        // bobot yang hidup - kelas kesalahan yang dulu membatalkan iterasi 2.
+        //
+        // Rantai: nilai ini < RetrainModel::$timeout (7200) < retry_after
+        // antrean 'training' (7500). Dijaga QueueTimeoutConfigTest.
+        'retrain_timeout' => (int) env('NLP_API_RETRAIN_TIMEOUT', 6600),
+
+        // Timeout HTTP khusus /api/analyze/topic. Pemodelan topik adalah satu
+        // permintaan utuh (tidak dipecah per batch) dan paling lama di antara
+        // semua jalur. Terukur di VPS produksi (Xeon Gold 6138, 3 thread):
+        // 3.366 komentar = 972 detik. Batas lama (timeout * 2 = 1200) hanya
+        // menyisakan ~19%; korpus 1,2x lebih besar sudah melewatinya.
+        //
+        // WAJIB < ProcessTextAnalysis::$timeout (3600). Pada analisis gabungan
+        // berbatch, sentimen + aspek sudah memakan ~13 menit sebelum topik
+        // dimulai, jadi 2400 masih menyisakan ruang di dalam satu job.
+        'topic_timeout' => (int) env('NLP_API_TOPIC_TIMEOUT', 2400),
+
         'batch_size' => env('NLP_API_BATCH_SIZE', 50),
 
         // Batas yang ditegakkan service NLP (app/config.py: max_batch_size dan

@@ -6,6 +6,7 @@ use App\Http\Controllers\AnalysisController;
 use App\Http\Controllers\AnalysisFeedbackController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\LandingController;
+use App\Http\Controllers\PanduanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\YouTubeScraperController;
 use App\Services\AnalysisInterpretationService;
@@ -13,6 +14,11 @@ use Illuminate\Support\Facades\Route;
 
 // Landing Page
 Route::get('/', [LandingController::class, 'index'])->name('landing');
+
+// Pedoman penggunaan. Sengaja di luar middleware auth: peserta uji coba
+// biasanya membacanya sebelum punya akun, dan pedoman yang menuntut login
+// untuk menjelaskan cara login tidak berguna.
+Route::get('/panduan', [PanduanController::class, 'index'])->name('panduan');
 
 // Dashboard (Protected - Auth Required)
 Route::middleware(['auth', 'verified'])->group(function () {
@@ -92,6 +98,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Profile
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::patch('/profile/preferences', [ProfileController::class, 'updatePreferences'])->name('profile.preferences');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 });
 
@@ -123,6 +130,11 @@ Route::middleware(['auth', 'verified', 'admin'])->prefix('admin')->name('admin.'
     Route::post('/training/trigger-retrain', [TrainingController::class, 'triggerTraining'])->name('training.trigger'); // Pastikan ini POST
 
     Route::post('/training/sync-all', [TrainingController::class, 'syncAll'])->name('training.sync');
+
+    // Fase evaluasi kuesioner: tunda pelatihan otomatis, lalu putar ulang.
+    Route::post('/training/tunda', [TrainingController::class, 'setTunda'])->name('training.tunda');
+    Route::post('/training/tunda/putar-ulang', [TrainingController::class, 'putarUlang'])->name('training.tunda.putar');
+    Route::post('/training/tunda/hentikan', [TrainingController::class, 'hentikanPutarUlang'])->name('training.tunda.hentikan');
 
     // 8. Evaluasi hold-out (golden dataset)
     // whereNumber pada tiap {id} dengan alasan yang sama seperti di atas.

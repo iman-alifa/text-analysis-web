@@ -45,6 +45,32 @@ class QueueTimeoutConfigTest extends TestCase
         );
     }
 
+    public function test_timeout_topik_cukup_tetapi_di_bawah_job(): void
+    {
+        // Terukur di VPS produksi: pemodelan topik 3.366 komentar = 972 detik.
+        // Batas lama (timeout * 2 = 1200) hanya menyisakan ~19%.
+        $job = new ProcessTextAnalysis(new \App\Models\TextAnalysis);
+
+        $this->assertGreaterThanOrEqual(2 * 972, config('services.nlp_api.topic_timeout'));
+        $this->assertLessThan($job->timeout, config('services.nlp_api.topic_timeout'));
+    }
+
+    public function test_rantai_timeout_pelatihan(): void
+    {
+        // HTTP retrain < RetrainModel::$timeout < retry_after antrean training.
+        // HTTP yang menyerah lebih dulu tidak menghentikan pelatihan di
+        // layanan: checkpoint tetap disimpan sementara riwayat mencatat
+        // 'failed', dan catatannya tidak lagi cocok dengan bobot yang hidup.
+        $job = new \App\Jobs\RetrainModel(new \App\Models\ModelTraining, []);
+
+        $this->assertLessThan($job->timeout, config('services.nlp_api.retrain_timeout'));
+        $this->assertGreaterThan($job->timeout, config('queue.connections.training.retry_after'));
+
+        // Pelatihan di VPS diperkirakan 27-40 menit untuk sentimen saja.
+        // Batas lama (timeout * 2 = 1200 detik) terlalu pendek.
+        $this->assertGreaterThanOrEqual(3600, config('services.nlp_api.retrain_timeout'));
+    }
+
     public function test_job_analisis_ditandai_unik(): void
     {
         $this->assertInstanceOf(

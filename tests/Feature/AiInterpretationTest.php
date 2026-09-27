@@ -104,6 +104,74 @@ class AiInterpretationTest extends TestCase
         $this->assertArrayHasKey('generated_at', $tersimpan['sentiment']);
     }
 
+    public function test_narasi_membawa_alasan_penting_dan_langkah_tindak_lanjut(): void
+    {
+        // Narasi saja menjawab "apa isinya" dan meninggalkan pembaca non-teknis
+        // pada pertanyaan yang sebenarnya: kenapa angka ini perlu dilihat, dan
+        // besok harus berbuat apa.
+        $analysis = $this->analysis();
+
+        $this->fakeGemini([
+            'narrative' => 'Opini terbelah rata.',
+            'highlights' => ['Setengah teks bernada negatif.'],
+            'why' => 'Porsi negatif sebesar ini menandakan keluhan yang belum tertangani.',
+            'how' => [
+                'Buka tab Perlu Ditinjau untuk membaca teks paling negatif.',
+                'Bandingkan hasil ini setelah penanganan dijalankan.',
+            ],
+        ]);
+
+        $this->actingAs($analysis->user)
+            ->postJson(route('analysis.interpret', ['id' => $analysis->id, 'section' => 'sentiment']))
+            ->assertOk()
+            ->assertJsonPath('data.why', 'Porsi negatif sebesar ini menandakan keluhan yang belum tertangani.')
+            ->assertJsonCount(2, 'data.how');
+
+        $tersimpan = $analysis->result->fresh()->ai_interpretations['sentiment'];
+
+        $this->assertSame('Porsi negatif sebesar ini menandakan keluhan yang belum tertangani.', $tersimpan['why']);
+        $this->assertCount(2, $tersimpan['how']);
+    }
+
+    public function test_narasi_lama_tanpa_medan_baru_tetap_bisa_dirender(): void
+    {
+        // Narasi yang tersimpan dari prompt versi 2 tidak punya 'why'/'how'.
+        // Halaman hasil harus tetap terbuka tanpa perlu membangkitkan ulang.
+        $analysis = $this->analysis();
+
+        $analysis->result->update([
+            'ai_interpretations' => [
+                'sentiment' => [
+                    'type' => 'narrative',
+                    'narrative' => 'Narasi dari versi lama.',
+                    'highlights' => ['Satu poin.'],
+                    'model' => 'gemini-3.5-flash',
+                ],
+            ],
+        ]);
+
+        $this->actingAs($analysis->user)
+            ->get(route('analysis.show', $analysis->id))
+            ->assertOk()
+            ->assertSee('Narasi dari versi lama.');
+    }
+
+    public function test_permintaan_menuntut_keempat_medan(): void
+    {
+        $analysis = $this->analysis();
+        $this->fakeGemini(['narrative' => 'x', 'highlights' => [], 'why' => 'y', 'how' => []]);
+
+        $this->actingAs($analysis->user)
+            ->postJson(route('analysis.interpret', ['id' => $analysis->id, 'section' => 'sentiment']))
+            ->assertOk();
+
+        \Illuminate\Support\Facades\Http::assertSent(function ($request) {
+            $wajib = $request['generationConfig']['response_schema']['required'] ?? [];
+
+            return in_array('why', $wajib, true) && in_array('how', $wajib, true);
+        });
+    }
+
     public function test_narasi_yang_sudah_ada_dipakai_ulang_tanpa_memanggil_api(): void
     {
         $analysis = $this->analysis();

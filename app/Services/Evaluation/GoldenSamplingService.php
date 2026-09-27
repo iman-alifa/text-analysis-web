@@ -32,8 +32,18 @@ use RuntimeException;
  *    test set sehingga akurasi keseluruhannya tidak lagi menaksir akurasi
  *    korpus.
  *
- * 3. **Baris yang sudah dikoreksi pengguna dikecualikan.** Baris itu data
- *    latih. Memasukkannya ke test set adalah kebocoran sejak awal.
+ * 3. **Baris yang koreksinya SUDAH DILATIHKAN dikecualikan.** Baris itu
+ *    pernah dilihat model; memasukkannya ke test set adalah kebocoran.
+ *
+ *    Koreksi yang belum pernah masuk pelatihan mana pun (mis. seluruh koreksi
+ *    fase evaluasi kuesioner, saat pelatihan ditunda) BOLEH terambil. Begitu
+ *    golden dataset dibekukan, penjaga di RetrainingService::correctedItems()
+ *    menyingkirkannya dari setiap pelatihan sesudahnya, jadi tidak ada
+ *    kebocoran. Mengecualikannya justru membuat sampel tidak acak: ajakan
+ *    koreksi mendahulukan baris yang model paling ragu, sehingga test set
+ *    kehilangan baris tersulit dan akurasinya menaksir terlalu tinggi.
+ *    Harganya: koreksi yang terambil tidak pernah dilatihkan. Jumlahnya
+ *    dicatat di rencana pengambilan (`koreksi_belum_dilatih_terambil`).
  *
  * 4. **Berkas anotasi tidak memuat prediksi model.** Anotator yang melihat
  *    tebakan model cenderung menyetujuinya, dan akurasi terukur naik tanpa
@@ -113,6 +123,7 @@ class GoldenSamplingService
 
         $sudahDipakai = $this->hashSudahDipakai();
         $sudahDikoreksi = $kecualikanKoreksi ? $this->hashSudahDikoreksi() : [];
+        $belumDilatih = $this->hashKoreksiBelumDilatih();
 
         $kandidat = [];
         $terlihat = [];
@@ -232,6 +243,14 @@ class GoldenSamplingService
         }
         mt_srand();
 
+        // Berapa koreksi pengguna yang terambil. Karena belum pernah dilatih,
+        // itu sah, tetapi koreksi itu tidak akan pernah dilatihkan sesudah
+        // golden dataset dibekukan - angka yang perlu disebut di naskah.
+        $belumDilatihTerambil = count(array_filter(
+            $terpilih,
+            fn ($baris) => isset($belumDilatih[$baris['text_hash']])
+        ));
+
         return [
             'rows' => $terpilih,
             'plan' => [
@@ -246,6 +265,7 @@ class GoldenSamplingService
                 'min_per_stratum' => $minPerStrata,
                 'min_length' => $minPanjang,
                 'exclude_corrected' => $kecualikanKoreksi,
+                'koreksi_belum_dilatih_terambil' => $belumDilatihTerambil,
                 'rejected' => $ditolak,
                 'strata' => $rincianStrata,
                 'method' => 'acak berstrata, disemai; tidak memakai keyakinan model',
@@ -369,22 +389,28 @@ class GoldenSamplingService
      *
      * Prediksi model TIDAK disertakan secara bawaan - lihat aturan 4 di atas.
      *
-     * Bila `$denganPrediksi` dinyalakan, dua kolom tambahan ikut: prediksi dan
-     * keyakinan model. Itu keputusan yang sah tetapi berkonsekuensi, dan
+     * Bila `$denganPrediksi` dinyalakan, tiga kolom tambahan ikut: prediksi dan
+     * keyakinan sentimen, serta aspek yang ditemukan model. Itu keputusan yang sah tetapi berkonsekuensi, dan
      * konsekuensinya harus disadari: anotator yang melihat tebakan model
      * cenderung menyetujuinya, sehingga akurasi yang terukur naik tanpa
      * modelnya berubah. Aplikasi anotasi karena itu menyembunyikan kolom ini
      * sampai anotator memilih labelnya sendiri, lalu mencatat apakah ia berubah
      * pikiran setelah melihatnya - angka yang justru layak dilaporkan.
+     *
+     * `model_aspects` memakai tiga keadaan yang sama dengan kolom `aspects`:
+     * `-` berarti model memeriksa baris itu dan tidak menemukan aspek, kosong
+     * berarti tidak ada data aspek (analisis sentimen saja, atau batch yang
+     * gagal). Keduanya harus bisa dibedakan anotator.
      */
     public function annotationRows(EvaluationDataset $dataset, bool $denganPrediksi = false): array
     {
         $prediksi = $denganPrediksi ? $this->modelPredictions($dataset) : [];
+        $aspekModel = $denganPrediksi ? $this->modelAspects($dataset) : [];
 
         return $dataset->items()
             ->orderBy('id')
             ->get()
-            ->map(function (EvaluationItem $item) use ($denganPrediksi, $prediksi) {
+            ->map(function (EvaluationItem $item) use ($denganPrediksi, $prediksi, $aspekModel) {
                 $baris = [
                     $item->id,
                     $item->text,
@@ -403,6 +429,9 @@ class GoldenSamplingService
                     $p = $prediksi[$item->text_hash] ?? null;
                     $baris[] = $p['sentiment'] ?? '';
                     $baris[] = $p['confidence'] ?? '';
+
+                    $a = $aspekModel[$item->text_hash] ?? null;
+                    $baris[] = $a === null ? '' : ($a === [] ? '-' : implode(';', $a));
                 }
 
                 return $baris;
@@ -417,6 +446,7 @@ class GoldenSamplingService
         if ($denganPrediksi) {
             $header[] = 'model_prediction';
             $header[] = 'model_confidence';
+            $header[] = 'model_aspects';
         }
 
         return $header;
@@ -453,6 +483,69 @@ class GoldenSamplingService
                     'sentiment' => isset($p['sentiment']) ? strtolower((string) $p['sentiment']) : null,
                     'confidence' => isset($p['confidence']) ? round((float) $p['confidence'], 4) : null,
                 ];
+            }
+        }
+
+        return $peta;
+    }
+
+    /**
+     * Aspek yang ditemukan model untuk tiap baris golden, dicari lewat sidik
+     * jari teks. Tidak ada panggilan baru ke layanan NLP.
+     *
+     * `document_aspects` dikunci indeks teks masukan (`raw_data`), bukan urutan
+     * prediksi - NLPApiService memetakannya lewat original_index pada jalur
+     * batch. Indeks yang tidak ada berarti tidak ada data, bukan "tidak ada
+     * aspek", jadi baris itu tidak masuk peta sama sekali.
+     *
+     * Batasannya: jalur batch mengisi baris dari batch aspek yang GAGAL dengan
+     * `[]`, bukan menghilangkannya, dan kegagalan itu tidak tersimpan pada hasil
+     * analisis. Baris seperti itu karena itu tampil `-` di sini. Hanya
+     * menyangkut tampilan tebakan di aplikasi anotasi; evaluasi hold-out
+     * menolak hasil parsial sendiri (HoldoutEvaluationService).
+     *
+     * Bentuk permukaan yang disimpan, bukan bentuk dasar: kolom ini dibaca
+     * manusia, dan "pelayanannya" lebih mudah dikenali di kalimatnya daripada
+     * "layan".
+     *
+     * @return array<string, list<string>>
+     */
+    private function modelAspects(EvaluationDataset $dataset): array
+    {
+        $ids = $dataset->sampling_plan['analysis_ids'] ?? [];
+
+        if (empty($ids)) {
+            return [];
+        }
+
+        $peta = [];
+
+        foreach (TextAnalysis::with('result')->whereIn('id', $ids)->get() as $analysis) {
+            $dokumen = $analysis->result?->document_aspects;
+
+            if (! is_array($dokumen)) {
+                continue;
+            }
+
+            foreach ((array) $analysis->raw_data as $indeks => $teks) {
+                if (! filled($teks) || ! array_key_exists($indeks, $dokumen)) {
+                    continue;
+                }
+
+                $daftar = [];
+
+                foreach ((array) $dokumen[$indeks] as $satu) {
+                    // document_aspects pernah dikirim sebagai daftar string dan
+                    // sebagai daftar objek {aspect: ...}; keduanya masih beredar.
+                    $nama = is_array($satu) ? ($satu['aspect'] ?? null) : $satu;
+                    $nama = trim(str_replace(';', ' ', (string) $nama));
+
+                    if ($nama !== '') {
+                        $daftar[mb_strtolower($nama)] ??= $nama;
+                    }
+                }
+
+                $peta[TextFingerprint::hash((string) $teks)] = array_values($daftar);
             }
         }
 
@@ -540,12 +633,46 @@ class GoldenSamplingService
     /**
      * @return array<string, true>
      */
-    private function hashSudahDikoreksi(): array
+    /**
+     * Koreksi yang BELUM pernah masuk pelatihan mana pun.
+     *
+     * @return array<string, true>
+     */
+    private function hashKoreksiBelumDilatih(): array
     {
+        $latihTerakhir = \App\Models\ModelTraining::latest('created_at')->value('created_at');
         $hash = [];
 
         TrainingItem::whereHas('textAnalysis')
             ->where('is_corrected', true)
+            ->when($latihTerakhir, fn ($q) => $q->where('verified_at', '>', $latihTerakhir))
+            ->select(['id', 'text_content'])
+            ->chunk(500, function ($potongan) use (&$hash) {
+                foreach ($potongan as $item) {
+                    $hash[TextFingerprint::hash((string) $item->text_content)] = true;
+                }
+            });
+
+        return $hash;
+    }
+
+    private function hashSudahDikoreksi(): array
+    {
+        $hash = [];
+
+        // Hanya koreksi yang sudah pernah masuk pelatihan: terverifikasi
+        // sebelum pelatihan TERAKHIR dibuat (koreksi tanpa verified_at adalah
+        // data lama dan dianggap sudah dilatihkan). Tanpa pelatihan sama sekali,
+        // tidak ada yang bocor.
+        $latihTerakhir = \App\Models\ModelTraining::latest('created_at')->value('created_at');
+
+        if (! $latihTerakhir) {
+            return [];
+        }
+
+        TrainingItem::whereHas('textAnalysis')
+            ->where('is_corrected', true)
+            ->where(fn ($q) => $q->whereNull('verified_at')->orWhere('verified_at', '<=', $latihTerakhir))
             ->select(['id', 'text_content'])
             ->chunk(500, function ($potongan) use (&$hash) {
                 foreach ($potongan as $item) {

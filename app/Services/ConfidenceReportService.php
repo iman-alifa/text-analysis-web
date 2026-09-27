@@ -402,7 +402,7 @@ class ConfidenceReportService
             default => [
                 'label' => 'Perlu perhatian',
                 'class' => 'text-red-800 bg-red-50 border-red-200',
-                'pesan' => 'Model banyak ragu pada data ini - kemungkinan gaya bahasanya jauh berbeda dari data latih. Koreksi Anda sangat dibutuhkan sebelum hasilnya dipakai.',
+                'pesan' => 'Model banyak ragu pada data ini - kemungkinan gaya bahasanya jauh berbeda dari data training. Koreksi Anda sangat dibutuhkan sebelum hasilnya dipakai.',
             ],
         };
     }

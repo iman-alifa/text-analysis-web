@@ -617,9 +617,20 @@
                         <div class="text-xs text-gray-500">Video</div>
                     </div>
                 </div>
-                <button id="download-result" class="w-full px-6 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl font-semibold text-sm hover:shadow-lg transition-all">
+                {{-- Langkah berikutnya didahulukan dan dibuat tombol utama.
+                     Mengambil data bukan tujuan akhir siapa pun: yang dicari
+                     adalah hasil analisisnya, dan menaruh Unduh sebagai satu-
+                     satunya tombol membuat alurnya berhenti di sini. --}}
+                <a id="analyze-result" href="#"
+                   class="block w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold text-sm hover:shadow-lg transition-all">
+                    <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                    Analisis Sekarang
+                </a>
+                <p class="mt-2 text-xs text-gray-500">Pengaturan analisis masih bisa diubah di halaman berikutnya.</p>
+
+                <button id="download-result" class="mt-3 w-full px-6 py-3 bg-white border border-gray-300 text-gray-700 rounded-xl font-semibold text-sm hover:bg-gray-50 transition-all">
                     <svg class="w-5 h-5 inline mr-2 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                    Download File
+                    Unduh Berkas
                 </button>
                 <button onclick="closeSuccessModal()" class="mt-3 w-full px-6 py-2.5 text-gray-600 hover:text-gray-800 text-sm font-medium transition-colors">Tutup</button>
             </div>
@@ -1166,6 +1177,19 @@
                 document.getElementById('progress-text').textContent = 'Selesai!';
 
                 downloadUrl = result.data.download_url;
+
+                // Nama berkas saja yang dioper. Isinya tetap dibaca server dari
+                // direktori exports dan divalidasi ScraperExport, jadi parameter
+                // ini tidak bisa menunjuk berkas lain.
+                const tautanAnalisis = document.getElementById('analyze-result');
+
+                if (tautanAnalisis && result.data.filename) {
+                    const params = new URLSearchParams({
+                        dari_scraper: result.data.filename,
+                        baris: result.data.total_comments ?? ''
+                    });
+                    tautanAnalisis.href = '{{ route('analysis.create') }}?' + params.toString();
+                }
 
                 setTimeout(() => {
                     document.getElementById('progress-modal').classList.add('hidden');

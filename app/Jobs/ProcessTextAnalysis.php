@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Exceptions\NlpBusyException;
 use App\Models\AnalysisLog;
 use App\Models\AnalysisResult;
 use App\Models\TextAnalysis;
@@ -14,6 +15,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
@@ -49,7 +51,39 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
      */
     public $timeout = 3600;
 
-    public $tries = 3;
+    /**
+     * Jatah percobaan untuk galat SUNGGUHAN (koneksi putus, HTTP 5xx).
+     *
+     * Dulu `$tries = 3`. Tetapi Laravel menghitung setiap pelepasan kembali ke
+     * antrean sebagai satu percobaan, termasuk pelepasan karena model sedang
+     * dilatih ulang (NlpBusyException). Satu putaran pelatihan di VPS memakan
+     * 41-61 menit dan `Retry-After` dari layanan paling lama 600 detik, jadi
+     * menunggu satu pelatihan saja sudah menghabiskan tiga percobaan dan
+     * analisis ditandai gagal tanpa ada yang rusak.
+     *
+     * Karena itu batas Laravel diganti jendela waktu (`retryUntil`), dan jatah
+     * galat sungguhan dihitung sendiri lewat percobaanNyata().
+     */
+    public const PERCOBAAN = 3;
+
+    /**
+     * Berapa lama sebuah analisis boleh menunggu sejak dikirim ke antrean,
+     * termasuk menunggu pelatihan ulang selesai.
+     */
+    public const JENDELA_JAM = 8;
+
+    /**
+     * Galat yang lolos dari handle() (bukan Exception, mis. TypeError) tetap
+     * dibatasi, supaya jendela waktu tidak membuatnya diulang selama 8 jam.
+     */
+    public $maxExceptions = 3;
+
+    /**
+     * Job yang habis waktunya (3600 detik) langsung gagal, tidak diulang.
+     * Dengan `retryUntil`, tanpa ini job yang selalu kehabisan waktu akan
+     * diulang sampai jendelanya habis - berjam-jam untuk hasil yang sama.
+     */
+    public $failOnTimeout = true;
 
     public $backoff = [120, 300, 600]; // 2 menit, 5 menit, 10 menit
 
@@ -86,6 +120,29 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
     public function uniqueId(): string
     {
         return 'analysis-'.$this->analysis->id;
+    }
+
+    /**
+     * Dihitung SEKALI saat job dikirim dan disimpan di payload-nya, jadi
+     * pelepasan berulang tidak memundurkan batasnya.
+     */
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addHours(self::JENDELA_JAM);
+    }
+
+    private function kunciTunggu(): string
+    {
+        return 'analysis-tunggu-latih:'.$this->analysis->id;
+    }
+
+    /**
+     * Percobaan yang benar-benar dipakai untuk galat, tidak termasuk
+     * pelepasan karena menunggu pelatihan.
+     */
+    private function percobaanNyata(): int
+    {
+        return max(1, $this->attempts() - (int) Cache::get($this->kunciTunggu(), 0));
     }
 
     public function handle(NLPApiService $nlpService): void
@@ -207,6 +264,7 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
                 'status' => 'completed',
                 'completed_at' => now(),
             ]);
+            Cache::forget($this->kunciTunggu());
 
             $duration = $this->analysis->started_at->diffInSeconds(now());
 
@@ -223,16 +281,46 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
 
             Log::info("Analysis ID {$this->analysis->id} completed successfully in {$duration} seconds");
 
-        } catch (\Illuminate\Http\Client\ConnectionException $e) {
-            // ✅ Connection timeout - will retry
-            Log::warning("Analysis ID {$this->analysis->id} connection timeout: ".$e->getMessage());
+        } catch (NlpBusyException $e) {
+            // Model yang dibutuhkan sedang dilatih ulang. Bukan kegagalan:
+            // lepas kembali ke antrean dengan jeda dari layanan, dan catat
+            // supaya pelepasan ini tidak dihitung sebagai percobaan gagal.
+            Cache::put($this->kunciTunggu(), (int) Cache::get($this->kunciTunggu(), 0) + 1, now()->addDay());
 
-            if ($this->attempts() < $this->tries) {
-                $retryDelay = $this->backoff[$this->attempts() - 1] ?? 120;
+            $menit = max(1, (int) ceil($e->retryAfter / 60));
+            $this->updateProgress(
+                (int) ($this->analysis->progress ?? 0),
+                "Model sedang dilatih ulang. Analisis dilanjutkan otomatis sekitar {$menit} menit lagi."
+            );
+            Log::info("Analysis ID {$this->analysis->id} menunggu pelatihan ulang, dilepas {$e->retryAfter} detik");
+
+            $this->release($e->retryAfter);
+
+            return;
+
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            // Batas waktu habis TIDAK diulang. Layanan tetap mengerjakan
+            // permintaan pertama walau klien sudah memutus, jadi mengulang
+            // berarti dua perhitungan berat serentak - dan data yang sekali
+            // melewati batas hampir pasti melewatinya lagi. Yang diulang hanya
+            // koneksi yang gagal (layanan mati sebentar, restart).
+            if (NLPApiService::kehabisanWaktu($e)) {
+                $this->handleFailure($e, 'Layanan analisis tidak selesai dalam batas waktu. '
+                    .'Data kemungkinan terlalu besar untuk satu analisis; pecah menjadi beberapa berkas lalu jalankan ulang.');
+
+                return;
+            }
+
+            Log::warning("Analysis ID {$this->analysis->id} connection error: ".$e->getMessage());
+
+            $percobaan = $this->percobaanNyata();
+
+            if ($percobaan < self::PERCOBAAN) {
+                $retryDelay = $this->backoff[$percobaan - 1] ?? 120;
 
                 $this->updateProgress(
                     $this->analysis->progress ?? 0,
-                    "Koneksi terputus. Mencoba kembali dalam {$retryDelay} detik... (Percobaan {$this->attempts()}/{$this->tries})"
+                    "Koneksi terputus. Mencoba kembali dalam {$retryDelay} detik... (Percobaan {$percobaan}/".self::PERCOBAAN.')'
                 );
 
                 $this->release($retryDelay);
@@ -247,11 +335,13 @@ class ProcessTextAnalysis implements ShouldBeUnique, ShouldQueue
             // HTTP errors
             Log::error("Analysis ID {$this->analysis->id} request error: ".$e->getMessage());
 
-            if ($this->attempts() < $this->tries) {
-                $retryDelay = $this->backoff[$this->attempts() - 1] ?? 120;
+            $percobaan = $this->percobaanNyata();
+
+            if ($percobaan < self::PERCOBAAN) {
+                $retryDelay = $this->backoff[$percobaan - 1] ?? 120;
                 $this->updateProgress(
                     $this->analysis->progress ?? 0,
-                    "Terjadi kesalahan. Mencoba kembali... (Percobaan {$this->attempts()}/{$this->tries})"
+                    "Terjadi kesalahan. Mencoba kembali... (Percobaan {$percobaan}/".self::PERCOBAAN.')'
                 );
                 $this->release($retryDelay);
 

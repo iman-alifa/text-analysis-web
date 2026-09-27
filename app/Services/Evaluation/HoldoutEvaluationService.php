@@ -356,7 +356,12 @@ class HoldoutEvaluationService
      */
     private function predictSentiment(array $texts, array $config): array
     {
-        $respons = $this->nlpApi->analyzeSentiment($texts, $config);
+        $respons = $this->nlpApi->utuh()->analyzeSentiment($texts, $config);
+
+        // Penjaga kedua, bila suatu saat jalur batch kembali memaafkan batch
+        // yang gagal: hasil parsial ditolak di sini juga.
+        $this->tolakBatchGagal('sentimen', $respons['results']['metrics']['failed_batches'] ?? []);
+
         $prediksi = $respons['results']['predictions'] ?? [];
 
         $hasil = [];
@@ -376,7 +381,51 @@ class HoldoutEvaluationService
 
         ksort($hasil);
 
+        // Setiap baris golden wajib punya prediksi yang sah. `method: error`
+        // bukan prediksi: layanan mengisinya `neutral` dengan keyakinan 0 saat
+        // teks itu gagal dinilai, dan menghitungnya berarti menilai model atas
+        // tebakan yang tidak pernah dibuatnya.
+        $tidakSah = [];
+
+        foreach (array_keys($texts) as $indeks) {
+            $p = $hasil[$indeks] ?? null;
+
+            if ($p === null || $p['sentiment'] === null || $p['method'] === 'error') {
+                $tidakSah[] = $indeks + 1;
+            }
+        }
+
+        if ($tidakSah) {
+            throw new RuntimeException(sprintf(
+                'Evaluasi dibatalkan: %d dari %d baris tidak mendapat prediksi sentimen yang sah (baris ke-%s). '
+                .'Hasil parsial tidak disimpan karena metriknya akan salah tanpa jejak. Jalankan ulang evaluasinya.',
+                count($tidakSah),
+                count($texts),
+                implode(', ', array_slice($tidakSah, 0, 10)).(count($tidakSah) > 10 ? ', ...' : ''),
+            ));
+        }
+
         return $hasil;
+    }
+
+    /**
+     * @param  array<int, array{batch?: int, texts?: int, error?: string}>  $gagal
+     */
+    private function tolakBatchGagal(string $jenis, array $gagal): void
+    {
+        if (empty($gagal)) {
+            return;
+        }
+
+        $pertama = $gagal[0];
+
+        throw new RuntimeException(sprintf(
+            'Evaluasi dibatalkan: %d batch %s gagal (batch %s: %s). Hasil parsial tidak disimpan. Jalankan ulang evaluasinya.',
+            count($gagal),
+            $jenis,
+            $pertama['batch'] ?? '?',
+            $pertama['error'] ?? 'tanpa pesan',
+        ));
     }
 
     /**
@@ -391,8 +440,26 @@ class HoldoutEvaluationService
      */
     private function predictAspects(array $texts, array $config): array
     {
-        $respons = $this->nlpApi->analyzeAspect($texts, $config);
+        $respons = $this->nlpApi->utuh()->analyzeAspect($texts, $config);
         $hasil = $respons['results'] ?? [];
+
+        // Jalur batch mengisi baris dari batch yang gagal dengan `[]`, yang
+        // tidak bisa dibedakan dari "model tidak menemukan aspek". Recall yang
+        // dihitung darinya salah tanpa jejak.
+        $this->tolakBatchGagal('aspek', $hasil['failed_batches'] ?? []);
+
+        $dokumenMentah = $hasil['document_aspects_normalized'] ?? $hasil['document_aspects'] ?? [];
+
+        foreach (array_keys($texts) as $indeks) {
+            if (! array_key_exists($indeks, $dokumenMentah)) {
+                throw new RuntimeException(sprintf(
+                    'Evaluasi dibatalkan: layanan mengembalikan aspek untuk %d dari %d baris. '
+                    .'Hasil parsial tidak disimpan. Jalankan ulang evaluasinya.',
+                    count($dokumenMentah),
+                    count($texts),
+                ));
+            }
+        }
 
         $ternormalisasi = isset($hasil['document_aspects_normalized']);
         $dokumen = $hasil['document_aspects_normalized'] ?? $hasil['document_aspects'] ?? [];
@@ -552,7 +619,7 @@ class HoldoutEvaluationService
     {
         $health = $this->nlpApi->health();
 
-        return [
+        $info = [
             'sentiment_source' => $this->nlpApi->healthModelValue($health, 'sentiment_source'),
             'sentiment_base' => $this->nlpApi->healthModelValue($health, 'sentiment_base'),
             'sentiment_temperature' => $this->nlpApi->healthModelValue($health, 'sentiment_temperature'),
@@ -561,5 +628,24 @@ class HoldoutEvaluationService
             'aspect_retrained' => $this->nlpApi->healthModelValue($health, 'aspect_retrained'),
             'checked_at' => now()->toIso8601String(),
         ];
+
+        // Bobot mana yang diukur run ini. `aspect_retrained: true` tidak bisa
+        // membedakan iterasi 1 dari iterasi 2, apalagi bobot yang dipulihkan;
+        // sidik jari kolam bisa. Hanya disimpan bila layanan menyebutnya, supaya
+        // "kunci ada, nilainya null" (bobot dasar) tetap berbeda dari "layanan
+        // versi lama tidak melaporkannya" (ActiveModelService memakai aturan
+        // cadangan untuk yang kedua).
+        $models = is_array($health['models'] ?? null) ? $health['models'] : ($health ?? []);
+
+        foreach ([
+            'sentiment_pool_fingerprint', 'sentiment_pool_samples',
+            'aspect_pool_fingerprint', 'aspect_pool_samples', 'aspect_restored_from',
+        ] as $kunci) {
+            if (array_key_exists($kunci, $models)) {
+                $info[$kunci] = $models[$kunci];
+            }
+        }
+
+        return $info;
     }
 }

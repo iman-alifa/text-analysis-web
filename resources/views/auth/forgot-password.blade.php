@@ -1,25 +1,31 @@
 <x-guest-layout>
-    <div class="mb-4 text-sm text-gray-600">
-        {{ __('Forgot your password? No problem. Just let us know your email address and we will email you a password reset link that will allow you to choose a new one.') }}
-    </div>
+    <x-slot name="judul">Lupa kata sandi</x-slot>
+    <x-slot name="keterangan">
+        Masukkan email Anda, lalu kami kirimkan tautan untuk membuat kata sandi baru.
+    </x-slot>
 
-    <!-- Session Status -->
     <x-auth-session-status class="mb-4" :status="session('status')" />
 
-    <form method="POST" action="{{ route('password.email') }}">
+    <form method="POST" action="{{ route('password.email') }}" class="space-y-5">
         @csrf
 
-        <!-- Email Address -->
         <div>
-            <x-input-label for="email" :value="__('Email')" />
-            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email" :value="old('email')" required autofocus />
+            <x-input-label for="email" value="Email" />
+            <x-text-input id="email" class="block mt-1 w-full" type="email" name="email"
+                          :value="old('email')" required autofocus placeholder="nama@contoh.com" />
             <x-input-error :messages="$errors->get('email')" class="mt-2" />
         </div>
 
-        <div class="flex items-center justify-end mt-4">
-            <x-primary-button>
-                {{ __('Email Password Reset Link') }}
-            </x-primary-button>
-        </div>
+        <button type="submit"
+                class="w-full inline-flex justify-center items-center px-4 py-2.5 rounded-lg bg-blue-600 text-white text-sm font-semibold shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition">
+            Kirim tautan atur ulang
+        </button>
     </form>
+
+    <p class="mt-6 text-center text-sm text-gray-600">
+        Ingat kata sandinya?
+        <a href="{{ route('login') }}" class="font-semibold text-blue-600 hover:text-blue-700 hover:underline">
+            Kembali ke halaman masuk
+        </a>
+    </p>
 </x-guest-layout>

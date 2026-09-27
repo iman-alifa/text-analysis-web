@@ -1179,26 +1179,18 @@ class YouTubeScraperController extends Controller
      */
     public function download($filename)
     {
-        $direktori = storage_path('app/public/exports');
+        $realPath = \App\Support\ScraperExport::path($filename);
 
-        // basename() membuang komponen path apa pun, lalu polanya dibatasi
-        // pada nama yang memang dihasilkan exportComments().
-        $filename = basename($filename);
-
-        if (! preg_match('/^[A-Za-z0-9._-]+\.(csv|xlsx|txt)$/', $filename)) {
+        if ($realPath === null) {
             abort(404, 'File tidak ditemukan');
         }
 
-        $path = $direktori.DIRECTORY_SEPARATOR.$filename;
-        $realPath = realpath($path);
-
-        // Penjagaan terakhir: pastikan berkas yang diselesaikan benar-benar
-        // berada di dalam direktori exports (mis. bila ada symlink).
-        if ($realPath === false || ! str_starts_with($realPath, realpath($direktori).DIRECTORY_SEPARATOR)) {
-            abort(404, 'File tidak ditemukan');
-        }
-
-        return response()->download($realPath)->deleteFileAfterSend(true);
+        // Berkasnya TIDAK dihapus setelah dikirim. Dulu begitu, dan itu membuat
+        // alur "ambil data lalu analisis" mustahil: menekan Unduh menghapus
+        // berkas yang beberapa detik kemudian mau dipakai tombol "Analisis
+        // Sekarang". Menghapus hasil kerja pengguna tepat saat ia mengambilnya
+        // juga bukan perilaku yang bisa dibenarkan dengan alasan kerapian.
+        return response()->download($realPath);
     }
 
     /**

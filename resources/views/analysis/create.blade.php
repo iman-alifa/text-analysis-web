@@ -263,6 +263,32 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
 
             <!-- File Upload Tab -->
             <div id="file-tab" class="tab-content hidden">
+                @if($berkasScraper)
+                    {{-- Datang dari YouTube Scraper. Berkasnya sudah ada di
+                         server, jadi tidak perlu diunduh lalu diunggah ulang.
+                         Seluruh pengaturan di bawah tetap bisa diubah, dan
+                         memilih berkas lain akan menggantikannya. --}}
+                    <div id="scraper-banner" class="mb-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
+                        <div class="flex items-start gap-3">
+                            <svg class="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            <div class="min-w-0 flex-1">
+                                <p class="text-sm font-semibold text-blue-900">Berkas dari YouTube Scraper sudah siap</p>
+                                <p class="mt-0.5 text-sm text-blue-800 break-all">{{ $berkasScraper['nama'] }}</p>
+                                <p class="mt-1 text-xs text-blue-700">
+                                    @if($berkasScraper['baris'])
+                                        {{ number_format((int) $berkasScraper['baris']) }} komentar.
+                                    @endif
+                                    Atur kolom teks dan jenis analisis di bawah, lalu jalankan. Ingin berkas lain? Pilih berkas baru dan berkas ini akan diganti.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="scraped_file" id="scraped-file" value="{{ $berkasScraper['nama'] }}">
+                @endif
+
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-3">
                         Upload File <span class="text-red-500">*</span>
@@ -402,7 +428,7 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                                 <p class="text-xs text-gray-500">
                                     Pilih kolom yang ingin dipakai untuk merinci hasil, misalnya tanggal,
                                     sumber data, atau judul video. Hasil keseluruhan tetap dihitung seperti
-                                    biasa - rinciannya bisa dibuka di halaman hasil tanpa menjalankan
+                                    biasa, lalu rinciannya dibuka di halaman hasil tanpa menjalankan
                                     analisis ulang. Kosongkan bila tidak perlu.
                                 </p>
 
@@ -579,8 +605,11 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                             class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                         <option value="">Default (Rekomendasi)</option>
                         @foreach($preprocessingConfigs as $config)
-                            <option value="{{ $config->id }}" {{ old('preprocessing_config_id') == $config->id ? 'selected' : '' }}>
-                                {{ $config->name }} - {{ $config->description }}
+                            {{-- Preferensi pengguna dari menu Pengaturan menjadi
+                                 nilai awal; old() tetap menang supaya kiriman
+                                 yang gagal validasi tidak kehilangan pilihannya. --}}
+                            <option value="{{ $config->id }}" {{ old('preprocessing_config_id', auth()->user()->preprocessing_config_id) == $config->id ? 'selected' : '' }}>
+                                {{ $config->name }} ({{ $config->description }})
                             </option>
                         @endforeach
                     </select>
@@ -670,7 +699,7 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                         <select name="num_topics"
                                 id="num_topics"
                                 class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            <option value="0" selected>Otomatis - cari jumlah topik terbaik</option>
+                            <option value="0" selected>Otomatis: cari jumlah topik terbaik</option>
                             @for($i = 2; $i <= 20; $i++)
                             <option value="{{ $i }}">{{ $i }} topik</option>
                             @endfor
@@ -684,18 +713,6 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                     </div>
                 </div>
             </div>
-        </div>
-
-        {{-- Bobot model dimuat malas di sisi API, jadi analisis pertama setelah
-             layanan menyala terasa menggantung. Kesiapannya ditampilkan di sini
-             sekadar informasi - pemanasannya sendiri sudah berjalan otomatis di
-             latar belakang begitu sebuah analisis dimulai (lihat
-             ProcessTextAnalysis::handle), jadi tidak ada tombol untuk dipilih
-             di sini lagi. --}}
-        <div id="nlp-status-panel" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 hidden">
-            <h3 class="text-sm font-semibold text-gray-900">Kesiapan Model</h3>
-            <p class="mt-1 text-xs text-gray-500" id="nlp-status-message">Memeriksa...</p>
-            <div class="mt-2 flex flex-wrap gap-2" id="nlp-status-badges"></div>
         </div>
 
         <!-- Submit Buttons -->
@@ -757,8 +774,85 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
 
 @push('scripts')
 <script>
+    /**
+     * Panaskan bobot model begitu halaman ini dibuka.
+     *
+     * Layanan NLP memuat bobot secara MALAS, jadi permintaan pertama membayar
+     * biaya muat model - di kontainer yang baru bangun bisa memakan menit.
+     * Pemanasan sudah dipanggil `ProcessTextAnalysis`, tetapi itu terjadi
+     * SESUDAH pengguna menekan kirim, sehingga menunggunya jatuh persis pada
+     * saat ia paling terasa.
+     *
+     * Dipindahkan ke pembukaan halaman, biayanya tumpang tindih dengan waktu
+     * pengguna memilih berkas dan mengatur opsi - pekerjaan yang sama, hanya
+     * tidak lagi terlihat sebagai jeda.
+     *
+     * Sengaja tanpa penanganan hasil: pemanasan adalah optimasi, bukan
+     * prasyarat (tiap modul punya rantai cadangan). Kegagalannya tidak boleh
+     * memunculkan apa pun ke pengguna.
+     */
+    (function panaskanModel() {
+        const token = document.querySelector('meta[name="csrf-token"]');
+        if (!token) return;
+        fetch('{{ route('analysis.warm-up') }}', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': token.getAttribute('content'),
+                'Accept': 'application/json',
+            },
+            // Permintaan ini hidup lebih lama dari halamannya bila pengguna
+            // langsung berpindah; itu tidak apa-apa - pemanasan tetap berjalan
+            // di sisi layanan.
+            keepalive: true,
+        }).catch(() => {});
+    })();
+
     // Global variable to store file metadata
     let currentFileData = null;
+
+    /**
+     * Lepas rujukan ke berkas hasil scraping.
+     *
+     * Medannya dikosongkan, bukan elemennya dihapus, supaya spanduknya masih
+     * bisa disembunyikan dan dimunculkan lagi tanpa menyusun ulang DOM.
+     */
+    /**
+     * Ada berkas yang siap dianalisis?
+     *
+     * Dua sumber yang sah: input unggahan terisi, atau rujukan ke berkas hasil
+     * scraping yang isinya sudah ada di server. Aturan yang sama dipakai server
+     * di `berkasMasukan()`, jadi penjaga sisi klien tidak pernah menolak
+     * kiriman yang sebenarnya akan diterima.
+     */
+    function adaBerkasMasukan() {
+        const input = document.getElementById('file-input');
+        const scraper = document.getElementById('scraped-file');
+
+        return (input && input.files.length > 0) || (scraper && scraper.value !== '');
+    }
+
+    /** Ekstensi berkas yang sedang dipakai, apa pun sumbernya. */
+    function ekstensiBerkasMasukan() {
+        const input = document.getElementById('file-input');
+
+        if (input && input.files.length > 0) {
+            return '.' + input.files[0].name.split('.').pop().toLowerCase();
+        }
+
+        const scraper = document.getElementById('scraped-file');
+
+        return scraper && scraper.value
+            ? '.' + scraper.value.split('.').pop().toLowerCase()
+            : '';
+    }
+
+    function lepasBerkasScraper() {
+        const medan = document.getElementById('scraped-file');
+        const spanduk = document.getElementById('scraper-banner');
+
+        if (medan) medan.value = '';
+        if (spanduk) spanduk.classList.add('hidden');
+    }
 
     // ==========================================
     // Tab Switching
@@ -843,6 +937,10 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
     // File Processing
     // ==========================================
     function handleFileSelect(file) {
+        // Berkas yang dipilih belakangan itulah maksud pengguna, jadi rujukan
+        // ke berkas scraper dilepas supaya server tidak menerima dua sumber.
+        lepasBerkasScraper();
+
         // Validate file type
         const allowedTypes = ['text/csv', 'text/plain', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
         const allowedExtensions = ['.csv', '.txt', '.xlsx', '.xls'];
@@ -1313,14 +1411,13 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                 return;
             }
         } else {
-            const fileInput = document.getElementById('file-input');
-            if (!fileInput.files.length) {
+            if (!adaBerkasMasukan()) {
                 alert('Upload file terlebih dahulu!');
                 return;
             }
-            
+
             // Validate file configuration
-            const fileExt = '.' + fileInput.files[0].name.split('.').pop().toLowerCase();
+            const fileExt = ekstensiBerkasMasukan();
             
             if (fileExt === '.xlsx' || fileExt === '.xls' || fileExt === '.csv') {
                 const hasHeader = document.getElementById('file_has_header').checked;
@@ -1494,8 +1591,7 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                 return false;
             }
         } else {
-            const fileInput = document.getElementById('file-input');
-            if (!fileInput.files.length) {
+            if (!adaBerkasMasukan()) {
                 e.preventDefault();
                 alert('Upload file terlebih dahulu!');
                 return false;
@@ -1630,7 +1726,7 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
                         + '<p class="mt-2 text-xs font-medium uppercase tracking-wide text-gray-400">Setelah preprocessing</p>'
                         + '<p class="' + (unchanged ? 'text-gray-500 italic' : 'text-gray-800') + '">'
                         + (processed ? escapeHtml(processed) : '<span class="italic text-gray-400">(kosong)</span>')
-                        + (unchanged ? ' - tidak berubah' : '')
+                        + (unchanged ? ' (tidak berubah)' : '')
                         + '</p></div>';
                 }).join('');
 
@@ -1650,59 +1746,50 @@ Pengiriman cepat dan aman">{{ old('manual_text') }}</textarea>
         }
     })();
 
-    // ------------------------------------------------------------------
-    // Kesiapan model NLP
-    // ------------------------------------------------------------------
+
+    // ==========================================
+    // Berkas bawaan dari YouTube Scraper
+    // ==========================================
+    @if($berkasScraper)
     (function () {
-        const panel = document.getElementById('nlp-status-panel');
-        if (!panel) return;
+        const nama = @json($berkasScraper['nama']);
+        const ukuran = {{ (int) $berkasScraper['ukuran'] }};
+        const ekstensi = '.' + nama.split('.').pop().toLowerCase();
 
-        const messageEl = document.getElementById('nlp-status-message');
-        const badgesEl = document.getElementById('nlp-status-badges');
+        // Tab berkas dibuka sendiri: pengguna datang ke sini justru karena
+        // sudah punya berkas, jadi memulainya di tab teks manual salah.
+        switchTab('file');
+        showFileLoading();
 
-        const LABELS = { sentiment: 'Sentimen', aspect: 'Aspek', topic: 'Topik' };
+        const formData = new FormData();
+        formData.append('scraped_file', nama);
 
-        function renderBadges(weights) {
-            badgesEl.innerHTML = Object.entries(weights).map(([name, loaded]) => {
-                const classes = loaded
-                    ? 'bg-green-100 text-green-800'
-                    : 'bg-gray-100 text-gray-600';
-                const label = LABELS[name] || name;
-                return '<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium '
-                    + classes + '">' + label + (loaded ? ' siap' : ' belum dimuat') + '</span>';
-            }).join('');
-        }
+        fetch('{{ route('analysis.upload-file') }}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (!data.success) throw new Error(data.message || 'Berkas gagal dibaca.');
 
-        function loadStatus() {
-            fetch('{{ route('analysis.nlp-status') }}', {
-                headers: { 'Accept': 'application/json' },
-            })
-            .then(response => response.json().then(data => ({ ok: response.ok, data })))
-            .then(({ ok, data }) => {
-                panel.classList.remove('hidden');
-
-                if (!ok || !data.success) {
-                    messageEl.textContent = data.message || 'Layanan analisis tidak merespons.';
-                    badgesEl.innerHTML = '';
-                    return;
-                }
-
-                renderBadges(data.weights_loaded || {});
-
-                if (data.all_ready) {
-                    messageEl.textContent = 'Semua model siap. Analisis akan langsung berjalan.';
-                } else {
-                    messageEl.textContent = 'Sebagian model belum dimuat. Analisis pertama akan memuatnya otomatis di latar belakang, jadi mungkin sedikit lebih lambat.';
-                }
-            })
-            .catch(() => {
-                panel.classList.remove('hidden');
-                messageEl.textContent = 'Tidak bisa memeriksa status layanan analisis.';
-            });
-        }
-
-        loadStatus();
+            currentFileData = data.data;
+            // displayFilePreview hanya membaca .name dan .size, jadi objek
+            // biasa cukup - tidak perlu File sungguhan.
+            displayFilePreview({ name: nama, size: ukuran }, data.data);
+            showFileConfiguration(ekstensi, data.data);
+        })
+        .catch(error => {
+            console.error(error);
+            lepasBerkasScraper();
+            clearFile();
+            alert('Berkas dari scraper tidak bisa dibaca: ' + error.message
+                + '\nSilakan pilih berkas secara manual.');
+        });
     })();
+    @endif
 </script>
 @endpush
 @endsection

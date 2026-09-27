@@ -15,6 +15,10 @@ return [
 
     'default' => env('QUEUE_CONNECTION', 'database'),
 
+    // Koneksi yang dipakai RetrainModel. Lihat koneksi 'training' di bawah.
+    // Tes menyetelnya ke 'sync' lewat phpunit.xml.
+    'training_connection' => env('QUEUE_TRAINING_CONNECTION', 'training'),
+
     /*
     |--------------------------------------------------------------------------
     | Queue Connections
@@ -54,6 +58,29 @@ return [
             // dan job akhirnya ditandai gagal setelah 3 percobaan. Inilah sebab
             // "analisis gagal / timeout" yang tampak acak.
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 4200),
+            'after_commit' => false,
+        ],
+
+        // Antrean khusus pelatihan ulang (RetrainModel), di tabel `jobs` yang
+        // sama tetapi dengan nama antrean dan retry_after sendiri.
+        //
+        // Dipisah karena dua alasan:
+        // 1. Pelatihan di CPU VPS 4 vCPU diperkirakan 41-61 menit per putaran
+        //    (terukur 1,68 dtk/sampel sentimen di laptop, VPS 2-3x lebih
+        //    lambat). Satu worker bersama berarti analisis pengguna bahkan
+        //    tidak dimulai selama itu.
+        // 2. retry_after antrean analisis (4200) lebih kecil daripada
+        //    RetrainModel::$timeout (7200), sehingga pelatihan yang masih
+        //    berjalan bisa dilepas kembali ke antrean.
+        //
+        // Rantainya: HTTP retrain (6600) < RetrainModel::$timeout (7200) <
+        // retry_after ini (7500). Dijaga QueueTimeoutConfigTest.
+        'training' => [
+            'driver' => 'database',
+            'connection' => env('DB_QUEUE_CONNECTION'),
+            'table' => env('DB_QUEUE_TABLE', 'jobs'),
+            'queue' => 'training',
+            'retry_after' => (int) env('DB_TRAINING_RETRY_AFTER', 7500),
             'after_commit' => false,
         ],
 

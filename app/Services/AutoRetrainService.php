@@ -25,7 +25,10 @@ use Illuminate\Support\Facades\Log;
  */
 class AutoRetrainService
 {
-    public function __construct(private RetrainingService $retraining) {}
+    public function __construct(
+        private RetrainingService $retraining,
+        private RetrainDeferralService $tunda,
+    ) {}
 
     public function enabled(): bool
     {
@@ -73,6 +76,13 @@ class AutoRetrainService
             return $tolak('Pelatihan ulang otomatis dimatikan lewat konfigurasi.');
         }
 
+        // Selama pemicu tertunda diputar ulang, pemicu langsung tidak boleh
+        // menyelip di antaranya: kurva yang direkonstruksi akan bercampur
+        // dengan putaran yang tidak pernah ditunda.
+        if (RetrainDeferralService::putarUlangAktif()) {
+            return $tolak('Pemutaran ulang pemicu tertunda sedang berjalan; koreksi ini ikut pada pemicu berikutnya.');
+        }
+
         if (ModelTraining::running()->exists()) {
             return $tolak('Masih ada pelatihan yang berjalan; koreksi ini ikut pada putaran berikutnya.', true);
         }
@@ -83,6 +93,16 @@ class AutoRetrainService
 
         if (($sisaJeda = $this->cooldownRemaining()) > 0) {
             return $tolak("Masih dalam jeda {$sisaJeda} jam sejak pelatihan terakhir.");
+        }
+
+        // Fase evaluasi kuesioner: pemicunya DICATAT, tidak dijalankan.
+        // Sengaja diperiksa setelah ambang dan jeda, supaya yang tercatat
+        // persis pemicu yang akan terjadi bila pelatihan berjalan langsung.
+        // Bukan "menghalangi" bagi pengguna: halaman koreksi tetap diam.
+        if (RetrainDeferralService::aktif()) {
+            $catatan = $this->tunda->catat($baru, $analysisId);
+
+            return $tolak("Ditunda (fase evaluasi kuesioner), dicatat sebagai pemicu #{$catatan->id}.");
         }
 
         $hasil = $this->retraining->dispatch(
@@ -127,15 +147,19 @@ class AutoRetrainService
      *
      * Memakai `verified_at`, bukan `updated_at`: baris latih ikut ter-update
      * karena hal lain, dan itu akan terhitung sebagai koreksi baru.
+     *
+     * Titiknya BATAS KOLAM yang sudah dilatih atau dicatat, bukan waktu
+     * pelatihan dibuat - lihat RetrainDeferralService::batasKolamTerakhir().
+     * Jeda tetap memakai waktu pelatihan sebenarnya.
      */
     public function newCorrectionCount(?int $analysisId = null): int
     {
-        $terakhir = ModelTraining::latest('created_at')->first();
+        $sejak = RetrainDeferralService::batasKolamTerakhir();
 
         return TrainingItem::whereHas('textAnalysis')
             ->where('is_corrected', true)
             ->when($analysisId, fn ($query) => $query->where('text_analysis_id', $analysisId))
-            ->when($terakhir, fn ($query) => $query->where('verified_at', '>', $terakhir->created_at))
+            ->when($sejak, fn ($query) => $query->where('verified_at', '>', $sejak))
             ->count();
     }
 
@@ -160,13 +184,15 @@ class AutoRetrainService
             return 0;
         }
 
-        $terakhir = ModelTraining::latest('created_at')->first();
+        // Pemicu tertunda dihitung sebagai "pelatihan" untuk jeda, sama seperti
+        // untuk hitungan koreksi baru.
+        $terakhir = RetrainDeferralService::titikTerakhir();
 
         if (! $terakhir) {
             return 0;
         }
 
-        $boleh = $terakhir->created_at->copy()->addHours($jeda);
+        $boleh = \Illuminate\Support\Carbon::parse($terakhir)->addHours($jeda);
 
         return $boleh->isFuture() ? (int) ceil(now()->diffInMinutes($boleh) / 60) : 0;
     }

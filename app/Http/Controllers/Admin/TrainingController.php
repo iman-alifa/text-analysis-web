@@ -11,6 +11,7 @@ use App\Models\TrainingItem;
 use App\Services\AutoRetrainService;
 use App\Services\ModelEvaluationService;
 use App\Services\NLPApiService;
+use App\Services\RetrainDeferralService;
 use App\Services\RetrainingService;
 use App\Services\TrainingItemService;
 use Illuminate\Http\Request;
@@ -25,7 +26,7 @@ class TrainingController extends Controller
     /**
      * HALAMAN 1: INDEX (DASHBOARD)
      */
-    public function index(AutoRetrainService $autoRetrain)
+    public function index(AutoRetrainService $autoRetrain, RetrainDeferralService $tundaService)
     {
         // 1. Hitung Statistik Global dari TrainingItem
         // Hanya baris yang analisisnya masih ada. TextAnalysis memakai soft
@@ -66,6 +67,13 @@ class TrainingController extends Controller
         // dilatih, dan tanpa eager load itu satu query per baris.
         $trainings = ModelTraining::with(['user', 'textAnalysis'])->latest()->limit(10)->get();
 
+        // Pelatihan yang bobotnya sedang dipakai layanan, per modul. Pelatihan
+        // terbaru belum tentu yang aktif: model aspek pernah dikembalikan ke
+        // iterasi sebelumnya karena iterasi baru lebih buruk.
+        $modelAktif = app(\App\Services\ActiveModelService::class);
+        $aktif = $modelAktif->aktif();
+        $pelatihanAktif = collect($modelAktif->pelatihanAktif())->filter()->map->id->all();
+
         // Sidik jari kolam yang sama dengan putaran SEBELUMNYA pada modul yang
         // sama berarti kolamnya tidak bertambah - keliru menurut protokol kolam,
         // dan tidak terlihat dari angka mana pun yang lain. Dibandingkan per
@@ -91,6 +99,7 @@ class TrainingController extends Controller
         // pengguna: pelatihan ulang adalah urusan internal sistem, dan
         // halaman ini memang permukaan pengawasannya.
         $autoStatus = $autoRetrain->status();
+        $tunda = $tundaService->status();
 
         // Koreksi per analisis, supaya pelatihan bisa dipicu per lembaga.
         // Putaran pertama studi kasus melatih gabungan dan hanya 19 dari 218
@@ -116,7 +125,7 @@ class TrainingController extends Controller
         // riwayat yang suhunya diwarisi alih-alih diukur ulang.
         $ambangValidasi = (int) config('analysis.auto_retrain.calibration_min_val', 50);
 
-        return view('admin.training.index', compact('stats', 'batches', 'stopwords', 'trainings', 'snapshots', 'autoStatus', 'perAnalisis', 'ambangLatih', 'ambangValidasi', 'sidikBerulang'));
+        return view('admin.training.index', compact('stats', 'batches', 'stopwords', 'trainings', 'snapshots', 'autoStatus', 'perAnalisis', 'ambangLatih', 'ambangValidasi', 'sidikBerulang', 'tunda', 'aktif', 'pelatihanAktif'));
     }
 
     /**
@@ -413,5 +422,38 @@ class TrainingController extends Controller
         }
 
         return back()->with('success', "Berhasil sinkronisasi {$count} file.");
+    }
+
+    // ------------------------------------------------ fase evaluasi kuesioner
+
+    public function setTunda(Request $request, RetrainDeferralService $tunda)
+    {
+        $request->validate(['aktif' => 'required|boolean']);
+
+        $tunda->setAktif($request->boolean('aktif'));
+
+        return redirect(route('admin.training.index').'#fase-kuesioner')->with('success', $request->boolean('aktif')
+            ? 'Mode tunda aktif. Pelatihan otomatis dicatat, tidak dijalankan.'
+            : 'Mode tunda dimatikan. Pemicu berikutnya kembali menjalankan pelatihan langsung.');
+    }
+
+    public function putarUlang(RetrainDeferralService $tunda)
+    {
+        try {
+            $tunda->mulai();
+        } catch (\RuntimeException $e) {
+            return redirect(route('admin.training.index').'#fase-kuesioner')->with('error', $e->getMessage());
+        }
+
+        return redirect(route('admin.training.index').'#fase-kuesioner')
+            ->with('success', 'Pemutaran ulang dimulai. Putaran berikutnya berjalan otomatis setelah putaran sebelumnya terukur.');
+    }
+
+    public function hentikanPutarUlang(RetrainDeferralService $tunda)
+    {
+        $tunda->hentikan();
+
+        return redirect(route('admin.training.index').'#fase-kuesioner')
+            ->with('success', 'Pemutaran ulang dihentikan. Pemicu yang tersisa tetap tertunda.');
     }
 }

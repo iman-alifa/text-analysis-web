@@ -68,7 +68,22 @@ class EvaluationController extends Controller
             }
         }
 
+        // Run mana yang mengukur bobot yang sedang dipakai, per modul. Run
+        // terakhir belum tentu: bobot bisa dipulihkan ke iterasi sebelumnya.
+        $modelAktif = app(\App\Services\ActiveModelService::class);
+        $aktif = $modelAktif->aktif();
+        $runAktif = [];
+
+        foreach ($selesai as $run) {
+            foreach (\App\Services\ActiveModelService::MODUL as $modul) {
+                if ($modelAktif->kunciRun($run, $modul) === $aktif[$modul]) {
+                    $runAktif[$run->id][] = $modul;
+                }
+            }
+        }
+
         return view('admin.evaluation.show', [
+            'runAktif' => $runAktif,
             'dataset' => $dataset,
             'kurva' => $kurva,
             'runTerakhir' => $selesai->first(),

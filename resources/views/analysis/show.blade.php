@@ -312,16 +312,19 @@
         </div>
         @endif
 
-        @if($confidence)
-            @include('analysis.partials.confidence-panel', ['confidence' => $confidence])
-        @endif
-
+        {{-- Ringkasan eksekutif AI menempel langsung pada ringkasan analisis:
+             keduanya menjawab pertanyaan yang sama ("jadi hasilnya apa"), dan
+             menyelipkan panel keyakinan di antaranya memutus bacaan. --}}
         @include('analysis.partials.ai-interpretation', [
             'section' => 'overview',
             'judul' => 'Ringkasan Eksekutif AI',
             'keterangan' => 'Menyatukan seluruh bagian hasil menjadi satu gambaran utuh.',
             'stored' => $aiSections['overview'] ?? null,
         ])
+
+        @if($confidence)
+            @include('analysis.partials.confidence-panel', ['confidence' => $confidence])
+        @endif
 
         <!-- Metrics Cards -->
         @php
@@ -426,14 +429,6 @@
 
             <!-- Predictions List -->
             @if($result->predictions)
-            @php
-                $reviewQueue = $result->metrics['review_queue'] ?? null;
-                $qualityCounters = collect([
-                    'total_empty' => ['label' => 'baris kosong', 'note' => 'tidak ikut dihitung dalam persentase'],
-                    'total_truncated' => ['label' => 'teks terpotong', 'note' => 'melebihi 512 token, ekornya tidak dinilai'],
-                    'total_failed' => ['label' => 'baris gagal dinilai', 'note' => 'model tidak berhasil menilai'],
-                ])->filter(fn ($meta, $key) => ($result->metrics[$key] ?? 0) > 0);
-            @endphp
             <div id="bagian-prediksi" class="scroll-mt-24 bg-white rounded-xl shadow-sm border border-gray-100">
                 <div class="px-6 py-4 border-b border-gray-200">
                     <div class="flex items-center justify-between flex-wrap gap-3">
@@ -447,11 +442,6 @@
                             <button type="button" onclick="filterPredictions('all')" class="filter-btn active px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white" data-filter="all" aria-pressed="true">
                                 Semua
                             </button>
-                            @if($reviewQueue && $reviewQueue['count'] > 0)
-                            <button type="button" onclick="filterPredictions('review')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-100 text-amber-800 hover:bg-amber-200" data-filter="review" aria-pressed="false">
-                                Perlu Ditinjau ({{ $reviewQueue['count'] }})
-                            </button>
-                            @endif
                             <button type="button" onclick="filterPredictions('positive')" class="filter-btn px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 text-gray-700 hover:bg-gray-200" data-filter="positive" aria-pressed="false">
                                 Positif
                             </button>
@@ -465,31 +455,10 @@
                     </div>
                 </div>
                 
-                @if($reviewQueue && $reviewQueue['count'] > 0)
-                <div class="px-6 py-4 border-b border-gray-200 bg-amber-50">
-                    <p class="text-sm text-amber-900">
-                        <strong>{{ $reviewQueue['count'] }} baris</strong>
-                        ({{ round($reviewQueue['share'] * 100, 1) }}% dari yang dinilai)
-                        punya keyakinan di bawah {{ round($reviewQueue['threshold'] * 100, 1) }}%.
-                        Mengoreksi baris ini lebih dulu adalah cara termurah mengumpulkan data latih.
-                    </p>
-                    <p class="mt-1 text-xs text-amber-800">
-                        Catatan: antrean ini sengaja berisi baris yang model paling ragu, jadi
-                        <strong>jangan memakainya untuk mengukur akurasi</strong> - untuk pengukuran, ambil sampel acak.
-                    </p>
-                </div>
-                @endif
-
-                @if($qualityCounters->isNotEmpty())
-                <div class="px-6 py-4 border-b border-gray-200 bg-blue-50">
-                    <p class="text-sm font-medium text-blue-900 mb-1">Catatan mutu data</p>
-                    <ul class="text-xs text-blue-800 space-y-0.5">
-                        @foreach($qualityCounters as $key => $meta)
-                        <li>&bull; {{ $result->metrics[$key] }} {{ $meta['label'] }} - {{ $meta['note'] }}</li>
-                        @endforeach
-                    </ul>
-                </div>
-                @endif
+                {{-- Tab "Perlu Ditinjau", catatan antrean tinjauan, dan "Catatan mutu
+                     data" dihapus atas permintaan pemilik proyek (24 Sep 2026).
+                     Ajakan mengoreksi baris yang ragu tetap ada di panel
+                     keyakinan di atas; di sini cukup daftar prediksinya. --}}
 
                 <!-- Search Box -->
                 <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
@@ -691,7 +660,7 @@
                      ke beberapa baris - spasi dan barisnya ikut terender
                      sehingga assertSee/assertStringContainsString yang utuh
                      tidak akan pernah cocok. --}}
-                <p class="text-xs text-gray-500 mb-3">{{ 'Menampilkan '.count($chartData['aspect']['labels']).' aspek dengan penyebutan terbanyak dari '.count($aspectRows).' - grafik untuk semuanya akan penuh sesak dan sulit dibaca. Aspek selebihnya tetap ada di Detail Aspek di bawah.' }}</p>
+                <p class="text-xs text-gray-500 mb-3">{{ 'Menampilkan '.count($chartData['aspect']['labels']).' aspek dengan penyebutan terbanyak dari '.count($aspectRows).'. Grafik untuk semuanya akan penuh sesak dan sulit dibaca. Aspek selebihnya tetap ada di Detail Aspek di bawah.' }}</p>
                 @endif
                 <div class="chart-container mt-3" style="height: 400px;">
                     @php
@@ -714,7 +683,7 @@
                      mengiranya berlaku kalau tidak dikatakan. --}}
                 <p class="text-xs text-gray-500 mb-4">
                     Persentase di bawah berasal dari sentimen tingkat klausa per aspek, bukan dari sentimen
-                    tingkat dokumen - akurasi model yang dilaporkan di halaman evaluasi tidak berlaku untuknya.
+                    tingkat dokumen, sehingga akurasi model yang dilaporkan di halaman evaluasi tidak berlaku untuknya.
                 </p>
                 <div class="space-y-4" id="aspect-cards-container">
                     @foreach($aspectRows as $i => $aspect)
@@ -953,9 +922,9 @@
 
             @if($topicQuality)
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 class="text-lg font-semibold text-gray-900 mb-1">Mutu Pemodelan Topik</h3>
+                <h3 class="text-lg font-semibold text-gray-900 mb-1">Mutu Topic Modeling</h3>
                 <p class="text-sm text-gray-500 mb-4">
-                    Ukuran seberapa koheren topik yang terbentuk pada korpus ini.
+                    Empat ukuran tentang seberapa rapi topik terbentuk dari teks Anda.
                 </p>
 
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -963,7 +932,7 @@
                     <div class="rounded-lg border p-4 {{ $cvBand['class'] }}">
                         <p class="text-xs font-medium uppercase tracking-wide opacity-80">Koherensi (c<sub>v</sub>)</p>
                         <p class="mt-1 text-2xl font-bold">{{ number_format($cv, 4) }}</p>
-                        <p class="text-xs mt-1">{{ $cvBand['label'] }}</p>
+                        <p class="text-xs mt-1">{{ \App\Helpers\ResultPresenter::coherenceMeaning($cv) }}</p>
                     </div>
                     @endif
 
@@ -979,7 +948,7 @@
                     <div class="rounded-lg border border-gray-200 p-4">
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Dokumen di luar topik</p>
                         <p class="mt-1 text-2xl font-bold text-gray-900">{{ round($topicQuality['outlier_rate'] * 100, 1) }}%</p>
-                        <p class="text-xs mt-1 text-gray-500">Wajar pada kisaran 5-20%</p>
+                        <p class="text-xs mt-1 text-gray-500">Porsi teks yang tidak masuk ke topik mana pun</p>
                     </div>
                     @endisset
 
@@ -988,20 +957,12 @@
                         <p class="text-xs font-medium uppercase tracking-wide text-gray-500">c<sub>NPMI</sub></p>
                         <p class="mt-1 text-2xl font-bold text-gray-900">{{ number_format($topicQuality['c_npmi'], 4) }}</p>
                         <p class="text-xs mt-1 text-gray-500">
-                            Ukuran pembanding, rentang &minus;1 sampai 1.
-                            Bernilai negatif itu wajar pada korpus komentar.
+                            Ukuran kepaduan kedua, dihitung dengan cara berbeda.
+                            Rentang &minus;1 sampai 1, dan nilai negatif lazim pada teks komentar.
                         </p>
                     </div>
                     @endisset
                 </div>
-
-                <p class="mt-4 text-xs text-gray-500">
-                    Nilai c<sub>v</sub> <strong>tidak sebanding antar korpus</strong>, jadi jangan dibandingkan
-                    langsung dengan angka dari penelitian lain - gunakan untuk membandingkan
-                    konfigurasi pada data yang sama. <strong>Jumlah topik bergantung pada seed</strong>
-                    (terukur 13,6 &plusmn; 4,98 pada lima seed) walaupun koherensinya stabil, jadi sertakan
-                    seed dan rentangnya bila angkanya dikutip.
-                </p>
             </div>
             @endif
 
@@ -1034,7 +995,7 @@
                     </div>
                     <div id="wordCloudCanvas" class="w-full" style="height: 360px;">
                         <canvas id="wordCloudCanvasEl" style="width:100%; height:100%;" role="img"
-                                aria-label="Awan kata dari kata yang paling sering muncul. Daftar lengkapnya ada pada tabel kata kunci tiap topik di bawah."></canvas>
+                                aria-label="Word cloud dari kata yang paling sering muncul. Daftar lengkapnya ada pada tabel kata kunci tiap topik di bawah."></canvas>
                     </div>
                     @if(isset($result->topic_results['word_frequencies']) && count($result->topic_results['word_frequencies']) > 0)
                         @php
@@ -2182,11 +2143,50 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     daftar.classList.toggle('hidden', (narasi.highlights || []).length === 0);
 
+                    // "Mengapa ini penting" - satu paragraf.
+                    const kotakWhy = blok.querySelector('[data-ai-why-box]');
+                    const teksWhy = blok.querySelector('[data-ai-why]');
+
+                    if (kotakWhy && teksWhy) {
+                        const isiWhy = (narasi.why || '').trim();
+                        teksWhy.textContent = isiWhy;
+                        kotakWhy.classList.toggle('hidden', isiWhy === '');
+                    }
+
+                    // "Cara memanfaatkan hasil ini" - daftar bernomor.
+                    const kotakHow = blok.querySelector('[data-ai-how-box]');
+                    const daftarHow = blok.querySelector('[data-ai-how]');
+
+                    if (kotakHow && daftarHow) {
+                        const langkah = narasi.how || [];
+                        daftarHow.innerHTML = '';
+
+                        langkah.forEach((isi, i) => {
+                            const li = document.createElement('li');
+                            li.className = 'text-sm text-emerald-900 flex gap-2';
+
+                            const nomor = document.createElement('span');
+                            nomor.className = 'flex-shrink-0 w-5 h-5 rounded-full bg-emerald-200 '
+                                + 'text-emerald-900 text-xs font-bold flex items-center justify-center';
+                            nomor.textContent = String(i + 1);
+
+                            const teks = document.createElement('span');
+                            // textContent, bukan innerHTML: keluaran model
+                            // tidak pernah disisipkan sebagai HTML.
+                            teks.textContent = isi;
+
+                            li.append(nomor, teks);
+                            daftarHow.appendChild(li);
+                        });
+
+                        kotakHow.classList.toggle('hidden', langkah.length === 0);
+                    }
+
                     const jejak = blok.querySelector('[data-ai-provenance]');
 
                     if (jejak) {
-                        jejak.textContent = 'Ditulis oleh AI (' + (narasi.model || '-') + ') baru saja'
-                            + ' \u2014 angka tetap berasal dari hasil analisis, bukan dari AI.';
+                        jejak.textContent = 'Ditulis oleh AI (' + (narasi.model || '-') + ') baru saja.'
+                            + ' Angka tetap berasal dari hasil analisis, bukan dari AI.';
                     }
 
                     hasil.classList.remove('hidden');

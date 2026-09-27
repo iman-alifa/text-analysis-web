@@ -66,7 +66,7 @@
                     </div>
                     <div>
                         <h1 class="text-2xl font-bold leading-tight">Bantu Tingkatkan Akurasi Model AI</h1>
-                        <p class="text-indigo-200 text-sm mt-0.5">Active Learning - Kontribusi Anda sangat berarti</p>
+                        <p class="text-indigo-200 text-sm mt-0.5">Active Learning. Kontribusi Anda sangat berarti</p>
                     </div>
                 </div>
                 <p class="text-indigo-100 leading-relaxed">
@@ -111,20 +111,20 @@
             <div class="text-sm text-blue-800 space-y-1">
                 <p class="font-semibold">Apa itu Confidence Score?</p>
                 <p>
-                    Nilai <strong>confidence</strong> (0 - 1) menunjukkan seberapa yakin model terhadap prediksinya.
+                    Nilai <strong>confidence</strong> (0 sampai 1) menunjukkan seberapa yakin model terhadap prediksinya.
                     Nilai mendekati <span class="font-medium text-red-600">0 (merah)</span> berarti model ragu-ragu -
                     kemungkinan besar prediksinya salah dan membutuhkan koreksi Anda.
                     Nilai mendekati <span class="font-medium text-green-600">1 (hijau)</span> berarti model sangat yakin.
                 </p>
                 <div class="flex flex-wrap gap-3 pt-1">
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-red-500"></span> &lt; 40% - Rendah, perlu koreksi
+                        <span class="w-2 h-2 rounded-full bg-red-500"></span> &lt; 40%: rendah, perlu koreksi
                     </span>
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-yellow-500"></span> 40-70% - Sedang
+                        <span class="w-2 h-2 rounded-full bg-yellow-500"></span> 40-70%: sedang
                     </span>
                     <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
-                        <span class="w-2 h-2 rounded-full bg-green-500"></span> &gt; 70% - Tinggi, sudah akurat
+                        <span class="w-2 h-2 rounded-full bg-green-500"></span> &gt; 70%: tinggi, sudah akurat
                     </span>
                 </div>
             </div>
@@ -349,7 +349,7 @@
         @if(($fokusInfo['disembunyikan_uji'] ?? 0) > 0)
         <p class="mb-4 text-xs text-gray-500">
             {{ number_format($fokusInfo['disembunyikan_uji']) }} baris tidak ditampilkan karena
-            dipakai sebagai data uji evaluasi.
+            dipakai sebagai test set evaluasi.
         </p>
         @endif
 
@@ -529,7 +529,7 @@
                                    id="aspek-{{ $item->id }}"
                                    name="corrections[{{ $index }}][corrected_aspects]"
                                    value="{{ $item->corrected_aspects ? implode(', ', $item->corrected_aspects) : (is_array($item->detected_aspects) ? implode(', ', $item->detected_aspects) : '') }}"
-                                   placeholder="Belum ada aspek terdeteksi - isi kalau ada, pisahkan dengan koma"
+                                   placeholder="Belum ada aspek terdeteksi. Isi kalau ada, pisahkan dengan koma"
                                    class="w-full text-xs px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder:italic placeholder:text-gray-400">
                             <p class="mt-1 text-[11px] text-gray-400">Atau blok kata pada teks di sebelah kiri (maks. 3 kata) untuk menambahkannya.</p>
                         </div>
@@ -923,7 +923,7 @@
     @if($items->hasPages())
     <div class="mt-6">
         <p class="mb-2 text-xs text-gray-500">
-            Simpan koreksi pada halaman ini sebelum berpindah - perubahan yang belum
+            Simpan koreksi pada halaman ini sebelum berpindah, karena perubahan yang belum
             disimpan tidak ikut terbawa ke halaman berikutnya.
         </p>
         {{ $items->links() }}

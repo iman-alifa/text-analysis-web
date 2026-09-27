@@ -1,29 +1,35 @@
-<x-app-layout>
-    <x-slot name="header">
-        <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-            {{ __('Profile') }}
-        </h2>
-    </x-slot>
+{{--
+    Halaman Pengaturan.
 
-    <div class="py-12">
-        <div class="max-w-7xl mx-auto sm:px-6 lg:px-8 space-y-6">
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
-                <div class="max-w-xl">
-                    @include('profile.partials.update-profile-information-form')
-                </div>
-            </div>
+    Memakai @extends, bukan <x-app-layout>. Komponen itu merender
+    `layouts.app`, tetapi layout tersebut menaruh isinya lewat @yield('content')
+    dan bukan {{ $slot }} - jadi seluruh isi halaman ini dibuang diam-diam dan
+    yang tampil hanya kerangkanya. Halaman profil karena itu tidak pernah benar-
+    benar menampilkan formulirnya sejak awal.
+--}}
+@extends('layouts.app')
 
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
-                <div class="max-w-xl">
-                    @include('profile.partials.update-password-form')
-                </div>
-            </div>
-
-            <div class="p-4 sm:p-8 bg-white shadow sm:rounded-lg">
-                <div class="max-w-xl">
-                    @include('profile.partials.delete-user-form')
-                </div>
-            </div>
-        </div>
+@section('content')
+<div class="max-w-3xl space-y-6">
+    <div>
+        <h1 class="text-3xl font-bold text-gray-900">Pengaturan</h1>
+        <p class="mt-1 text-sm text-gray-600">Preferensi analisis, data akun, dan kata sandi.</p>
     </div>
-</x-app-layout>
+
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sm:p-8">
+        @include('profile.partials.update-preferences-form')
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sm:p-8">
+        @include('profile.partials.update-profile-information-form')
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sm:p-8">
+        @include('profile.partials.update-password-form')
+    </div>
+
+    <div class="bg-white rounded-xl shadow-sm border border-red-100 p-6 sm:p-8">
+        @include('profile.partials.delete-user-form')
+    </div>
+</div>
+@endsection

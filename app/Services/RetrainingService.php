@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Jobs\RetrainModel;
+use App\Models\EvaluationDataset;
 use App\Models\EvaluationRun;
 use App\Models\ModelTraining;
 use App\Models\TrainingItem;
@@ -81,10 +82,32 @@ class RetrainingService
      */
     public function correctedItems()
     {
+        return $this->correctedItemsSampai(null);
+    }
+
+    /**
+     * Kolam koreksi SEPERTI PADA SUATU SAAT: hanya koreksi yang sudah ada pada
+     * `$batas`. Dipakai HANYA untuk memutar ulang pemicu yang ditunda selama
+     * fase evaluasi kuesioner (RetrainDeferralService), supaya putaran ke-k
+     * melatih kolam yang akan dilihatnya bila pelatihan berjalan langsung.
+     *
+     * Tanpa batas ini, N putaran yang diputar ulang sekaligus semuanya melatih
+     * kolam akhir yang sama - dengan bobot dasar dan seed yang sama, hasilnya
+     * identik N kali dan kurvanya tidak mengukur apa pun.
+     *
+     * Ini batas WAKTU, bukan penyaring per analisis: kolamnya tetap seluruh
+     * lembaga, hanya dipotong di titik waktu pemicunya. Koreksi tanpa
+     * `verified_at` (data lama) dianggap sudah ada sejak awal.
+     */
+    public function correctedItemsSampai(?\DateTimeInterface $batas)
+    {
         $hashGolden = $this->golden->frozenHashes();
 
         $items = TrainingItem::whereHas('textAnalysis')
             ->where('is_corrected', true)
+            ->when($batas, fn ($q) => $q->where(
+                fn ($w) => $w->whereNull('verified_at')->orWhere('verified_at', '<=', $batas)
+            ))
             ->get();
 
         if (empty($hashGolden)) {
@@ -211,6 +234,15 @@ class RetrainingService
             return null;
         }
 
+        // Tanpa test set beku tidak ada yang BISA mengukur iterasi itu, jadi
+        // tidak ada yang hilang bila bobotnya tertimpa. Tanpa pengecualian ini
+        // pemasangan yang belum punya golden dataset berhenti selamanya
+        // setelah putaran pertama: penjaga menunggu evaluasi yang tidak akan
+        // pernah dijalankan.
+        if (! EvaluationDataset::ujiAktif()) {
+            return null;
+        }
+
         $sejak = $terakhir->completed_at ?? $terakhir->created_at;
 
         $sudahDiukur = EvaluationRun::where('status', 'completed')
@@ -232,6 +264,8 @@ class RetrainingService
      * @param  int|null  $triggeredBy  id pengguna, atau null bila dipicu sistem
      * @param  int|null  $analysisId  analisis yang memicu putaran ini; dicatat, tidak menyaring
      * @param  bool  $paksa  lewati penjaga kelayakan (setara `--force`)
+     * @param  \DateTimeInterface|null  $batas  HANYA untuk memutar ulang pemicu
+     *                                          tertunda: kolam dipotong pada saat itu
      * @return array{dispatched: array, skipped: array, trainings: array, error: string|null}
      */
     public function dispatch(
@@ -240,14 +274,24 @@ class RetrainingService
         ?int $triggeredBy = null,
         ?int $analysisId = null,
         bool $paksa = false,
+        ?\DateTimeInterface $batas = null,
     ): array {
         $kosong = ['dispatched' => [], 'skipped' => [], 'trainings' => []];
+
+        // Fase evaluasi kuesioner: pelatihan apa pun ditahan sampai golden
+        // dataset baru diambil, termasuk tombol admin. Pemutaran ulang (yang
+        // membawa $batas) dan "paksa" yang disengaja tetap boleh.
+        if (RetrainDeferralService::aktif() && $batas === null && ! $paksa) {
+            return $kosong + ['error' => 'Mode tunda pelatihan sedang aktif (fase evaluasi kuesioner). '
+                .'Pemicu dicatat dan diputar ulang setelah golden dataset baru diambil. '
+                .'Matikan mode tunda di /admin/training, atau centang "paksa".'];
+        }
 
         if (ModelTraining::running()->exists()) {
             return $kosong + ['error' => 'Masih ada proses training yang berjalan. Tunggu sampai selesai.'];
         }
 
-        $items = $this->correctedItems();
+        $items = $this->correctedItemsSampai($batas);
 
         if ($items->isEmpty()) {
             return $kosong + ['error' => 'Belum ada data terkoreksi untuk dilatih.'];
@@ -346,7 +390,8 @@ class RetrainingService
                 'Pelatihan sebelumnya belum diukur: pelatihan #%d (%s%s) selesai %s dan belum ada '
                 .'evaluasi sesudahnya. Melatih sekarang akan MENIMPA bobot itu, dan iterasinya '
                 .'tidak bisa diukur belakangan karena bobot lamanya sudah hilang. '
-                .'Jalankan evaluasi dulu di /admin/evaluation, atau centang "paksa".',
+                .'Evaluasi dijalankan otomatis di akhir putaran; tunggu hasilnya muncul di '
+                .'/admin/evaluation, jalankan manual di sana bila evaluasinya gagal, atau centang "paksa".',
                 $belum->id,
                 $belum->model_type,
                 $belum->text_analysis_id ? ', analisis #'.$belum->text_analysis_id : '',

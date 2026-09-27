@@ -102,7 +102,7 @@ class ResultPresenter
         return match (strtolower($type)) {
             'sentiment' => 'Analisis Sentimen',
             'aspect' => 'Analisis Aspek',
-            'topic' => 'Pemodelan Topik',
+            'topic' => 'Topic Modeling',
             'combined' => 'Analisis Gabungan',
             default => ucfirst($type),
         };
@@ -176,5 +176,23 @@ class ResultPresenter
     public static function coherenceLabel(?float $cv): ?string
     {
         return self::coherenceBand($cv)['label'] ?? null;
+    }
+
+    /**
+     * Arti angka koherensi, bukan penilaiannya.
+     *
+     * Label pita ("Baik untuk teks pendek") menilai tanpa memberi tahu apa yang
+     * sebenarnya diukur, sehingga pembaca tidak bisa menimbang sendiri apakah
+     * penilaian itu masuk akal untuk datanya. Keterangan pada kartu karena itu
+     * mendefinisikan angkanya; pitanya tinggal dipakai untuk warna.
+     */
+    public static function coherenceMeaning(?float $cv): ?string
+    {
+        if ($cv === null) {
+            return null;
+        }
+
+        return 'Seberapa sering kata kunci satu topik benar-benar muncul berdekatan '
+            .'di teks yang sama. Rentang 0 sampai 1, makin tinggi makin padu.';
     }
 }

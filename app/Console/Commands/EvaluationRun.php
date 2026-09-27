@@ -118,13 +118,17 @@ class EvaluationRun extends Command
                 $parsial = $aspek['partial'] ?? [];
                 $sering = $aspek['macro_frequent'] ?? [];
 
+                // Parsial adalah angka UTAMA (keputusan pemilik proyek, 24 Sep
+                // 2026): konsep yang ditemukan dalam granularitas frasa yang
+                // berbeda tetap dihitung ketemu. Ketat tetap dilaporkan sebagai
+                // batas bawah.
                 $this->table(['Aspek (multi-label)', 'Micro-F1', 'Macro-F1'], [
-                    ['Ketat (nama sama persis)', $aspek['micro_f1'].'%', $aspek['macro_f1'].'%'],
                     [
-                        'Parsial (irisan kata-dasar)',
+                        'Parsial (irisan kata-dasar) - UTAMA',
                         isset($parsial['micro_f1']) ? $parsial['micro_f1'].'%' : '-',
                         isset($parsial['macro_f1']) ? $parsial['macro_f1'].'%' : '-',
                     ],
+                    ['Ketat (nama sama persis) - batas bawah', $aspek['micro_f1'].'%', $aspek['macro_f1'].'%'],
                     [
                         'Ketat, aspek support >= '.($sering['min_support'] ?? 2)
                             .' ('.($sering['aspects'] ?? 0).' jenis)',

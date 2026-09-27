@@ -27,6 +27,7 @@
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
+        <env name="QUEUE_TRAINING_CONNECTION" value="sync"/>
         <!-- Antrean sync + pelatihan ulang otomatis = job retrain berjalan
              seketika di dalam tes. Dimatikan di sini supaya menyalakannya di
              .env tidak pernah bisa membuat suite menembak layanan sungguhan;

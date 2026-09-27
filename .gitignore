@@ -43,3 +43,15 @@ __pycache__/
 # Large model files
 *.dll
 *.lib
+
+# Keluaran sementara yang sempat menumpuk di akar proyek: laporan PHPUnit,
+# potret metrik penelitian, dan skrip coba-coba. Berkasnya sendiri dipindah ke
+# ../dokumen-skripsi/ - polanya dicantumkan di sini supaya tidak kembali lagi.
+/hasil-uji-php.*
+/metrik-*.json
+/test_api.php
+/test_output.json
+/scratch/
+
+# Sisa cache pytest dari sisi layanan Python; bukan milik proyek ini.
+/.pytest_cache/
