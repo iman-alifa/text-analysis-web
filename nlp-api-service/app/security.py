@@ -115,8 +115,7 @@ class PembatasLaju:
     Memori proses **benar** di sini, bukan jalan pintas: layanan ini wajib
     berjalan `--workers 1` (keadaan model hidup di global tingkat proses), jadi
     satu proses melihat seluruh lalu lintas kontainer ini. Penyimpanan bersama
-    seperti Redis baru diperlukan kalau replika inferensi ditambah - dan itu
-    Tahap 2 pada `docs/RENCANA_DEPLOY.md`.
+    seperti Redis baru diperlukan kalau replika inferensi ditambah.
     """
 
     def __init__(self, maks: int, jendela_detik: int) -> None:

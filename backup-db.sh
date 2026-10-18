@@ -8,7 +8,7 @@
 # seed 42); koreksinya sendiri tidak bisa. Karena itu cadangan ini lebih
 # mendesak daripada cadangan bobot mana pun.
 #
-# Pemakaian (dari cron, lihat DEPLOYMENT.md bagian 11):
+# Pemakaian (dari cron, lihat docs/DEPLOYMENT.md bagian 11):
 #   ./backup-db.sh
 #
 # Variabel opsional:
@@ -30,7 +30,7 @@ baca_env() {
     grep -E "^$1=" "$APP_DIR/.env" | tail -n1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
 
-# .env berizin 640 milik www-data (DEPLOYMENT.md bagian 5). Tanpa pemeriksaan
+# .env berizin 640 milik www-data (docs/DEPLOYMENT.md bagian 5). Tanpa pemeriksaan
 # ini, `grep` yang ditolak menghentikan skrip lewat `set -e` dengan pesan
 # "Permission denied" yang tidak menyebut jalan keluarnya.
 if [[ ! -r "$APP_DIR/.env" ]]; then

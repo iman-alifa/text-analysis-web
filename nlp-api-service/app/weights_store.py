@@ -12,8 +12,7 @@ Hub dipilih bukan sekadar sebagai tempat menaruh berkas. Ia berbasis git,
 sehingga tiap putaran retraining menjadi commit tersendiri: jejak audit yang
 lebih kuat daripada `provenance.json` di disk lokal, dan pemulihan ke iterasi
 mana pun menjadi satu perintah. Ia juga menjadi "penyimpanan bobot bersama"
-yang dibutuhkan bila nanti replika inferensi ditambah (Tahap 2 pada
-`docs/RENCANA_DEPLOY.md`).
+yang dibutuhkan bila nanti replika inferensi ditambah.
 
 **Seluruh operasi di sini tidak boleh fatal.** Layanan punya rantai fallback di
 setiap modul; gagal menyinkronkan bobot harus menurunkan mutu, bukan

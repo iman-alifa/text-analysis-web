@@ -483,7 +483,7 @@ async def normalize_aspects(request: AspectNormalizeRequest):
 # berlangsung - jauh lebih baik daripada hasil yang salah diam-diam.
 #
 # Lock per proses sudah cukup KARENA layanan wajib jalan `--workers 1` (dipatok
-# di Procfile, nixpacks.toml, dan railway.json), alasan yang sama dengan kenapa
+# pada unit systemd dan Dockerfile), alasan yang sama dengan kenapa
 # bobot model disimpan di global per proses.
 #
 # Topic tidak punya lock: modelnya tidak pernah dilatih ulang lewat API.

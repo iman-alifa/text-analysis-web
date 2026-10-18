@@ -163,7 +163,7 @@ class DeployCheck extends Command
         $this->nilai(
             "Pelatihan memakai antrean sendiri ('".config('queue.training_connection')."')",
             config('queue.training_connection') !== 'sync',
-            'Setel QUEUE_TRAINING_CONNECTION=training dan jalankan worker kedua (lihat DEPLOYMENT.md).'
+            'Setel QUEUE_TRAINING_CONNECTION=training dan jalankan worker kedua (lihat docs/DEPLOYMENT.md).'
         );
 
         $this->nilai(

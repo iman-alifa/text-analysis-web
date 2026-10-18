@@ -49,8 +49,7 @@ dist/
 # Bahan penelitian yang terlalu besar untuk repo (2,8 GB checkpoint eksperimen)
 models_exp/
 
-# Keluaran uji dan korespondensi lintas-repo: berguna sebagai riwayat, tidak
-# perlu ikut ke mana pun. Lihat .railwayignore untuk apa yang ikut ke produksi.
+# Keluaran uji: berguna sebagai riwayat lokal, tidak perlu ikut ke repositori.
 arsip/keluaran-uji/
 
 # --- Ditambahkan saat dipindah ke repositori GitHub ---

@@ -85,6 +85,9 @@ tar -czf "$KELUAR" \
     --exclude='./node_modules' \
     --exclude='./.env' \
     --exclude='./tests' \
+    --exclude='./nlp-api-service' \
+    --exclude='./dataset' \
+    --exclude='./docs' \
     --exclude='./storage/logs/*' \
     --exclude='./storage/framework/cache/*' \
     --exclude='./storage/framework/sessions/*' \

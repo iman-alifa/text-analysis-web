@@ -21,8 +21,8 @@ Python lewat HTTP, dan tanpa layanan itu semua analisis gagal.
 
 ### Rencana yang dipakai
 
-Disepakati bersama sisi `nlp-api-service` (lihat
-`../nlp-api-service/docs/JAWABAN_HOSTING_SATU_VPS.md`). Hugging Face tidak lagi
+Kedua komponen berada dalam satu repositori: aplikasi web di akar, layanan NLP
+di folder `nlp-api-service/`. Hugging Face tidak lagi
 menyediakan Space Docker gratis, dan hosting layanan di tempat terpisah
 menambah tagihan kedua serta masalah bobot yang hilang saat deploy ulang.
 
@@ -475,7 +475,7 @@ sudo ss -tlnp | grep 3306     # harus 127.0.0.1:3306, bukan 0.0.0.0:3306
 
 ```bash
 cd /var/www
-sudo git clone <url-repo-anda> analisisteks
+sudo git clone https://github.com/iman-alifa/text-analysis-web analisisteks
 cd analisisteks
 
 # --no-dev membuang paket pengembangan (PHPUnit, Pint, Faker) dari server
@@ -805,8 +805,8 @@ menulisnya belakangan.
 
 ## 8. Layanan NLP (nlp-api-service)
 
-Diringkas dari `../nlp-api-service/docs/JAWABAN_HOSTING_SATU_VPS.md`; bila
-berbeda, dokumen itu yang berlaku. Dijalankan dengan systemd + venv, bukan
+Kode layanan ada di folder `nlp-api-service/` pada repositori ini. Dijalankan
+dengan systemd + venv, bukan
 Docker: lebih ringan di satu VPS, log menyatu di `journalctl`, dan `models/`
 otomatis berada di disk server.
 
@@ -814,7 +814,10 @@ otomatis berada di disk server.
 
 ```bash
 sudo useradd --system --create-home --home-dir /opt/nlp-api-service nlp
-sudo -u nlp git clone <url-repo-nlp> /opt/nlp-api-service
+# Ambil folder nlp-api-service/ dari repositori yang sama dengan aplikasi web
+git clone --depth 1 https://github.com/iman-alifa/text-analysis-web /tmp/analisisteks-src
+sudo cp -r /tmp/analisisteks-src/nlp-api-service/. /opt/nlp-api-service/
+sudo chown -R nlp:nlp /opt/nlp-api-service
 cd /opt/nlp-api-service
 
 sudo -u nlp python3.11 -m venv venv

@@ -44,9 +44,8 @@ __pycache__/
 *.dll
 *.lib
 
-# Keluaran sementara yang sempat menumpuk di akar proyek: laporan PHPUnit,
-# potret metrik penelitian, dan skrip coba-coba. Berkasnya sendiri dipindah ke
-# ../dokumen-skripsi/ - polanya dicantumkan di sini supaya tidak kembali lagi.
+# Keluaran sementara yang tidak boleh ikut ke repositori: laporan PHPUnit,
+# potret metrik penelitian, dan skrip coba-coba.
 /hasil-uji-php.*
 /metrik-*.json
 /test_api.php
@@ -55,3 +54,7 @@ __pycache__/
 
 # Sisa cache pytest dari sisi layanan Python; bukan milik proyek ini.
 /.pytest_cache/
+
+# Cadangan basis data dan berkas ekspor yang dibuat aplikasi
+*.sql
+*.sql.gz

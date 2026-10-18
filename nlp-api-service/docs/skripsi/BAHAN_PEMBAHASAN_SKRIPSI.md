@@ -347,7 +347,7 @@ Cara membaca fase 2:
    Lewis (1995), Onita (2023), Cohen (1960), Landis & Koch (1977), Guo et al.
    (2017), dan lainnya.
 7. **Lampiran** masih templat. Kandidat isi: pedoman anotasi
-   (`dokumen-skripsi/docs/PEDOMAN_ANOTASI.md`), kuesioner CSUQ, contoh
+   (`docs/PEDOMAN_ANOTASI.md` di akar repositori), kuesioner CSUQ, contoh
    keluaran aplikasi, dan laporan evaluasi.
 8. **Daftar isi, daftar tabel, dan daftar gambar** belum diperbarui (masih
    "4.1 Judul Pokok Bahasan", "BAB V ANALISIS DAN PERANCANGAN", dst.).

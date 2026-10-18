@@ -1,8 +1,6 @@
-# Image untuk Hugging Face Spaces (SDK: docker), dan untuk host Docker mana pun.
-#
-# Railway memakai Nixpacks dan MENGABAIKAN berkas ini - konfigurasinya ada di
-# `nixpacks.toml` dan `railway.json`. Keduanya dipertahankan supaya pilihan
-# hosting tidak mengunci proyek pada satu penyedia.
+# Image untuk host Docker mana pun. Pemasangan produksi skripsi memakai
+# systemd + venv (lihat docs/DEPLOYMENT.md di akar repositori); berkas ini
+# disediakan sebagai alternatif.
 
 FROM python:3.11-slim
 
